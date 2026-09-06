@@ -38,7 +38,11 @@ PID_FILE = os.path.join(DATA_DIR, "bot.pid")
 RUNTIME_LEVEL_FILE = os.path.join(DATA_DIR, "runtime_log_level.json")
 STATS_FILE = os.path.join(DATA_DIR, "stats.json")
 
+# 正式安装包使用 {项目根}\python\python.exe（standalone Python，无 .venv）；
+# 开发环境若存在 .venv 则优先使用，否则回退到项目根的 python。
 VENV_PYTHON = os.path.join(PROJECT_ROOT, ".venv", "Scripts", "python.exe")
+if not os.path.exists(VENV_PYTHON):
+    VENV_PYTHON = os.path.join(PROJECT_ROOT, "python", "python.exe")
 BOT_ENTRY = os.path.join(PROJECT_ROOT, "bot.py")
 
 PANEL_HOST = "127.0.0.1"

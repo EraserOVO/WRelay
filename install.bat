@@ -2,43 +2,34 @@
 chcp 65001 >nul
 rem ============================================================
 rem  WuppoRelay 一键安装脚本（Windows）
-rem  1. 创建虚拟环境 .venv
-rem  2. 安装项目依赖（pip install -e .）
+rem  1. 使用随安装包自带的自包含 Python 运行时 python\
+rem     （无需本机安装 Python，也无需创建虚拟环境）
+rem  2. 校验运行时依赖是否完整
 rem  3. 缺少 .env.prod 时从 .env.example 复制生成
 rem  完成后请编辑 .env.prod，再双击「启动面板.bat」
 rem ============================================================
 cd /d "%~dp0"
 
-rem ---- 检查 python ----
-where python >nul 2>nul
-if errorlevel 1 (
-    echo [错误] 未找到 python，请先安装 Python 3.10 或更高版本，
-    echo        安装时记得勾选 "Add to PATH"
+rem ---- 检查自包含运行时 ----
+if not exist "python\python.exe" (
+    echo [错误] 未找到自包含运行时 python\python.exe，
+    echo        请重新运行 WuppoRelay 安装包
     pause
     exit /b 1
 )
 
-python -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)"
+echo [1/3] 校验 Python 运行时 ...
+".\python\python.exe" --version
 if errorlevel 1 (
-    echo [错误] 需要 Python 3.10 或更高版本，当前版本：
-    python --version
+    echo [错误] 运行时 python.exe 无法运行
     pause
     exit /b 1
 )
 
-echo [1/3] 创建虚拟环境 .venv ...
-python -m venv .venv
+echo [2/3] 校验依赖是否完整 ...
+".\python\python.exe" -c "import nonebot, nonebot.adapters.qq, nonebot.adapters.discord, fastapi, uvicorn, httpx; print('依赖完整')"
 if errorlevel 1 (
-    echo [错误] 创建虚拟环境失败
-    pause
-    exit /b 1
-)
-
-echo [2/3] 安装依赖（首次需要数分钟，请耐心等待）...
-".venv\Scripts\python.exe" -m pip install --upgrade pip >nul
-".venv\Scripts\python.exe" -m pip install -e .
-if errorlevel 1 (
-    echo [错误] 依赖安装失败，请检查网络后重新运行本脚本
+    echo [错误] 依赖不完整，请重新运行 WuppoRelay 安装包
     pause
     exit /b 1
 )
