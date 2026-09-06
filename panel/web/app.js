@@ -49,7 +49,7 @@ let channelNames = {};
 // 转发组：当前活动组 id 持久化到 localStorage，刷新后恢复；
 // 组内成员（channels/groups）随 settings 整体保存
 const FG_STORAGE_KEY = "wuppo_active_fg";
-const MAX_FG = 10;
+const MAX_FG = 11;
 // 「测试组」：固定 id / 名称，不可删除、不可改名，计入转发组数量上限
 const TEST_FG_ID = "test";
 const TEST_FG_NAME = "测试组";
@@ -364,7 +364,7 @@ function renderFgTabs() {
       }
     }
   });
-  // 达到上限(10)后直接不显示新增按钮，删除一个后自动恢复
+  // 达到上限(11)后直接不显示新增按钮，删除一个后自动恢复
   if (list.length < MAX_FG) {
     const add = document.createElement("button");
     add.type = "button";
@@ -495,7 +495,7 @@ function renderSettings() {
       '</td>' +
       '<td class="mono">' + escapeHtml(c.id) + '</td>' +
       '<td><div style="display:flex;gap:4px;justify-content:flex-end;">' +
-        '<button class="sec rowicon' + ((c.filter_usernames && c.filter_usernames.length) || (c.filter_keywords && c.filter_keywords.length) ? ' filter-active' : '') + '" data-kind="chanFilter" data-i="' + gi + '">' + SVG_FUNNEL + '</button>' +
+        '<button class="sec rowicon' + (channelFilterActive(c) ? ' filter-active' : '') + '" data-kind="chanFilter" data-i="' + gi + '">' + SVG_FUNNEL + '</button>' +
         '<button class="danger rowicon" data-kind="fgChanRemove" data-id="' + escapeHtml(String(c.id)) + '">' + SVG_TRASH + '</button>' +
       '</div></td>';
     cb.appendChild(tr);
@@ -939,14 +939,125 @@ async function reviewRegistration(openid, action) {
 }
 
 // ---------- 频道筛选弹窗 ----------
+// 消息类型按钮（与 plugins/filter.py 的类型名一一对应，前后端保持同名单；
+// Discord 视频附件当前按「文件」转发，因此没有独立的「视频」类型）
+const FILTER_MESSAGE_TYPES = ["文字", "图片", "语音", "文件", "链接", "表情"];
+
 let filterEditIndex = -1;
+let filterUsernames = [];
+let filterKeywords = [];
+let filterMessageTypes = [];
+
+function filterItemsOf(kind) {
+  return kind === "usernames" ? filterUsernames : filterKeywords;
+}
+
+function filterListIdOf(kind) {
+  return kind === "usernames" ? "filterUsernameList" : "filterKeywordList";
+}
+
+function filterInputIdOf(kind) {
+  return kind === "usernames" ? "filterUsernameInput" : "filterKeywordInput";
+}
+
+// 用户名 / 关键词列表渲染（每项右侧 × 可删除）
+function renderFilterList(kind) {
+  const wrap = document.getElementById(filterListIdOf(kind));
+  const items = filterItemsOf(kind);
+  wrap.innerHTML = "";
+  items.forEach(function (item, i) {
+    const chip = document.createElement("span");
+    chip.className = "flt-chip";
+    const label = document.createElement("span");
+    label.textContent = item;
+    label.title = item;
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "flt-chip-x";
+    del.textContent = "×";
+    del.title = "删除";
+    del.addEventListener("click", function () {
+      items.splice(i, 1);
+      renderFilterList(kind);
+    });
+    chip.appendChild(label);
+    chip.appendChild(del);
+    wrap.appendChild(chip);
+  });
+}
+
+// 「确认」添加：去首尾空白、禁止重复（用户名/关键词匹配均不区分大小写），
+// 添加后清空输入框
+function addFilterItem(kind) {
+  const items = filterItemsOf(kind);
+  const input = document.getElementById(filterInputIdOf(kind));
+  const value = input.value.trim();
+  if (!value) return;
+  const lower = value.toLowerCase();
+  const dup = items.some(function (it) { return it.toLowerCase() === lower; });
+  if (dup) {
+    input.select();
+    return;
+  }
+  items.push(value);
+  input.value = "";
+  renderFilterList(kind);
+  input.focus();
+}
+
+// 消息类型按钮：样式参照「开机自启」（√/× SVG + 文字，data-on 记录状态）
+function renderFilterTypes() {
+  const wrap = document.getElementById("filterTypeList");
+  wrap.innerHTML = "";
+  FILTER_MESSAGE_TYPES.forEach(function (t) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "sec flt-type-btn";
+    btn.dataset.type = t;
+    btn.title = t;
+    btn.addEventListener("click", function () {
+      const idx = filterMessageTypes.indexOf(t);
+      if (idx >= 0) filterMessageTypes.splice(idx, 1);
+      else filterMessageTypes.push(t);
+      renderFilterTypeBtn(btn);
+    });
+    wrap.appendChild(btn);
+    renderFilterTypeBtn(btn);
+  });
+}
+
+function renderFilterTypeBtn(btn) {
+  const on = filterMessageTypes.indexOf(btn.dataset.type) >= 0;
+  btn.dataset.on = on ? "1" : "0";
+  const icon = on
+    ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
+    : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+  btn.innerHTML = icon + "<span>" + btn.dataset.type + "</span>";
+}
+
+// 频道是否配置了筛选（漏斗图标高亮）：用户名/关键词任一非空，
+// 或消息类型显式保存过且不是"全部启用"（缺省/全选 = 未筛选）
+function channelFilterActive(c) {
+  if ((c.filter_usernames || []).length) return true;
+  if ((c.filter_keywords || []).length) return true;
+  const t = c.filter_message_types;
+  return Array.isArray(t) && t.length < FILTER_MESSAGE_TYPES.length;
+}
 
 function openFilterModal(index) {
   filterEditIndex = index;
   const c = settings.discord_channels[index];
   document.getElementById("filterChanName").textContent = "# " + (c.name || c.id);
-  document.getElementById("filterUsernames").value = (c.filter_usernames || []).join(", ");
-  document.getElementById("filterKeywords").value = (c.filter_keywords || []).join(", ");
+  // 兼容现有已保存的筛选配置（数组）；类型字段缺省 = 全部启用
+  filterUsernames = (c.filter_usernames || []).slice();
+  filterKeywords = (c.filter_keywords || []).slice();
+  const storedTypes = c.filter_message_types;
+  filterMessageTypes = Array.isArray(storedTypes)
+    ? storedTypes.slice()
+    : FILTER_MESSAGE_TYPES.slice();
+  renderFilterList("usernames");
+  renderFilterList("keywords");
+  renderFilterTypes();
   document.getElementById("filterModal").style.display = "flex";
 }
 
@@ -955,13 +1066,27 @@ function closeFilterModal() {
   filterEditIndex = -1;
 }
 
+document.getElementById("filterUsernameAdd").addEventListener("click", function () { addFilterItem("usernames"); });
+document.getElementById("filterKeywordAdd").addEventListener("click", function () { addFilterItem("keywords"); });
+document.getElementById("filterUsernameInput").addEventListener("keydown", function (e) {
+  if (e.key === "Enter") { e.preventDefault(); addFilterItem("usernames"); }
+});
+document.getElementById("filterKeywordInput").addEventListener("keydown", function (e) {
+  if (e.key === "Enter") { e.preventDefault(); addFilterItem("keywords"); }
+});
+
 document.getElementById("filterSave").addEventListener("click", async function () {
   if (filterEditIndex < 0) return;
   const c = settings.discord_channels[filterEditIndex];
-  c.filter_usernames = document.getElementById("filterUsernames").value
-    .split(",").map(function (s) { return s.trim(); }).filter(Boolean);
-  c.filter_keywords = document.getElementById("filterKeywords").value
-    .split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+  c.filter_usernames = filterUsernames.slice();
+  c.filter_keywords = filterKeywords.slice();
+  // 全部启用 = 默认状态：不写字段（后端对缺省字段按全部启用处理），
+  // 与老配置保持兼容；未全选时才落盘类型列表
+  if (filterMessageTypes.length < FILTER_MESSAGE_TYPES.length) {
+    c.filter_message_types = filterMessageTypes.slice();
+  } else {
+    delete c.filter_message_types;
+  }
   closeFilterModal();
   await saveAndReload();
 });
@@ -1074,6 +1199,8 @@ document.addEventListener("click", async function (e) {
     await openRegistrationReview("users");
   } else if (btn.id === "btnQQPlatform") {
     window.open("https://q.qq.com/qqbot/dashboard/", "_blank");
+  } else if (btn.id === "btnDiscord") {
+    window.open("https://discord.com/channels/@me", "_blank");
   } else if (btn.id === "btnDiscordDev") {
     window.open("https://discord.com/developers/home", "_blank");
   } else if (btn.id === "btnClearLog") {

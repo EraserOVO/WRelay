@@ -490,8 +490,10 @@ def get_backfill_enabled():
 def get_channel_filter(channel_id):
     """返回指定频道的消息筛选配置
 
-    {"filter_usernames": [...], "filter_keywords": [...]}
-    旧配置没有筛选字段时返回空列表（= 不筛选）。
+    {"filter_usernames": [...], "filter_keywords": [...],
+     "filter_message_types": [...] | None}
+    旧配置没有筛选字段时返回空列表（= 不筛选）；filter_message_types
+    缺省为 None（= 全部消息类型启用，由 plugins/filter.py 解释）。
     兼容旧字段 filter_user_ids：如果存在则转换为 filter_usernames。
     """
     data = _load_settings()
@@ -514,5 +516,10 @@ def get_channel_filter(channel_id):
                         for k in (item.get("filter_keywords") or [])
                         if k
                     ],
+                    "filter_message_types": item.get("filter_message_types"),
                 }
-    return {"filter_usernames": [], "filter_keywords": []}
+    return {
+        "filter_usernames": [],
+        "filter_keywords": [],
+        "filter_message_types": None,
+    }

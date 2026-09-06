@@ -10,7 +10,10 @@ from plugins.config import (
     get_groups_for_channel,
     get_channel_filter,
 )
-from plugins.filter import check_message_filter
+from plugins.filter import (
+    check_message_filter,
+    get_enabled_message_types,
+)
 from plugins.history import (
     load_last_messages,
     update_last_messages,
@@ -142,8 +145,13 @@ async def handle(
     )
 
 
+    # 消息类型筛选：按消息内部各内容组件过滤（由 build_parts 执行），
+    # 过滤后无内容时不发送（has_content=False）
     text_parts, media_items, has_content = await build_parts(
-        message
+        message,
+        enabled_types=get_enabled_message_types(
+            filter_config
+        ),
     )
 
 

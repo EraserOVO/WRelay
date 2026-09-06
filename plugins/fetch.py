@@ -8,6 +8,14 @@ from nonebot import logger
 from nonebot.adapters.qq import MessageSegment as QQMessageSegment
 
 from plugins.config import get_discord_token
+from plugins.filter import (
+    MESSAGE_TYPE_TEXT,
+    MESSAGE_TYPE_IMAGE,
+    MESSAGE_TYPE_AUDIO,
+    MESSAGE_TYPE_FILE,
+    MESSAGE_TYPE_LINK,
+    MESSAGE_TYPE_EMOJI,
+)
 from plugins.media import (
     AUDIO_EXTS,
     IMAGE_EXTS,
@@ -783,7 +791,7 @@ def _render_reference(reference):
 # 规范化消息 → QQ 消息段（唯一一份渲染逻辑）
 # =====================================================
 
-async def build_parts(message, source_label="自动转发来自"):
+async def build_parts(message, source_label="自动转发来自", enabled_types=None):
     """规范化消息 → (text_parts, media_items, has_content)
 
     - header（来源频道/作者）始终在 text_parts 首位
@@ -792,9 +800,16 @@ async def build_parts(message, source_label="自动转发来自"):
     - 正文 + Emoji、embeds、附件统一渲染，媒体并发下载
     - 下载失败降级为文字 + 原链接
     - has_content 用于实时转发跳过空消息（仅 header 时）
-    - source_label 区分消息来源（实时转发 / 启动补发）"""
+    - source_label 区分消息来源（实时转发 / 启动补发）
+    - enabled_types：消息类型筛选（plugins/filter.py 的类型名集合），
+      None = 全部类型启用（默认，行为与旧版完全一致）。
+      按消息内部各内容组件分别过滤：被禁用的组件不渲染；过滤后
+      无任何内容时 has_content=False，调用方不发送（不发空消息）"""
     text_parts = []
     media_items = []
+
+    def _type_enabled(kind):
+        return enabled_types is None or kind in enabled_types
 
     channel_name = message.get("channel_name") or ""
     channel_id = message.get("channel_id") or ""
@@ -817,10 +832,12 @@ async def build_parts(message, source_label="自动转发来自"):
     # 回复引用行（best-effort，失败不影响当前消息转发）
     # ======================
 
-    reference = await _resolve_reference(
-        message.get("reference"),
-        channel_id,
-    )
+    reference = None
+    if _type_enabled(MESSAGE_TYPE_TEXT):
+        reference = await _resolve_reference(
+            message.get("reference"),
+            channel_id,
+        )
 
     if reference:
         ref_text = _render_reference(reference)
@@ -836,21 +853,23 @@ async def build_parts(message, source_label="自动转发来自"):
     # ======================
 
     raw_content = message.get("content") or ""
-    content = raw_content
+    type_text = _type_enabled(MESSAGE_TYPE_TEXT)
+    type_emoji = _type_enabled(MESSAGE_TYPE_EMOJI)
 
-    if content:
-        content = convert_mentions(content)
+    # Emoji 从正文中解析，因此文字/表情任一启用时都需要解析正文
+    if raw_content and (type_text or type_emoji):
+        content = convert_mentions(raw_content)
         content, emojis = parse_discord_emoji(content)
         content = convert_mention_ids(content)
         content = cleanup_markdown(content)
 
-        if content:
+        if content and type_text:
             text_parts.append(
                 make_text("\n" + content)
             )
             has_content = True
 
-        if emojis:
+        if emojis and type_emoji:
             emoji_bytes_map = await fetch_bytes_many(emojis)
             for emoji in emojis:
                 emoji_bytes = emoji_bytes_map.get(emoji)
@@ -878,19 +897,25 @@ async def build_parts(message, source_label="自动转发来自"):
         url = embed.get("url")
         image_url = embed.get("image_url")
 
-        if title:
+        if title and _type_enabled(MESSAGE_TYPE_TEXT):
             text_parts.append(
                 make_text("\n\n【" + title + "】")
             )
             has_content = True
 
-        if url and not raw_content:
+        # 旧逻辑：仅当无正文时才显示链接（避免与正文重复）；正文因
+        # 类型筛选被丢弃时，链接不再被正文抑制，保证「链接」可选
+        if (
+            url
+            and _type_enabled(MESSAGE_TYPE_LINK)
+            and (not raw_content or not _type_enabled(MESSAGE_TYPE_TEXT))
+        ):
             text_parts.append(
                 make_text("\n" + url)
             )
             has_content = True
 
-        if image_url:
+        if image_url and _type_enabled(MESSAGE_TYPE_IMAGE):
             image_bytes_map = await fetch_bytes_many([image_url])
             image_bytes = image_bytes_map.get(image_url)
             if image_bytes:
@@ -914,6 +939,9 @@ async def build_parts(message, source_label="自动转发来自"):
 
     image_jobs = []
     audio_jobs = []
+    type_image = _type_enabled(MESSAGE_TYPE_IMAGE)
+    type_audio = _type_enabled(MESSAGE_TYPE_AUDIO)
+    type_file = _type_enabled(MESSAGE_TYPE_FILE)
 
     for att in message.get("attachments") or []:
         url = att.get("url")
@@ -924,14 +952,17 @@ async def build_parts(message, source_label="自动转发来自"):
         ext = os.path.splitext(filename.lower())[1]
 
         if ext in IMAGE_EXTS:
-            image_jobs.append((url, filename))
+            if type_image:
+                image_jobs.append((url, filename))
         elif ext in AUDIO_EXTS:
-            audio_jobs.append((url, filename))
+            if type_audio:
+                audio_jobs.append((url, filename))
         else:
-            text_parts.append(
-                make_file_link(filename, url)
-            )
-            has_content = True
+            if type_file:
+                text_parts.append(
+                    make_file_link(filename, url)
+                )
+                has_content = True
 
     if image_jobs:
         image_bytes_map = await fetch_bytes_many(

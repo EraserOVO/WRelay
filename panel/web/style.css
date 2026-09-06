@@ -100,8 +100,10 @@
   button:hover { opacity: .9; }
   button.sec { background: var(--sec-bg); color: var(--sec-fg); }
   /* 门户链接按钮：链环图标在文本左侧，图标与文字垂直居中 */
+  /* 固定 line-height，避免中/英文混排时文字行盒高度不一致导致按钮高度不同 */
   button.linkbtn {
     display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    line-height: 20px;
   }
   button.linkbtn svg { flex: none; }
   button.danger { background: var(--danger-bg); color: var(--danger-fg); }
@@ -285,6 +287,44 @@
   }
   button.rowicon.filter-active:hover {
     background: var(--filter-active-border);
+  }
+
+  /* ---------- 频道筛选弹窗（用户名/关键词列表 + 消息类型按钮） ---------- */
+  .flt-col-title { font-size: 13px; color: var(--muted); }
+  .flt-col-hint { font-size: 11px; color: var(--muted); opacity: .85; }
+  .flt-list {
+    display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start;
+    min-height: 32px; padding: 6px;
+    background: var(--field-bg);
+    border: 1px solid var(--field-border);
+    border-radius: 6px;
+  }
+  .flt-chip {
+    display: inline-flex; align-items: center; gap: 2px;
+    max-width: 100%;
+    background: var(--sec-bg); color: var(--sec-fg);
+    border: 1px solid var(--field-border);
+    border-radius: 12px; padding: 2px 4px 2px 10px;
+    font-size: 12px;
+  }
+  .flt-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .flt-chip-x {
+    width: 16px; height: 16px; padding: 0;
+    border: none; border-radius: 50%;
+    background: transparent; color: var(--muted);
+    font-size: 13px; line-height: 1;
+    display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer;
+  }
+  .flt-chip-x:hover { color: var(--danger-fg); background: var(--danger-bg); }
+  /* 消息类型按钮：样式参照「开机自启」（图标+文字，data-on 高亮选中态） */
+  .flt-type-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .flt-type-btn svg { flex: none; }
+  .flt-type-btn[data-on="1"] {
+    background: var(--primary);
+    border-color: var(--primary-border);
   }
 
   /* ---------- 拖拽排序（转发组 / 私聊权限 表格行） ---------- */

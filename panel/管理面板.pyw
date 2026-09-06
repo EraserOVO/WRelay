@@ -58,7 +58,7 @@ BOT_PORT = 8082
 # 磁盘迁移在 main() 启动时一次性执行，不能放 load_settings()：
 # 测试用临时 settings 文件做"其他字段逐字节不变"断言，load 路径写盘会破坏它。
 FORWARDING_GROUP_DEFAULT_ID = "default"
-FORWARDING_GROUP_MAX = 10
+FORWARDING_GROUP_MAX = 11
 
 # 「测试组」常量与 bot 侧 plugins/config.py 保持一致（唯一来源）
 try:

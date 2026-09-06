@@ -13,7 +13,10 @@ from plugins.config import (
     get_backfill_enabled,
     get_channel_filter,
 )
-from plugins.filter import check_message_filter
+from plugins.filter import (
+    check_message_filter,
+    get_enabled_message_types,
+)
 from plugins.history import (
     load_last_messages,
     update_last_messages,
@@ -239,9 +242,14 @@ async def _backfill_channel(channel_id, channel_name, active_groups, limit):
 
         msg["channel_name"] = channel_name
 
+        # 消息类型筛选：与实时转发共用同一渲染逻辑，按内容组件过滤，
+        # 过滤后无内容时不发送
         text_parts, media_items, has_content = await build_parts(
             msg,
             source_label="自动补发来自",
+            enabled_types=get_enabled_message_types(
+                filter_config
+            ),
         )
 
         if not has_content:
