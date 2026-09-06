@@ -92,6 +92,20 @@ sys.path.insert(0, PROJECT_ROOT)
 # 面板与 bot 共用的 JSON 原子写（唯一 tmp + os.replace 重试）
 from plugins.json_io import atomic_write_json
 
+# X 转发组：复用 bot 侧的归一化结果（GET 注入默认组）与 source key 派生
+# （保存时清理悬空引用）。导入失败时用最小回退（等价于不做注入/清理）。
+try:
+    from plugins.config import (
+        get_x_forwarding_groups,
+        _x_source_key,
+    )
+except Exception:
+    def get_x_forwarding_groups():
+        return []
+
+    def _x_source_key(raw):
+        return str(raw or "").lstrip("@")
+
 
 def _log(msg):
     """面板运行日志（panel.log），带时间戳"""
@@ -207,6 +221,29 @@ def _validate_settings(data):
             if str(fg.get("id")) == TEST_FORWARDING_GROUP_ID:
                 if fg.get("name") != TEST_FORWARDING_GROUP_NAME:
                     return "「测试组」名称固定，不可改名"
+    # X 转发组：key 缺失/空列表视为合法（旧配置走 bot 侧默认组兼容）；
+    # 存在时才逐项检查。无固定测试组，其余规则与 forwarding_groups 一致。
+    if "x_forwarding_groups" in data:
+        xfgs = data["x_forwarding_groups"]
+        if not isinstance(xfgs, list):
+            return "x_forwarding_groups 必须是列表"
+        if len(xfgs) > FORWARDING_GROUP_MAX:
+            return "x_forwarding_groups 最多 %d 个" % FORWARDING_GROUP_MAX
+        xids = set()
+        for xfg in xfgs:
+            if not isinstance(xfg, dict):
+                return "x_forwarding_groups 的每一项必须是对象"
+            xid = str(xfg.get("id") or "").strip()
+            if not xid:
+                return "x_forwarding_groups 的每一项必须有非空 id"
+            if xid in xids:
+                return "x_forwarding_groups 存在重复 id: %s" % xid
+            xids.add(xid)
+            if not isinstance(xfg.get("name"), str):
+                return "x_forwarding_groups 的每一项 name 必须是字符串"
+            for field in ("sources", "groups"):
+                if not isinstance(xfg.get(field), list):
+                    return "x_forwarding_groups 的 %s 必须是列表" % field
     return None
 
 
@@ -273,10 +310,58 @@ def _normalize_forwarding_groups(data):
     data["forwarding_groups"] = clean
 
 
+def _normalize_x_forwarding_groups(data):
+    """写盘前归一化 X 转发组（x_forwarding_groups 缺失时不动，兼容旧载荷）。
+
+    - 每项规整为 {id, name, sources[], groups[]}，id/name 取 str
+    - sources/groups 去重并剔除悬空引用：
+      source 不在 x_rss_sources（按 bot 侧 _x_source_key 派生 key）、
+      群 openid 不在 qq_group_openids
+    - 不按 enabled 裁剪：enabled 只影响运行，成员关系独立保存
+    - 无固定测试组；空列表原样保留（bot 侧内存回退默认组）"""
+    xfgs = data.get("x_forwarding_groups")
+    if not isinstance(xfgs, list):
+        return
+    known_sources = {
+        _x_source_key(str(s.get("source") or ""))
+        for s in data.get("x_rss_sources", [])
+        if isinstance(s, dict) and str(s.get("source") or "").strip()
+    }
+    known_sources.discard("")
+    known_groups = {
+        str(g.get("openid"))
+        for g in data.get("qq_group_openids", [])
+        if isinstance(g, dict) and g.get("openid")
+    }
+    clean = []
+    seen_ids = set()
+    for xfg in xfgs:
+        if not isinstance(xfg, dict):
+            continue
+        xid = str(xfg.get("id") or "").strip()
+        if not xid or xid in seen_ids:
+            continue
+        seen_ids.add(xid)
+        clean.append({
+            "id": xid,
+            "name": str(xfg.get("name") or "").strip() or xid,
+            "sources": [
+                k for k in dict.fromkeys(str(s) for s in xfg.get("sources") or [])
+                if k and k in known_sources
+            ],
+            "groups": [
+                o for o in dict.fromkeys(str(g) for g in xfg.get("groups") or [])
+                if o and o in known_groups
+            ],
+        })
+    data["x_forwarding_groups"] = clean
+
+
 def save_settings(data):
     # 备份上一版配置（任何误写/损坏都可从 settings.json.bak 恢复），
     # 再走统一原子写（唯一 tmp + os.replace，见 plugins/json_io.py）
     _normalize_forwarding_groups(data)
+    _normalize_x_forwarding_groups(data)
     try:
         if os.path.exists(SETTINGS_FILE):
             shutil.copyfile(SETTINGS_FILE, SETTINGS_BAK)
@@ -872,9 +957,21 @@ def api_status():
     }
 
 
+def _settings_payload():
+    """load_settings() + 注入 X 转发组归一化结果（复用 bot 侧默认组兼容
+    逻辑，仅内存不写盘）：旧配置缺省时前端也能拿到默认 X 转发组用于渲染，
+    避免前端另写一套默认逻辑。"""
+    data = load_settings()
+    try:
+        data["x_forwarding_groups"] = get_x_forwarding_groups()
+    except Exception:
+        pass
+    return data
+
+
 @app.get("/api/settings")
 def api_settings():
-    return load_settings()
+    return _settings_payload()
 
 
 @app.get("/api/settings/default")
@@ -895,7 +992,7 @@ async def api_settings_save(request: Request):
             {"ok": False, "msg": "配置校验失败: " + err}, status_code=400
         )
     save_settings(data)
-    return {"ok": True, "settings": load_settings()}
+    return {"ok": True, "settings": _settings_payload()}
 
 
 @app.post("/api/settings/backfill-toggle")
@@ -1299,6 +1396,20 @@ def api_backfill_clear():
         return {"ok": False, "msg": "bot 接口不可用"}
     if data.get("ok"):
         _backfill_seq += 1
+    return data
+
+
+# ---------------- X RSS 运行状态（代理到 bot 8082） ----------------
+@app.get("/api/xrss/status")
+def api_xrss_status():
+    """X → QQ 页状态卡片数据源：bot 未运行直接返回未运行，
+    避免前端把「bot 停止」误判成 X RSS 的其他状态"""
+    if not bot_status()["running"]:
+        return {"ok": False, "bot_running": False}
+    data = bot_api_get("/api/x-rss/status")
+    if data is None:
+        return {"ok": False, "bot_running": True, "msg": "bot 接口不可用"}
+    data["bot_running"] = True
     return data
 
 

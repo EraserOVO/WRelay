@@ -20,6 +20,11 @@
     </div>
   </div>
 
+  <div class="pagetabs" id="pageTabs">
+    <button type="button" class="fgtab active" data-kind="pageTab" data-page="discord">Discord → QQ</button>
+    <button type="button" class="fgtab" data-kind="pageTab" data-page="x">X → QQ</button>
+  </div>
+
   <div class="cardrow">
     <div class="card">
       <h2 style="display:flex;align-items:center;gap:6px;">机器人状态 <button class="hintbtn" data-hint="managedHint" data-title="机器人状态">?</button></h2>
@@ -64,6 +69,7 @@
     </div>
   </div>
 
+  <div id="pageDiscord">
   <div class="card">
     <h2 style="display:flex;align-items:center;gap:6px;">转发组 <button class="hintbtn" data-hint="hint-fg" data-title="转发组">?</button></h2>
     <div id="fgBody">
@@ -130,6 +136,105 @@
         <button id="btnSyncUsers" class="sec">注册审核</button>
       </div>
       <div class="hint" id="hint-user" style="display:none">仅勾选的用户可私聊使用 relay 命令；用户私聊发送"register QQ号 昵称"提交申请，点"注册审核"处理。通过后只进入「已注册项」（默认未启用），需再点「＋ 新增」从已注册用户中勾选加入白名单。删除注册记录后该用户不再出现在「从已注册项新增」中，需重新注册。</div>
+    </div>
+  </div>
+  </div>
+
+  <div id="pageX" style="display:none">
+    <div class="card">
+      <h2 style="display:flex;align-items:center;gap:6px;">转发组 <button class="hintbtn" data-hint="hint-xfg" data-title="转发组">?</button></h2>
+      <div id="xFgBody">
+        <div class="fgtabs" id="xFgTabs">
+          <!-- X 转发组 tab 由 app.js 动态渲染；此处仅占位展示结构 -->
+          <button type="button" class="fgtab active" data-kind="fgTab" data-ctx="x" data-id="x_default">转发组1</button>
+          <button type="button" class="fgtab-add" id="btnAddXFg">＋ 添加转发组</button>
+        </div>
+        <div class="hint" id="hint-xfg" style="display:none">X 转发组与 Discord → QQ 转发组完全独立：一个 X 转发组 = 一组"X 来源 → QQ 群"成员列表，加入本组的来源只投递给本组的群；来源/群可同时属于多个转发组（同一群只收一次，自动去重）。没有固定测试组。「＋ 新增」只从已注册实体中选择加入本组（注册与入组是两个独立步骤，注册后只进入已注册项、不自动入组）；行内"删除"仅把实体移出当前转发组，不影响全局与其他组。
+
+· X 来源：列表只显示当前转发组的来源成员。「注册新源」把 X 账号登记为全局来源（默认启用、不自动入组）；「＋ 新增」从已注册来源中选择加入本组。「从已注册项新增」窗口里「×」可删除来源注册记录（删除后需重新注册，其在各转发组中的引用自动清理）；行内"删除"仅从本组移除。勾选「启用」= 是否允许该源参与轮询与发送（全局）。
+
+· QQ 接收群：列表只显示当前转发组的群成员。「＋ 新增」从已注册群中选择加入本组；「注册审核」通过的新群只进入已注册项、不自动入组；行内"删除"仅从本组移除，不删除全局群。实际投递还要求群全局启用（勾选框）。</div>
+        <div class="fgsection">
+          <h3 class="fgh3" style="display:flex;justify-content:space-between;align-items:center;"><span>X 来源</span> <button class="foldbtn" data-fold="xSourceContent" aria-label="展开/折叠"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 5l8 14H4z"/></svg></button></h3>
+          <div id="xSourceContent">
+            <div class="tablewrap">
+              <table id="xSourceList" style="table-layout:fixed">
+                <thead><tr>
+                  <th style="width:1.6%"></th>
+                  <th style="width:2.3%;text-align:center" class="col-muted" title="启用 = 是否允许该源参与轮询与发送"><input type="checkbox" id="xSourceAllEnabled"></th>
+                  <th style="width:30%">名称</th><th style="width:20%">X 账号</th><th style="width:3.5%"></th>
+                </tr></thead>
+                <tbody id="xSourceBody"></tbody>
+              </table>
+            </div>
+            <div class="row addrow">
+              <button id="btnAddXFgSource">＋ 新增</button>
+              <input type="text" id="xSourceInput" placeholder="注册新源：X 账号（如 xx_Chon_xx，可带 @）" style="flex:none;width:260px;">
+              <input type="text" id="xSourceNameInput" placeholder="显示名称（可选）" style="flex:none;width:140px;">
+              <button id="btnAddXSource" class="sec">注册新源</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="fgsection">
+          <h3 class="fgh3" style="display:flex;justify-content:space-between;align-items:center;"><span>QQ 接收群</span> <button class="foldbtn" data-fold="xGroupContent" aria-label="展开/折叠"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 5l8 14H4z"/></svg></button></h3>
+          <div id="xGroupContent">
+            <div class="tablewrap">
+              <table id="xGroupList" style="table-layout:fixed">
+                <thead><tr>
+                  <th style="width:1.6%"></th>
+                  <th style="width:2.3%;text-align:center" class="col-muted" title="启用 = 是否允许该群接收转发"><input type="checkbox" id="xGroupAllEnabled"></th>
+                  <th style="width:11.2%">名称</th><th style="width:18%">账号</th><th style="width:13%">Group OpenID</th><th style="width:3.5%"></th>
+                </tr></thead>
+                <tbody id="xXGroupBody"></tbody>
+              </table>
+            </div>
+            <div class="row addrow">
+              <button id="btnAddXFgGroup">＋ 新增</button>
+              <button id="btnSyncXGroups" class="sec">注册审核</button>
+              <button id="btnQQPlatformX" class="sec linkbtn" style="margin-left:auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.395 15.035a40 40 0 0 0-.803-2.264l-1.079-2.695c.001-.032.014-.562.014-.836C19.526 4.632 17.351 0 12 0S4.474 4.632 4.474 9.241c0 .274.013.804.014.836l-1.08 2.695a39 39 0 0 0-.802 2.264c-1.021 3.283-.69 4.643-.438 4.673.54.065 2.103-2.472 2.103-2.472 0 1.469.756 3.387 2.394 4.771-.612.188-1.363.479-1.845.835-.434.32-.379.646-.301.778.343.578 5.883.369 7.482.189 1.6.18 7.14.389 7.483-.189.078-.132.132-.458-.301-.778-.483-.356-1.233-.646-1.846-.836 1.637-1.384 2.393-3.302 2.393-4.771 0 0 1.563 2.537 2.103 2.472.251-.03.581-1.39-.438-4.673"/></svg>QQ 开放平台管理页</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="display:flex;justify-content:space-between;align-items:center;"><span style="display:flex;align-items:center;gap:6px;">QQ 私聊白名单 <button class="hintbtn" data-hint="hint-xuser" data-title="QQ 私聊白名单">?</button></span> <button class="foldbtn" data-fold="xUserContent" aria-label="展开/折叠"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 5l8 14H4z"/></svg></button></h2>
+      <div id="xUserContent">
+        <table id="xUserList" style="table-layout:fixed">
+          <thead><tr><th style="width:1.6%"></th><th style="width:2.3%;text-align:center"><input type="checkbox" id="xUserAllEnabled"></th><th style="width:11.2%">名称</th><th style="width:18%">账号</th><th style="width:13%">User OpenID</th><th style="width:3.5%"></th></tr></thead>
+          <tbody id="xUserBody"></tbody>
+        </table>
+        <div class="row addrow">
+          <button id="btnAddXUser">＋ 新增</button>
+          <button id="btnSyncXUsers" class="sec">注册审核</button>
+        </div>
+        <div class="hint" id="hint-xuser" style="display:none">全局 QQ 私聊白名单（与 Discord → QQ 页为同一份数据，任一页面修改两边同步）：仅勾选的用户可私聊使用 relay 命令；用户私聊发送"register QQ号 昵称"提交申请，点"注册审核"处理。通过后只进入「已注册项」（默认未启用），需再点「＋ 新增」从已注册用户中勾选加入白名单。删除注册记录后该用户不再出现在「从已注册项新增」中，需重新注册。</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="display:flex;align-items:center;gap:6px;">X RSS 状态</h2>
+      <div class="row">
+        <span id="xrssBadge" class="badge off">检测中…</span>
+      </div>
+      <div class="row" style="margin-top:10px;display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;font-size:13px;">
+        <span class="pid">订阅源</span><span id="xrssSources">—</span>
+        <span class="pid">上次轮询</span><span id="xrssLastPoll">—</span>
+        <span class="pid">上次结果</span><span id="xrssLastResult">—</span>
+        <span class="pid">发现新帖</span><span id="xrssNew">—</span>
+        <span class="pid">发送成功</span><span id="xrssSent">—</span>
+        <span class="pid">发送失败</span><span id="xrssFailed">—</span>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <span class="bf-limit-label">RSSHub 地址</span>
+        <input type="text" id="xRsshubBase" style="flex:none;width:240px;">
+        <span class="bf-limit-label">轮询间隔</span>
+        <input type="number" id="xPollInterval" min="30" step="1" class="bf-limit-input" style="width:70px;">
+        <span class="bf-limit-label">秒</span>
+      </div>
+      <div class="hint">轮询间隔下限 30 秒（对齐 RSSHub 缓存），修改保存后下个轮询周期自动生效，无需重启机器人。</div>
     </div>
   </div>
 

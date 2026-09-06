@@ -49,15 +49,70 @@ function toggleTheme() {
 })();
 // Discord 频道真实名称映射 {频道ID: 真实名}，由 /api/channel-names 拉取（仅展示，不写入 settings）
 let channelNames = {};
-// 转发组：当前活动组 id 持久化到 localStorage，刷新后恢复；
-// 组内成员（channels/groups）随 settings 整体保存
-const FG_STORAGE_KEY = "wrelay_active_fg";
+// 转发组机制：Discord 与 X 各一套上下文（组列表字段 / 成员字段 / active
+// 状态 / id 前缀等），组相关函数全部按 ctx 参数化复用，两边交互一致。
+// active 组 id 各自持久化到 localStorage，刷新后恢复且互不影响；
+// 组内成员随 settings 整体保存。
 const MAX_FG = 11;
-// 「测试组」：固定 id / 名称，不可删除、不可改名，计入转发组数量上限
+// 「测试组」（仅 Discord 转发组）：固定 id / 名称，不可删除、不可改名，计入上限
 const TEST_FG_ID = "test";
 const TEST_FG_NAME = "测试组";
-let activeFgId = null;
-try { activeFgId = localStorage.getItem(FG_STORAGE_KEY); } catch (e) { activeFgId = null; }
+const FG_DISCORD = {
+  key: "discord",
+  field: "forwarding_groups",
+  memberField: {chan: "channels", group: "groups"},
+  emptyMembers: ["channels", "groups"],
+  storageKey: "wrelay_active_fg",
+  idPrefix: "fg_",
+  tabsId: "fgTabs",
+  addBtnId: "btnAddFg",
+  testGroupId: TEST_FG_ID,
+  activeId: null,
+};
+const FG_X = {
+  key: "x",
+  field: "x_forwarding_groups",
+  memberField: {source: "sources", group: "groups"},
+  emptyMembers: ["sources", "groups"],
+  storageKey: "wrelay_active_xfg",
+  idPrefix: "xfg_",
+  tabsId: "xFgTabs",
+  addBtnId: "btnAddXFg",
+  testGroupId: null,          // X 转发组没有固定测试组
+  activeId: null,
+};
+const FG_CTX = {discord: FG_DISCORD, x: FG_X};
+try { FG_DISCORD.activeId = localStorage.getItem(FG_DISCORD.storageKey); } catch (e) { FG_DISCORD.activeId = null; }
+try { FG_X.activeId = localStorage.getItem(FG_X.storageKey); } catch (e) { FG_X.activeId = null; }
+// X source 字符串 → 去重状态 key（与 bot 侧 config._x_source_key 同规则）：
+// screen_name 去 @；完整 URL 时提取 /twitter/user/{handle}，提取不到用整个 URL
+function xSourceKey(raw) {
+  raw = String(raw || "").trim();
+  if (/^https?:\/\//.test(raw)) {
+    const m = raw.match(/\/twitter\/user\/([^/?#]+)/);
+    return m ? m[1] : raw;
+  }
+  return raw.replace(/^@+/, "");
+}
+
+// ---------------- 主要界面切换（Discord → QQ / X → QQ） ----------------
+// 每种转发组合一个独立页面，页面选择持久化到 localStorage（与主题/转发组同方式），
+// 刷新后恢复；默认进入 Discord → QQ（不改变原有使用习惯）。
+// 两个页面共用同一份 settings 对象（整体保存、整体拉取），切换只改可见性，
+// 不会丢失任何已保存/未保存的修改。
+const PAGE_STORAGE_KEY = "wrelay_active_page";
+let activePage = "discord";
+try { if (localStorage.getItem(PAGE_STORAGE_KEY) === "x") activePage = "x"; } catch (e) {}
+
+function setActivePage(page) {
+  activePage = page === "x" ? "x" : "discord";
+  try { localStorage.setItem(PAGE_STORAGE_KEY, activePage); } catch (e) {}
+  document.getElementById("pageDiscord").style.display = activePage === "discord" ? "" : "none";
+  document.getElementById("pageX").style.display = activePage === "x" ? "" : "none";
+  document.querySelectorAll('#pageTabs [data-kind="pageTab"]').forEach(function (btn) {
+    btn.classList.toggle("active", btn.dataset.page === activePage);
+  });
+}
 
 async function jget(url) {
   const r = await fetch(url);
@@ -143,34 +198,34 @@ function renderBackfillToggle(on) {
   btn.innerHTML = icon + "<span>启用补发</span>";
 }
 
-// ---------- 转发组 ----------
-function getFgList() {
-  return (settings && settings.forwarding_groups) || [];
+// ---------- 转发组（Discord / X 共用机制，按 ctx 区分） ----------
+function getFgList(ctx) {
+  return (settings && settings[ctx.field]) || [];
 }
-function getActiveFg() {
-  const list = getFgList();
+function getActiveFg(ctx) {
+  const list = getFgList(ctx);
   if (!list.length) return null;
   let fg = null;
-  if (activeFgId) {
+  if (ctx.activeId) {
     for (let i = 0; i < list.length; i++) {
-      if (list[i].id === activeFgId) { fg = list[i]; break; }
+      if (list[i].id === ctx.activeId) { fg = list[i]; break; }
     }
   }
   if (!fg) {
     // 当前 id 失效（组被删除/首次访问）：回退第一个组并固定记录
     fg = list[0];
-    activeFgId = fg.id;
-    try { localStorage.setItem(FG_STORAGE_KEY, activeFgId); } catch (e) {}
+    ctx.activeId = fg.id;
+    try { localStorage.setItem(ctx.storageKey, ctx.activeId); } catch (e) {}
   }
   return fg;
 }
-function setActiveFg(id) {
-  activeFgId = id;
-  try { localStorage.setItem(FG_STORAGE_KEY, id); } catch (e) {}
+function setActiveFg(ctx, id) {
+  ctx.activeId = id;
+  try { localStorage.setItem(ctx.storageKey, id); } catch (e) {}
   renderSettings();
 }
 function toggleFgMember(fg, id, field, on) {
-  // 只修改当前组的 channels/groups 集合；id 统一转字符串存储
+  // 只修改当前组的成员集合（channels/sources/groups）；id 统一转字符串存储
   if (!fg) return;
   const idStr = String(id);
   const arr = fg[field] || [];
@@ -178,9 +233,9 @@ function toggleFgMember(fg, id, field, on) {
   if (on && idx < 0) arr.push(idStr);
   if (!on && idx >= 0) arr.splice(idx, 1);
 }
-function removeFgMember(id, field) {
+function removeFgMember(ctx, id, field) {
   // 只把实体从当前转发组移除（脱组）：不删全局实体、不影响其他组
-  const fg = getActiveFg();
+  const fg = getActiveFg(ctx);
   if (!fg) return;
   const idStr = String(id);
   const arr = fg[field] || [];
@@ -188,46 +243,68 @@ function removeFgMember(id, field) {
   if (idx >= 0) arr.splice(idx, 1);
   saveAndReload();
 }
-function openFgAddPicker(kind) {
+function fgCandidate(kind) {
+  // kind → 已注册实体列表 / 条目 id / 展示文案（Discord 频道、X 来源、QQ 群共用）
+  if (kind === "group") {
+    return {
+      all: settings.qq_group_openids,
+      idOf: function (g) { return String(g.openid); },
+      labelOf: function (g) {
+        const gname = g.name || g.remark || identityName("groups", g.openid) || "";
+        return (gname + " " + g.openid).trim();
+      },
+    };
+  }
+  if (kind === "chan") {
+    return {
+      all: settings.discord_channels,
+      idOf: function (c) { return String(c.id); },
+      labelOf: function (c) { return ((c.name || "") + " " + c.id).trim(); },
+    };
+  }
+  // source（X 来源）：组内以 key（去 @ handle）为标识
+  return {
+    all: settings.x_rss_sources,
+    idOf: function (s) { return xSourceKey(s.source); },
+    labelOf: function (s) {
+      const handle = xSourceKey(s.source);
+      return ((s.name || handle) + " @" + handle).trim();
+    },
+  };
+}
+function openFgAddPicker(ctx, kind) {
   // 「从已注册项新增」：从全局已注册实体中选择加入当前转发组
-  const fg = getActiveFg();
+  const fg = getActiveFg(ctx);
   if (!fg) return;
-  const isGroup = kind === "group";
-  const field = isGroup ? "groups" : "channels";
+  const field = ctx.memberField[kind];
+  const cand = fgCandidate(kind);
   const memberSet = {};
   (fg[field] || []).forEach(function (id) { memberSet[String(id)] = true; });
-  const all = isGroup ? settings.qq_group_openids : settings.discord_channels;
-  const candidates = all.filter(function (item) {
-    const id = isGroup ? String(item.openid) : String(item.id);
-    return !memberSet[id];
+  const candidates = cand.all.filter(function (item) {
+    return !memberSet[cand.idOf(item)];
   });
   if (!candidates.length) {
     showAlert(
       "从已注册项新增",
-      "当前转发组已包含全部已注册的" + (isGroup ? "群" : "频道") + "，没有可添加的条目"
+      "当前转发组已包含全部已注册的" + (kind === "group" ? "群" : kind === "chan" ? "频道" : "来源") + "，没有可添加的条目"
     );
     return;
   }
   showConfirmSelect(
     "从已注册项新增",
     candidates,
-    function (item) {
-      if (isGroup) {
-        const gname = item.name || item.remark || identityName("groups", item.openid) || "";
-        return (gname + " " + item.openid).trim();
-      }
-      const cname = item.name || "";
-      return (cname + " " + item.id).trim();
-    },
+    cand.labelOf,
     async function (selected) {
       selected.forEach(function (item) {
-        toggleFgMember(fg, isGroup ? item.openid : item.id, field, true);
+        toggleFgMember(fg, cand.idOf(item), field, true);
       });
       await saveAndReload();
     },
     {
       defaultChecked: false,
-      onRowDelete: function (item) { deleteRegisteredItem(kind, item); },
+      onRowDelete: function (item) {
+        deleteRegisteredItem(kind, item, function () { openFgAddPicker(ctx, kind); });
+      },
     }
   );
 }
@@ -261,17 +338,20 @@ function openUserAddPicker() {
 // 保存时面板 _normalize_forwarding_groups 会剔除它在各转发组中的悬空引用）。
 // 与表格行内"删除"（仅移出当前转发组、保留全局实体）严格区分。删除后需重新走
 // 注册流程（重新扫描 / 重新注册审核）才能再次加入转发组或白名单。
-function deleteRegisteredItem(kind, item) {
+function deleteRegisteredItem(kind, item, reopenPicker) {
   const isGroup = kind === "group";
   const isChan = kind === "chan";
-  const id = String(isChan ? item.id : item.openid);
+  const isSource = kind === "source";
+  const id = String(isChan ? item.id : isSource ? xSourceKey(item.source) : item.openid);
   const name = isGroup
     ? (item.name || item.remark || identityName("groups", item.openid) || "")
     : isChan
       ? (item.name || "")
-      : (item.name || item.remark || identityName("users", item.openid) || "");
+      : isSource
+        ? (item.name || xSourceKey(item.source) || "")
+        : (item.name || item.remark || identityName("users", item.openid) || "");
   const label = ((name || "") + " " + id).trim();
-  const kindName = isGroup ? "群" : isChan ? "频道" : "用户";
+  const kindName = isGroup ? "群" : isChan ? "频道" : isSource ? "来源" : "用户";
   hideConfirm();
   showConfirmDlg("删除注册记录",
     "确定删除「" + label + "」的注册记录？\n删除后该" + kindName + "不再出现在「从已注册项新增」列表中（若已加入转发组也会一并移出），再次使用需重新注册。",
@@ -282,13 +362,17 @@ function deleteRegisteredItem(kind, item) {
       } else if (isChan) {
         const idx = settings.discord_channels.findIndex(function (o) { return String(o.id) === id; });
         if (idx >= 0) settings.discord_channels.splice(idx, 1);
+      } else if (isSource) {
+        const idx = settings.x_rss_sources.findIndex(function (o) { return xSourceKey(o.source) === id; });
+        if (idx >= 0) settings.x_rss_sources.splice(idx, 1);
       } else {
         const idx = settings.qq_user_openids.findIndex(function (o) { return String(o.openid) === id; });
         if (idx >= 0) settings.qq_user_openids.splice(idx, 1);
       }
       await saveAndReload();
-      if (isGroup || isChan) openFgAddPicker(kind);
-      else openUserAddPicker();
+      // 删除后重开选择窗口：默认回到原页面自己的「从已注册项新增」
+      if (reopenPicker) reopenPicker();
+      else if (kind === "user") openUserAddPicker();
     }, "删除");
 }
 // 「从全部可读频道注册」：整合原「同步可读频道」——扫描 Bot 可读的频道，
@@ -325,25 +409,33 @@ async function scanReadableChannels(btn) {
     showAlert("注册结果", "已注册 " + added + " 个新频道（默认未启用）");
   }, {defaultChecked: false, groupBy: function (ch) { return ch.guild; }});
 }
-function renderFgTabs() {
-  const wrap = document.getElementById("fgTabs");
+function renderFgTabs(ctx) {
+  const wrap = document.getElementById(ctx.tabsId);
   if (!wrap) return;
-  const list = getFgList();
-  getActiveFg();   // 顺带校正 activeFgId（失效则回退并持久化）
+  // 重命名进行中：跳过本上下文的 tab 区重建，保留重命名输入框与已输入内容
+  // （30 秒周期 refreshIdentities 等触发的 renderSettings 不会销毁输入框；
+  // 其余区域照常刷新，finish 后自动恢复正常渲染）
+  if (fgRenameActive && fgRenameCtxKey === ctx.key) return;
+  const list = getFgList(ctx);
+  getActiveFg(ctx);   // 顺带校正 activeId（失效则回退并持久化）
   wrap.innerHTML = "";
-  // 渲染顺序：测试组始终排在最左侧，其余组保持原顺序
-  const ordered = list.slice().sort(function (a, b) {
-    if (a.id === TEST_FG_ID) return -1;
-    if (b.id === TEST_FG_ID) return 1;
-    return 0;
-  });
+  // 渲染顺序：Discord 测试组始终排在最左侧，其余组保持原顺序（X 无测试组）
+  const ordered = list.slice();
+  if (ctx.testGroupId) {
+    ordered.sort(function (a, b) {
+      if (a.id === ctx.testGroupId) return -1;
+      if (b.id === ctx.testGroupId) return 1;
+      return 0;
+    });
+  }
   ordered.forEach(function (fg) {
-    const isActive = fg.id === activeFgId;
-    const isTest = fg.id === TEST_FG_ID;
+    const isActive = fg.id === ctx.activeId;
+    const isTest = !!ctx.testGroupId && fg.id === ctx.testGroupId;
     const tab = document.createElement("button");
     tab.type = "button";
     tab.className = "fgtab" + (isActive ? " active" : "");
     tab.dataset.kind = "fgTab";
+    tab.dataset.ctx = ctx.key;
     tab.dataset.id = fg.id;
     tab.textContent = fg.name;
     wrap.appendChild(tab);
@@ -354,6 +446,7 @@ function renderFgTabs() {
         rename.type = "button";
         rename.className = "fgctrl rowicon";
         rename.dataset.kind = "fgRename";
+        rename.dataset.ctx = ctx.key;
         rename.innerHTML = SVG_PEN;
         wrap.appendChild(rename);
         if (list.length > 1) {
@@ -361,7 +454,8 @@ function renderFgTabs() {
           del.type = "button";
           del.className = "fgctrl rowicon";
           del.dataset.kind = "fgDel";
-          del.innerHTML = SVG_TRASH;   // 与频道/群行内删除按钮同一白色垃圾桶图标
+          del.dataset.ctx = ctx.key;
+          del.innerHTML = SVG_TRASH;   // 与成员行内删除按钮同一白色垃圾桶图标
           wrap.appendChild(del);
         }
       }
@@ -372,13 +466,13 @@ function renderFgTabs() {
     const add = document.createElement("button");
     add.type = "button";
     add.className = "fgtab-add";
-    add.id = "btnAddFg";
+    add.id = ctx.addBtnId;
     add.textContent = "＋ 添加转发组";
     wrap.appendChild(add);
   }
 }
-function addForwardingGroup() {
-  const list = getFgList();
+function addForwardingGroup(ctx) {
+  const list = getFgList(ctx);
   if (list.length >= MAX_FG) { showAlert("添加转发组", "最多 " + MAX_FG + " 个转发组"); return; }
   // 空组：不复制任何成员；名称自动取未占用的「转发组N」（从 1 起找）
   let n = 1;
@@ -386,26 +480,27 @@ function addForwardingGroup() {
   list.forEach(function (g) { names[g.name] = true; });
   while (names["转发组" + n]) n++;
   const fg = {
-    id: "fg_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    id: ctx.idPrefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     name: "转发组" + n,
-    channels: [],
-    groups: [],
   };
+  ctx.emptyMembers.forEach(function (f) { fg[f] = []; });
   list.push(fg);
-  activeFgId = fg.id;
-  try { localStorage.setItem(FG_STORAGE_KEY, fg.id); } catch (e) {}
+  ctx.activeId = fg.id;
+  try { localStorage.setItem(ctx.storageKey, fg.id); } catch (e) {}
   saveAndReload();
 }
 let fgRenameActive = false;
-function startFgRename() {
-  const fg = getActiveFg();
-  // 「测试组」为固定转发组，不允许重命名
-  if (!fg || fgRenameActive || fg.id === TEST_FG_ID) return;
-  const wrap = document.getElementById("fgTabs");
+let fgRenameCtxKey = null;   // 正在重命名的转发组上下文 key（discord / x）
+function startFgRename(ctx) {
+  const fg = getActiveFg(ctx);
+  // 「测试组」（仅 Discord）为固定转发组，不允许重命名
+  if (!fg || fgRenameActive || (ctx.testGroupId && fg.id === ctx.testGroupId)) return;
+  const wrap = document.getElementById(ctx.tabsId);
   const tabs = Array.prototype.slice.call(wrap.querySelectorAll(".fgtab"));
   const tabBtn = tabs.find(function (b) { return b.dataset.id === fg.id; });
   if (!tabBtn) return;
   fgRenameActive = true;
+  fgRenameCtxKey = ctx.key;
   const input = document.createElement("input");
   input.type = "text";
   input.className = "fg-rename";
@@ -421,6 +516,7 @@ function startFgRename() {
     if (done) return;
     done = true;
     fgRenameActive = false;
+    fgRenameCtxKey = null;
     const v = input.value.trim();
     if (commit && v && v !== fg.name) {
       fg.name = v;   // 只改 name，id 保持不变
@@ -437,8 +533,8 @@ function startFgRename() {
 }
 
 function renderSettings() {
-  renderFgTabs();
-  const activeFg = getActiveFg();
+  renderFgTabs(FG_DISCORD);
+  const activeFg = getActiveFg(FG_DISCORD);
   const gb = document.getElementById("groupBody");
   gb.innerHTML = "";
   // 只渲染当前转发组的成员；「启用/测试」仍是全局实体状态
@@ -538,6 +634,215 @@ function renderSettings() {
   syncHeaderAll("groupAllEnabled", grpRows, "enabled");
   syncHeaderAll("chanAllEnabled", chanRows, "enabled");
   syncHeaderAll("userAllEnabled", settings.qq_user_openids || [], "enabled");
+  // X → QQ 页面与 Discord 页共用同一份 settings，跟随每次保存/轮询同步刷新
+  renderXPage();
+}
+
+// ---------------- X → QQ 页面 ----------------
+// 转发组读写 settings.x_forwarding_groups（与 Discord forwarding_groups 完全
+// 独立；组机制函数与 Discord 页共用，见 FG_X 上下文）；私聊白名单与 X RSS
+// 状态仍读写原有全局字段。保存走现有 /api/settings/save 整体流程；
+// 后端 x_rss.py 路由逻辑不在此触碰。
+
+function renderXPage() {
+  const srcBody = document.getElementById("xSourceBody");
+  if (!srcBody || !settings) return;
+  renderFgTabs(FG_X);
+  const xfg = getActiveFg(FG_X);
+
+  // X 来源：只渲染当前 X 转发组的来源成员；「启用」仍是全局注册源状态
+  const allSources = Array.isArray(settings.x_rss_sources) ? settings.x_rss_sources : [];
+  srcBody.innerHTML = "";
+  const memberKeys = {};
+  if (xfg) {
+    (xfg.sources || []).forEach(function (k) { memberKeys[String(k)] = true; });
+  }
+  const srcRows = allSources.filter(function (s) { return memberKeys[xSourceKey(s.source)]; });
+  if (!srcRows.length) {
+    srcBody.innerHTML = '<tr class="fgempty-row"><td colspan="5" class="fgempty-msg">还未新增来源，点击下方「＋ 新增」从已注册来源中加入，或先「注册新源」。</td></tr>';
+  }
+  srcRows.forEach((s) => {
+    const i = allSources.indexOf(s);
+    const handle = xSourceKey(s.source);
+    const name = s.name || handle;
+    const tr = document.createElement("tr");
+    tr.setAttribute("data-id", handle);
+    tr.innerHTML =
+      '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
+      '<td style="text-align:center"><input type="checkbox" data-kind="xSource" data-i="' + i + '"' + (s.enabled ? " checked" : "") + '></td>' +
+      '<td style="color:var(--fg);font-size:12px;word-break:break-all;">' + escapeHtml(name) + '</td>' +
+      '<td class="mono">@' + escapeHtml(handle) + '</td>' +
+      '<td style="text-align:right"><button class="danger rowicon" data-kind="xFgSourceRemove" data-id="' + escapeHtml(handle) + '" title="移出当前转发组">' + SVG_TRASH + '</button></td>';
+    srcBody.appendChild(tr);
+  });
+  // 表头全选框状态反映当前组成员，勾选/取消作用于全部注册源（与 Discord 页同语义）
+  syncHeaderAll("xSourceAllEnabled", srcRows, "enabled");
+
+  // QQ 接收群：只渲染当前 X 转发组的群成员；「启用」仍是全局群状态
+  const xgBody = document.getElementById("xXGroupBody");
+  const allGroups = settings.qq_group_openids || [];
+  xgBody.innerHTML = "";
+  const memberGrps = {};
+  if (xfg) {
+    (xfg.groups || []).forEach(function (o) { memberGrps[String(o)] = true; });
+  }
+  const grpRows = allGroups.filter(function (g) { return memberGrps[String(g.openid)]; });
+  if (!grpRows.length) {
+    xgBody.innerHTML = '<tr class="fgempty-row"><td colspan="6" class="fgempty-msg">还未新增群，点击下方「＋ 新增」来新增第一个群吧！</td></tr>';
+  }
+  grpRows.forEach((g) => {
+    const gi = allGroups.indexOf(g);
+    const gname = g.name || identityName("groups", g.openid) || "";
+    const gacc = g.qq_id || "";
+    const tr = document.createElement("tr");
+    tr.setAttribute("data-id", String(g.openid));
+    tr.innerHTML =
+      '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
+      '<td style="text-align:center"><input type="checkbox" data-kind="group" data-i="' + gi + '"' + (g.enabled ? " checked" : "") + '></td>' +
+      '<td>' +
+        (gname ? '<div style="color:var(--fg);font-size:12px;word-break:break-all;">' + escapeHtml(gname) + '</div>' : '') +
+      '</td>' +
+      '<td style="font-size:12px;">' + escapeHtml(gacc) + '</td>' +
+      '<td class="mono">' + escapeHtml(g.openid) + '</td>' +
+      '<td style="text-align:right"><button class="danger rowicon" data-kind="xFgGroupRemove" data-id="' + escapeHtml(String(g.openid)) + '" title="移出当前转发组">' + SVG_TRASH + '</button></td>';
+    xgBody.appendChild(tr);
+  });
+  syncHeaderAll("xGroupAllEnabled", grpRows, "enabled");
+
+  // QQ 私聊白名单：全局数据（settings.qq_user_openids），与 Discord → QQ 页
+  // 共用同一份 settings 数组，任一页修改经 saveAndReload 后两边同步重渲染
+  const xb = document.getElementById("xUserBody");
+  if (xb) {
+    xb.innerHTML = "";
+    if (!(settings.qq_user_openids || []).length) {
+      xb.innerHTML = '<tr class="fgempty-row"><td colspan="6" class="fgempty-msg">还未新增账号，点击下方「新增」按钮来新增第一个账号吧！</td></tr>';
+    }
+    (settings.qq_user_openids || []).forEach((u) => {
+      const ui = settings.qq_user_openids.indexOf(u);   // 原始索引：增删改仍按 settings 数组定位
+      const tr = document.createElement("tr");
+      tr.setAttribute("data-id", String(u.openid));
+      const uname = u.name || identityName("users", u.openid) || "";
+      const uacc = u.qq_id || "";
+      tr.innerHTML =
+        '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
+        '<td style="text-align:center"><input type="checkbox" data-kind="xUser" data-i="' + ui + '"' + (u.enabled ? " checked" : "") + '></td>' +
+        '<td>' +
+          (uname ? '<div style="color:var(--fg);font-size:12px;word-break:break-all;">' + escapeHtml(uname) + '</div>' : '') +
+        '</td>' +
+        '<td style="font-size:12px;">' + escapeHtml(uacc) + '</td>' +
+        '<td class="mono">' + escapeHtml(u.openid) + '</td>' +
+        '<td style="text-align:right"><button class="danger rowicon" data-kind="xUserDel" data-i="' + ui + '">' + SVG_TRASH + '</button></td>';
+      xb.appendChild(tr);
+    });
+    syncHeaderAll("xUserAllEnabled", settings.qq_user_openids || [], "enabled");
+  }
+
+  // X RSS 状态卡片的「运行中徽章 + 运行行」由 refreshXStatus 轻量轮询独立刷新；
+  // 这里只同步两个配置输入框（正在编辑的输入框不覆盖，与 backfillLimit 同策略）
+  const baseInput = document.getElementById("xRsshubBase");
+  if (baseInput && document.activeElement !== baseInput) {
+    baseInput.value = settings.x_rsshub_base || "";
+  }
+  const intervalInput = document.getElementById("xPollInterval");
+  if (intervalInput && document.activeElement !== intervalInput) {
+    const v = Number(settings.x_rss_poll_interval);
+    intervalInput.value = v > 0 ? v : 300;
+  }
+}
+
+// ---------------- X RSS 状态卡片（真实运行状态，轻量轮询） ----------------
+// 数据来自面板 /api/xrss/status（代理 bot 的 /api/x-rss/status 运行时状态）。
+// 只更新本卡片的 textContent，不重建任何表格/输入框：转发组重命名输入框
+// （fgRenameCtxKey 保护）与 RSSHub/间隔输入框都不会被本刷新打断。
+function xrssFmtInterval(sec) {
+  return (sec >= 60 && sec % 60 === 0) ? (sec / 60) + " 分钟" : sec + " 秒";
+}
+
+function xrssFmtTime(ts) {
+  const d = new Date(ts * 1000);
+  const time = d.toLocaleTimeString("zh-CN", {hour12: false});
+  return d.toDateString() === new Date().toDateString() ? time
+    : d.toLocaleDateString("zh-CN") + " " + time;
+}
+
+function xrssSet(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+function renderXStatus(st) {
+  const badge = document.getElementById("xrssBadge");
+  if (!badge) return;
+
+  // 订阅源：接口值（bot 当前实际读到）优先，面板 settings 兜底
+  let srcText = "—";
+  if (st && st.sources_total !== undefined) {
+    srcText = st.sources_enabled + " / " + st.sources_total + " 个";
+  } else if (settings && Array.isArray(settings.x_rss_sources)) {
+    const all = settings.x_rss_sources;
+    srcText = all.filter(function (s) { return s.enabled; }).length + " / " + all.length + " 个";
+  }
+  xrssSet("xrssSources", srcText);
+
+  if (!st) return;
+  const botUp = st.bot_running === true;
+  const pollTs = Number(st.last_poll_ts) || 0;
+  xrssSet("xrssLastPoll", pollTs ? xrssFmtTime(pollTs) : "—");
+
+  // 徽章：真实运行状态（写死「轮询中」已废弃）。
+  // 优先级：bot 停止 > bot 接口不可用 > 轮询循环未启动（等 QQ） >
+  // QQ 掉线（RSS 可能仍正常，必须与「运行中」区分）> 拉取/解析失败 > 运行中
+  let badgeText, badgeCls;
+  if (!botUp) {
+    badgeText = "未运行";
+    badgeCls = "badge off";
+  } else if (st.ok === false) {
+    badgeText = st.msg || "检测中…";
+    badgeCls = "badge warn";
+  } else if (!st.running) {
+    // 轮询循环只在 QQ Bot 连接后启动：未启动即 QQ 尚未连接过
+    badgeText = "等待 QQ 连接";
+    badgeCls = "badge warn";
+  } else if (!st.qq_connected) {
+    badgeText = st.last_result === "ok" ? "RSS 正常 · QQ 未连接" : "RSSHub 请求失败 · QQ 未连接";
+    badgeCls = "badge warn";
+  } else if (st.last_result === "fetch_failed") {
+    badgeText = "RSSHub 请求失败";
+    badgeCls = "badge off";
+  } else if (st.last_result === "parse_failed") {
+    badgeText = "RSS 解析失败";
+    badgeCls = "badge off";
+  } else {
+    badgeText = "运行中";
+    badgeCls = "badge on";
+  }
+  badge.textContent = badgeText;
+  badge.className = badgeCls;
+
+  // 上次结果 + 简短错误原因（成功轮不残留上一次错误）
+  const failed = st.last_result === "fetch_failed" || st.last_result === "parse_failed";
+  const resultEl = document.getElementById("xrssLastResult");
+  if (resultEl) {
+    if (!pollTs) {
+      resultEl.textContent = "—";
+      resultEl.style.color = "";
+    } else if (failed) {
+      resultEl.textContent = "失败" + (st.last_error ? "（" + st.last_error + "）" : "");
+      resultEl.style.color = "var(--badge-off-fg)";
+    } else {
+      resultEl.textContent = "成功";
+      resultEl.style.color = "";
+    }
+  }
+  xrssSet("xrssNew", pollTs ? (Number(st.last_new_count) || 0) + " 条" : "—");
+  xrssSet("xrssSent", pollTs ? (Number(st.last_sent_count) || 0) + " 条" : "—");
+  xrssSet("xrssFailed", pollTs ? (Number(st.last_failed_count) || 0) + " 条" : "—");
+}
+
+async function refreshXStatus() {
+  try {
+    renderXStatus(await jget("/api/xrss/status"));
+  } catch (err) { /* 面板瞬断：保留当前显示，下一轮覆盖 */ }
 }
 
 function syncHeaderAll(id, items, field) {
@@ -639,15 +944,30 @@ function applyDndOrder(bodyId, newIds) {
   const pos = {};
   newIds.forEach(function (id, i) { pos[String(id)] = i; });
   let arr = null, memberSet = null;
+  if (bodyId === "xSourceBody" || bodyId === "xXGroupBody") {
+    // X 转发组成员排序：直接重排当前 X 组的 sources/groups
+    // （只影响本组内的显示顺序，不重排全局注册实体）
+    const xfg = getActiveFg(FG_X);
+    if (!xfg) return false;
+    const field = bodyId === "xSourceBody" ? "sources" : "groups";
+    const members = (xfg[field] || []).map(String);
+    if (members.length !== newIds.length) return false;
+    const mset = {};
+    members.forEach(function (id) { mset[id] = true; });
+    if (!newIds.every(function (id) { return mset[String(id)]; })) return false;
+    xfg[field] = newIds.map(String);
+    return true;
+  }
   if (bodyId === "chanBody") {
     arr = settings.discord_channels;
-    memberSet = memberIdSet(getActiveFg() && getActiveFg().channels);
+    memberSet = memberIdSet(getActiveFg(FG_DISCORD) && getActiveFg(FG_DISCORD).channels);
   } else if (bodyId === "groupBody") {
     arr = settings.qq_group_openids;
-    memberSet = memberIdSet(getActiveFg() && getActiveFg().groups);
-  } else if (bodyId === "userBody") {
+    memberSet = memberIdSet(getActiveFg(FG_DISCORD) && getActiveFg(FG_DISCORD).groups);
+  } else if (bodyId === "userBody" || bodyId === "xUserBody") {
+    // X → QQ 页的白名单表与 Discord 页共用同一份数组，全量排序
     arr = settings.qq_user_openids;
-    memberSet = memberIdSet(arr && arr.map(function (u) { return u.openid; }));  // 用户表全量排序
+    memberSet = memberIdSet(arr && arr.map(function (u) { return u.openid; }));
   } else {
     return false;
   }
@@ -670,8 +990,7 @@ function applyDndOrder(bodyId, newIds) {
   if (bodyId === "chanBody") settings.discord_channels = result;
   else if (bodyId === "groupBody") settings.qq_group_openids = result;
   else settings.qq_user_openids = result;
-  return true;
-}
+  return true;}
 
 // {id1: true, id2: true, ...} —— 用于判断某实体是否为当前区域的成员
 function memberIdSet(arr) {
@@ -1134,51 +1453,116 @@ document.addEventListener("click", async function (e) {
     return;
   }
   const k = btn.dataset.kind;
+  if (k === "pageTab") {
+    setActivePage(btn.dataset.page);
+    return;
+  }
   if (k === "fgTab") {
-    setActiveFg(btn.dataset.id);
+    setActiveFg(FG_CTX[btn.dataset.ctx] || FG_DISCORD, btn.dataset.id);
     return;
   }
   if (k === "fgRename") {
-    startFgRename();
+    startFgRename(FG_CTX[btn.dataset.ctx] || FG_DISCORD);
     return;
   }
   if (k === "fgDel") {
-    const fg = getActiveFg();
-    // 「测试组」为固定转发组，不允许删除；普通转发组可全部删除（至少保留测试组）
-    if (!fg || fg.id === TEST_FG_ID) return;
-    showConfirmDlg("删除转发组", "删除转发组「" + fg.name + "」将移除其频道→群路由关系，频道和群本身不受影响。确定删除？", async function () {
+    const ctx = FG_CTX[btn.dataset.ctx] || FG_DISCORD;
+    const fg = getActiveFg(ctx);
+    // 「测试组」（仅 Discord）为固定转发组，不允许删除；
+    // 普通转发组可删除（每套组至少保留 1 个）
+    if (!fg || (ctx.testGroupId && fg.id === ctx.testGroupId)) return;
+    showConfirmDlg("删除转发组", "删除转发组「" + fg.name + "」将移除其成员→群路由关系，" + (ctx.key === "x" ? "来源和群" : "频道和群") + "本身不受影响。确定删除？", async function () {
       // 确认时基于最新 settings 解析，避免弹窗期间对象被替换
-      const curList = getFgList();
+      const curList = getFgList(ctx);
       const target = curList.find(function (x) { return x.id === fg.id; });
       if (!target) return;
       curList.splice(curList.indexOf(target), 1);
-      if (activeFgId === fg.id) {
+      if (ctx.activeId === fg.id) {
         const next = curList[0] || null;
-        activeFgId = next ? next.id : null;
-        try { localStorage.setItem(FG_STORAGE_KEY, activeFgId || ""); } catch (e) {}
+        ctx.activeId = next ? next.id : null;
+        try { localStorage.setItem(ctx.storageKey, ctx.activeId || ""); } catch (e) {}
       }
       await saveAndReload();
     }, "删除");
     return;
   }
   if (btn.id === "btnAddFg") {
-    addForwardingGroup();
+    addForwardingGroup(FG_DISCORD);
+    return;
+  }
+  if (btn.id === "btnAddXFg") {
+    addForwardingGroup(FG_X);
+    return;
+  }
+  if (btn.id === "btnAddXSource") {
+    // 「注册新源」：登记为全局 X 来源（默认启用），不自动加入任何转发组
+    const input = document.getElementById("xSourceInput");
+    const nameInput = document.getElementById("xSourceNameInput");
+    const handle = input.value.trim().replace(/^@/, "");
+    if (!handle) { showAlert("注册新源", "请先填写 X 账号"); return; }
+    if (!Array.isArray(settings.x_rss_sources)) settings.x_rss_sources = [];
+    const dup = settings.x_rss_sources.some(function (s) {
+      return xSourceKey(s.source).toLowerCase() === handle.toLowerCase();
+    });
+    if (dup) { showAlert("注册新源", "该账号已在源列表中"); return; }
+    settings.x_rss_sources.push({source: handle, name: nameInput.value.trim(), enabled: true});
+    input.value = "";
+    nameInput.value = "";
+    await saveAndReload();
+    return;
+  }
+  if (btn.id === "btnAddXFgSource") {
+    // 「＋ 新增」（X 来源）：从已注册来源中选择加入当前 X 转发组
+    openFgAddPicker(FG_X, "source");
+    return;
+  }
+  if (btn.id === "btnAddXFgGroup") {
+    // 「＋ 新增」（QQ 接收群）：从已注册群中选择加入当前 X 转发组
+    openFgAddPicker(FG_X, "group");
+    return;
+  }
+  if (btn.id === "btnSyncXGroups") {
+    // 与 Discord → QQ 页共用的注册审核流程（/api/registrations）
+    await openRegistrationReview("groups");
+    return;
+  }
+  if (btn.id === "btnQQPlatformX") {
+    window.open("https://q.qq.com/qqbot/dashboard/", "_blank");
+    return;
+  }
+  if (btn.id === "btnAddXUser") {
+    // 与 Discord 页完全相同的「从已注册项新增」白名单流程
+    openUserAddPicker();
+    return;
+  }
+  if (btn.id === "btnSyncXUsers") {
+    await openRegistrationReview("users");
     return;
   }
   if (btn.id === "btnAddFgChan") {
-    openFgAddPicker("chan");
+    openFgAddPicker(FG_DISCORD, "chan");
     return;
   }
   if (btn.id === "btnAddFgGroup") {
-    openFgAddPicker("group");
+    openFgAddPicker(FG_DISCORD, "group");
     return;
   }
   if (btn.id === "btnScanChannels") {
     scanReadableChannels(btn);
     return;
   }
+  if (k === "xFgSourceRemove") {
+    // 与转发组行内"删除"同机制：仅把来源移出当前 X 转发组（不删注册源）
+    removeFgMember(FG_X, btn.dataset.id, "sources");
+    return;
+  }
+  if (k === "xFgGroupRemove") {
+    // 仅把群移出当前 X 转发组（不删全局群、不影响其他组）
+    removeFgMember(FG_X, btn.dataset.id, "groups");
+    return;
+  }
   if (k === "fgGroupRemove") {
-    removeFgMember(btn.dataset.id, "groups");
+    removeFgMember(FG_DISCORD, btn.dataset.id, "groups");
     return;
   } else if (k === "userDel") {
     const idx = Number(btn.dataset.i);
@@ -1188,10 +1572,20 @@ document.addEventListener("click", async function (e) {
       settings.qq_user_openids.splice(idx, 1);
       await saveAndReload();
     }, "删除");
+  } else if (k === "xUserDel") {
+    // X → QQ 页白名单行内删除：与 Discord 页 userDel 同机制（同一份全局数据）
+    const idx = Number(btn.dataset.i);
+    const u = settings.qq_user_openids[idx];
+    if (!u) return;
+    const label = (u.name || "").trim() || (u.remark || "").trim() || identityName("users", u.openid) || u.openid;
+    showConfirmDlg("删除用户", "确定要删除用户「" + label + "」吗？", async function () {
+      settings.qq_user_openids.splice(idx, 1);
+      await saveAndReload();
+    }, "删除");
   } else if (k === "chanFilter") {
     openFilterModal(Number(btn.dataset.i));
   } else if (k === "fgChanRemove") {
-    removeFgMember(btn.dataset.id, "channels");
+    removeFgMember(FG_DISCORD, btn.dataset.id, "channels");
   } else if (btn.id === "btnAddUser") {
     openUserAddPicker();
   } else if (btn.id === "btnSync") {
@@ -1307,7 +1701,32 @@ document.addEventListener("change", async function (e) {
     await refreshStatus();
     return;
   }
-  if (el.id === "groupAllEnabled") {
+  if (el.id === "xSourceAllEnabled") {
+    (settings.x_rss_sources || []).forEach(function (s) { s.enabled = el.checked; });
+    await saveAndReload();
+    return;
+  }
+  if (el.id === "xRsshubBase") {
+    settings.x_rsshub_base = el.value.trim();
+    await saveAndReload();
+    return;
+  }
+  if (el.id === "xPollInterval") {
+    let v = parseInt(el.value, 10);
+    // 下限 30 秒（与后端 get_x_rss_poll_interval 一致，防误配打爆 RSSHub）
+    if (!(v > 0)) v = 300;
+    if (v < 30) v = 30;
+    settings.x_rss_poll_interval = v;
+    el.value = v;
+    await saveAndReload();
+    return;
+  }
+  if (el.id === "xUserAllEnabled") {
+    settings.qq_user_openids.forEach(function (u) { u.enabled = el.checked; });
+    await saveAndReload();
+    return;
+  }
+  if (el.id === "groupAllEnabled" || el.id === "xGroupAllEnabled") {
     settings.qq_group_openids.forEach(function (g) { g.enabled = el.checked; });
     await saveAndReload();
     return;
@@ -1323,6 +1742,22 @@ document.addEventListener("change", async function (e) {
     return;
   }
   if (!el.dataset.kind) return;
+  if (el.dataset.kind === "xSource") {
+    const s = (settings.x_rss_sources || [])[Number(el.dataset.i)];
+    if (s) {
+      s.enabled = el.checked;
+      await saveAndReload();
+    }
+    return;
+  }
+  if (el.dataset.kind === "xUser") {
+    const u = settings.qq_user_openids[Number(el.dataset.i)];
+    if (u) {
+      u.enabled = el.checked;
+      await saveAndReload();
+    }
+    return;
+  }
   if (el.dataset.kind === "group") {
     settings.qq_group_openids[Number(el.dataset.i)].enabled = el.checked;
     await saveAndReload();
@@ -1404,6 +1839,8 @@ async function init() {
   // 轮询定时器只创建一套，避免 /api/status → /api/health 出现多重轮询。
   if (pollingStarted) return;
   pollingStarted = true;
+  // 恢复上一次选择的界面（默认 Discord → QQ）
+  setActivePage(activePage);
   try {
     settings = await jget("/api/settings");
     renderSettings();
@@ -1415,6 +1852,9 @@ async function init() {
   setInterval(refreshBackfill, 300000);
   await refreshIdentities();
   setInterval(refreshIdentities, 30000);
+  // X RSS 状态卡片：独立轻量轮询（只更新卡片文本，10 秒足够）
+  await refreshXStatus();
+  setInterval(refreshXStatus, 10000);
 }
 
 init();

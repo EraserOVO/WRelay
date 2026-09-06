@@ -349,6 +349,14 @@
   tr.drop-before td:first-child { box-shadow: inset 0 2px 0 0 var(--primary-border); }
   tr.drop-after td:first-child  { box-shadow: inset 0 -2px 0 0 var(--primary-border); }
 
+  /* ---------- 主要界面切换（Discord → QQ / X → QQ） ---------- */
+  /* 复用 .fgtab 视觉，字号/内边距略大以体现一级层级 */
+  .pagetabs {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    margin-bottom: 16px;
+  }
+  .pagetabs .fgtab { padding: 8px 18px; font-size: 14px; }
+
   /* ---------- 转发组卡片 ---------- */
   .fgtabs {
     display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
