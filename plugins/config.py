@@ -1,4 +1,5 @@
 import os
+import re
 
 # Discord频道列表（可分发版本：不内置默认频道；
 # 首次运行时自动生成空配置，由用户在管理面板添加）
@@ -94,6 +95,11 @@ def _default_settings():
         "discord_channels": channels,
         "backfill_enabled": True,
         "backfill_limit": 10,
+        # X（Twitter）RSS 订阅（RSSHub）：源列表 / 轮询秒数 / RSSHub 地址。
+        # 旧配置缺省时只在内存补齐（见 _load_settings），不写回文件
+        "x_rss_sources": [],
+        "x_rss_poll_interval": 300,
+        "x_rsshub_base": "http://localhost:1200",
     }
 
 
@@ -165,6 +171,10 @@ def _load_settings():
         # 结构完整但缺少新增字段：只在内存补齐，不写回文件
         # （写回会与面板保存形成跨进程写竞争）
         data["qq_user_openids"] = []
+
+    if isinstance(data, dict) and not isinstance(data.get("x_rss_sources"), list):
+        # X RSS 订阅源：同样只在内存补齐，不写回文件
+        data["x_rss_sources"] = []
 
     if data is None:
         _settings_cache = _default_settings()
@@ -523,3 +533,240 @@ def get_channel_filter(channel_id):
         "filter_keywords": [],
         "filter_message_types": None,
     }
+
+
+# =====================================================
+# X（Twitter）RSS 订阅（RSSHub → WRelay）
+#
+# 与 Discord 转发完全独立的链路（不读不写 forwarding_groups）：
+#   - 源列表 x_rss_sources：[{source, name, enabled}]
+#     source 填 X 账号 screen_name（如 "xx_Chon_xx"），也兼容直接填
+#     RSSHub 完整 URL；轮询时拼 {x_rsshub_base}/twitter/user/{source}
+#   - 目标群：X 转发组 x_forwarding_groups（X 源 → X 组 → QQ 群，
+#     见下方 X 转发组路由）；旧配置缺省时内存生成默认组，
+#     默认组 groups 取 x_rss_target_groups（非空）否则全部启用群，
+#     与旧的"全局白名单/全量投递"行为完全一致
+#   - 去重游标复用 data/discord_last.json（伪频道键 "x_rss:{handle}"，
+#     tweet ID 与 Discord 消息 ID 一样是单调递增整数，dedup 纯函数原样可用）
+# =====================================================
+
+# X 转发组：与 Discord forwarding_groups 完全独立的一套组配置。
+# 旧配置缺省时内存归一化为默认 X 转发组（sources/groups = 当前启用项 /
+# 旧全局白名单），路由结果与旧版完全一致；面板保存后固化落盘。
+# X 组没有固定"测试组"（测试路由是 Discord 转发组的概念）。
+X_FORWARDING_GROUP_DEFAULT_ID = "x_default"
+X_FORWARDING_GROUP_DEFAULT_NAME = "转发组1"
+
+def _x_source_key(raw):
+    """x_rss_sources 的原始 source 字符串 → 去重状态 key（与游标键一致）。
+
+    填 screen_name 时为去 @ 的 handle（稳定不随 RSSHub 地址变化）；
+    直接填 URL 时尝试提取 handle，提取不到则用整个 URL。"""
+    if raw.startswith("http://") or raw.startswith("https://"):
+        m = re.search(r"/twitter/user/([^/?#]+)", raw)
+        return m.group(1) if m else raw
+    return raw.lstrip("@")
+
+
+def get_x_rss_sources():
+    """返回归一化的 X RSS 订阅源列表 [{key, url, name, enabled}]
+
+    key 是去重状态键（见 _x_source_key）。enabled 缺省视为 False
+    （不发送）。"""
+    data = _load_settings()
+    base = get_x_rsshub_base()
+    items = data.get("x_rss_sources")
+    sources = []
+    if isinstance(items, list):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            raw = str(item.get("source") or "").strip()
+            if not raw:
+                continue
+            key = _x_source_key(raw)
+            if key.startswith("http://") or key.startswith("https://"):
+                url = raw
+            else:
+                url = f"{base}/twitter/user/{key}"
+            sources.append({
+                "key": key,
+                "url": url,
+                "name": str(item.get("name") or "").strip() or key,
+                "enabled": bool(item.get("enabled")),
+            })
+    return sources
+
+
+def get_x_rss_poll_interval():
+    """X RSS 轮询间隔（秒），默认 300（对齐 RSSHub 缓存 max-age=300）；
+    下限 30 秒，防误配打爆 RSSHub"""
+    data = _load_settings()
+    try:
+        value = int(data.get("x_rss_poll_interval") or 300)
+    except (TypeError, ValueError):
+        return 300
+    return value if value >= 30 else 300
+
+
+def get_x_rsshub_base():
+    """RSSHub 服务地址，默认 http://localhost:1200（末尾斜杠归一化）"""
+    data = _load_settings()
+    base = str(data.get("x_rsshub_base") or "").strip()
+    return (base or "http://localhost:1200").rstrip("/")
+
+
+def get_x_rss_target_groups():
+    """X RSS 投递目标群白名单（openid 列表）——旧配置字段。
+
+    仅在 x_forwarding_groups 缺省时作为默认组的 groups 来源；
+    字段本身保留不删，新配置存在后路由不再读取它。
+    空列表（默认/缺省）= 默认组回退为全部启用 QQ 群（原行为）。"""
+    data = _load_settings()
+    items = data.get("x_rss_target_groups")
+    if not isinstance(items, list):
+        return []
+    return [str(o) for o in items if str(o).strip()]
+
+
+# =====================================================
+# X 转发组路由（x_forwarding_groups）
+#
+# 与 Discord forwarding_groups 完全独立的一套组配置：
+#   X 源（x_rss:{handle} 的 handle） → X 组 → QQ 群
+#
+# 只负责"当前路由"，不管理去重游标：游标仍是
+# data/discord_last.json 里 "x_rss:{handle}" 按群记录的
+# {group_openid: tweet_id}，转发组只决定本轮哪些群是目标。
+#
+# 实际发送必须同时满足（两级开关，与 get_groups_for_channel 同语义）：
+#   - 源全局 enabled（x_rss_sources 条目的 enabled）
+#   - 群全局 enabled（qq_group_openids 条目的 enabled）
+#   - 源与群同属于至少一个 X 转发组
+# =====================================================
+
+
+def _x_source_keys(data, only_enabled=False):
+    """settings dict 内 X 源 key 集合（归一化清理悬空引用 / 路由共用）。
+
+    only_enabled=True 时只返回 enabled 条目的 key（与
+    get_x_rss_sources 的 enabled 缺省视为 False 一致）。"""
+    keys = set()
+    items = data.get("x_rss_sources")
+    if isinstance(items, list):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            raw = str(item.get("source") or "").strip()
+            if not raw:
+                continue
+            if only_enabled and not item.get("enabled"):
+                continue
+            keys.add(_x_source_key(raw))
+    return keys
+
+
+def _ensure_x_forwarding_groups(data):
+    """X 转发组内存归一化（只改内存 data，不写盘）。
+
+    - 结构合法 → 清洗保留（id 去重、字段转 str、name 缺省回退 id、
+      sources/groups 去重并剔除悬空引用——源已删除/群已注销的引用）
+    - 缺省/空/结构无效（旧配置升级）→ 生成默认组：
+      sources = 当前全部 enabled 的 X 源 key；
+      groups = x_rss_target_groups（非空，剔除未注册群）否则全部启用群，
+      与旧的"全局白名单/全量投递"行为完全一致
+    - 不按 enabled 裁剪组成员：enabled 只影响运行，成员关系独立保存"""
+    groups = data.get("x_forwarding_groups")
+    if not isinstance(groups, list):
+        groups = []
+
+    valid_sources = _x_source_keys(data)
+    valid_groups = {
+        str(item["openid"])
+        for item in data.get("qq_group_openids", [])
+        if isinstance(item, dict) and item.get("openid")
+    }
+
+    normalized = []
+    seen_ids = set()
+    for item in groups:
+        if not isinstance(item, dict):
+            continue
+        gid = str(item.get("id") or "").strip()
+        if not gid or gid in seen_ids:
+            continue
+        seen_ids.add(gid)
+        sources = []
+        for key in (item.get("sources") or []):
+            key = str(key)
+            if key and key in valid_sources and key not in sources:
+                sources.append(key)
+        xgroups = []
+        for openid in (item.get("groups") or []):
+            openid = str(openid)
+            if openid and openid in valid_groups and openid not in xgroups:
+                xgroups.append(openid)
+        normalized.append({
+            "id": gid,
+            "name": str(item.get("name") or "").strip() or gid,
+            "sources": sources,
+            "groups": xgroups,
+        })
+
+    if not normalized:
+        target = [
+            o for o in get_x_rss_target_groups()
+            if o in valid_groups
+        ]
+        if not target:
+            target = _enabled_group_openids(data)
+        normalized = [{
+            "id": X_FORWARDING_GROUP_DEFAULT_ID,
+            "name": X_FORWARDING_GROUP_DEFAULT_NAME,
+            "sources": sorted(_x_source_keys(data, only_enabled=True)),
+            "groups": target,
+        }]
+
+    data["x_forwarding_groups"] = normalized
+    return normalized
+
+
+def get_x_forwarding_groups():
+    """返回归一化后的 X 转发组列表（[{id, name, sources[], groups[]}]）"""
+    return _ensure_x_forwarding_groups(
+        _load_settings()
+    )
+
+
+def get_x_groups_for_source(source_key):
+    """X 源 → QQ 目标群 的唯一路由入口（与 get_groups_for_channel
+    同语义，但独立实现，不读 Discord forwarding_groups）。
+
+    同时满足才投递：
+      - 源全局 enabled（x_rss_sources 条目的 enabled）
+      - 群全局 enabled（qq_group_openids 条目的 enabled）
+      - 源与群同属于至少一个 X 转发组
+    源未启用或未加入任何 X 转发组返回 []（不回退全量投递）。
+    返回值是去重后的 openid 列表，顺序与全局启用群一致；
+    同一群被多个 X 转发组勾选不会重复出现（下游 inflight 判重兜底）。"""
+    data = _load_settings()
+    source_key = str(source_key or "").strip()
+
+    if not source_key or source_key not in _x_source_keys(data, only_enabled=True):
+        return []
+
+    enabled_groups = _enabled_group_openids(data)
+    if not enabled_groups:
+        return []
+
+    targets = set()
+    for fg in _ensure_x_forwarding_groups(data):
+        if source_key in fg["sources"]:
+            targets.update(fg["groups"])
+
+    # 群必须全局 enabled；按启用顺序返回即天然去重
+    return [
+        group
+        for group in enabled_groups
+        if group in targets
+    ]
