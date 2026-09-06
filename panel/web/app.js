@@ -23,7 +23,7 @@ function openAboutLink(url, label) {
 
 let settings = null;
 // 主题偏好：夜间/日间模式，持久化到 localStorage，默认夜间（与旧版视觉一致）
-const THEME_KEY = "wuppo_theme";
+const THEME_KEY = "wrelay_theme";
 const THEME_DARK = "dark";
 const THEME_LIGHT = "light";
 function applyTheme(theme) {
@@ -48,7 +48,7 @@ function toggleTheme() {
 let channelNames = {};
 // 转发组：当前活动组 id 持久化到 localStorage，刷新后恢复；
 // 组内成员（channels/groups）随 settings 整体保存
-const FG_STORAGE_KEY = "wuppo_active_fg";
+const FG_STORAGE_KEY = "wrelay_active_fg";
 const MAX_FG = 11;
 // 「测试组」：固定 id / 名称，不可删除、不可改名，计入转发组数量上限
 const TEST_FG_ID = "test";

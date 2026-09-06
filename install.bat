@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 rem ============================================================
-rem  WuppoRelay 一键安装脚本（Windows）
+rem  WRelay 一键安装脚本（Windows）
 rem  1. 使用随安装包自带的自包含 Python 运行时 python\
 rem     （无需本机安装 Python，也无需创建虚拟环境）
 rem  2. 校验运行时依赖是否完整
@@ -13,7 +13,7 @@ cd /d "%~dp0"
 rem ---- 检查自包含运行时 ----
 if not exist "python\python.exe" (
     echo [错误] 未找到自包含运行时 python\python.exe，
-    echo        请重新运行 WuppoRelay 安装包
+    echo        请重新运行 WRelay 安装包
     pause
     exit /b 1
 )
@@ -29,7 +29,7 @@ if errorlevel 1 (
 echo [2/3] 校验依赖是否完整 ...
 ".\python\python.exe" -c "import nonebot, nonebot.adapters.qq, nonebot.adapters.discord, fastapi, uvicorn, httpx; print('依赖完整')"
 if errorlevel 1 (
-    echo [错误] 依赖不完整，请重新运行 WuppoRelay 安装包
+    echo [错误] 依赖不完整，请重新运行 WRelay 安装包
     pause
     exit /b 1
 )

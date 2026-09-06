@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-rem 启动 WuppoRelay 管理面板（无控制台窗口，自动打开浏览器）
+rem 启动 WRelay 管理面板（无控制台窗口，自动打开浏览器）
 rem 使用相对路径，可放在项目任意位置双击运行
 cd /d "%~dp0"
 

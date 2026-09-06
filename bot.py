@@ -123,7 +123,7 @@ def _first_run_config_check():
     lines = []
     lines.append("")
     lines.append("=" * 66)
-    lines.append("  WuppoRelay 首次配置检查：尚未完成首次配置")
+    lines.append("  WRelay 首次配置检查：尚未完成首次配置")
     lines.append("=" * 66)
     if not exists:
         lines.append("  尚未生成配置文件（.env.prod 不存在）。")

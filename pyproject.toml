@@ -1,7 +1,7 @@
 [project]
-name = "Wuppo"
+name = "WRelay"
 version = "0.1.0"
-description = "Wuppo"
+description = "WRelay"
 readme = "README.md"
 requires-python = ">=3.10, <4.0"
 

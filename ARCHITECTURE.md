@@ -1,4 +1,4 @@
-# WuppoRelay 架构说明
+# WRelay 架构说明
 
 > 面向项目维护者，帮助快速理解"每一块是干什么的、以后改东西应该去哪里"。
 > 以当前实际代码为准。
@@ -8,7 +8,7 @@
 ## 1. 项目整体结构
 
 ```
-Wuppo/
+WRelay/
 ├── bot.py                    机器人入口（NoneBot 启动、适配器注册、日志轮转）
 ├── plugins/                  NoneBot 插件目录（所有转发逻辑都在这里）
 │   ├── config.py             配置读取 + 内存缓存（settings.json 的消费者）

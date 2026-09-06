@@ -1,4 +1,4 @@
-# WuppoRelay
+# WRelay
 
 **Discord → QQ 单向消息转发器**（基于 NoneBot2）：把指定 Discord 频道的消息实时转发到指定 QQ 群。
 
@@ -34,7 +34,7 @@
 ## 项目结构
 
 ```text
-Wuppo/
+WRelay/
 ├─ bot.py               # 入口：注册适配器、日志轮转、加载插件
 ├─ pyproject.toml       # 依赖与项目元信息（pip install -e .）
 ├─ .env.example         # 配置模板（install.bat 复制为 .env.prod）
@@ -58,7 +58,7 @@ Wuppo/
 ├─ panel/
 │  ├─ 管理面板.pyw      # 管理面板（127.0.0.1:8090）
 │  ├─ autostart.pyw     # 开机自启中转
-│  └─ wuppo_panel.ico   # 面板图标
+│  └─ wrelay_panel.ico   # 面板图标
 └─ data/                # 运行时数据：配置、去重记录、日志（不入库）
 ```
 

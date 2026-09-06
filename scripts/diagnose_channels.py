@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """频道权限诊断与记录脚本
 
-列出 WuppoRelay Bot 当前可见（View Channel）与可读内容
+列出 WRelay Bot 当前可见（View Channel）与可读内容
 （Read Message History）的 Discord 频道，并生成/更新
 docs/CHANNELS.md 记录文件。
 
@@ -138,7 +138,7 @@ async def main():
 
     # 写 docs/CHANNELS.md
     lines = []
-    lines.append("# WuppoRelay Bot 频道权限记录")
+    lines.append("# WRelay Bot 频道权限记录")
     lines.append("")
     lines.append(
         f"> 由 scripts/diagnose_channels.py 生成，更新于 "

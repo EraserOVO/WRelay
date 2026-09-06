@@ -1,6 +1,6 @@
-# WuppoRelay 安装指南（Windows）
+# WRelay 安装指南（Windows）
 
-WuppoRelay 是一个 **Discord → QQ 单向消息转发器**：把指定 Discord 频道的消息实时转发到指定 QQ 群。
+WRelay 是一个 **Discord → QQ 单向消息转发器**：把指定 Discord 频道的消息实时转发到指定 QQ 群。
 
 ---
 
@@ -14,7 +14,7 @@ WuppoRelay 是一个 **Discord → QQ 单向消息转发器**：把指定 Discor
 
 ## 2. 一键安装
 
-1. 把整个项目放到一个目录（例如 `C:\Wuppo`），或 `git clone` 到本地。
+1. 把整个项目放到一个目录（例如 `C:\WRelay`），或 `git clone` 到本地。
 2. **双击 `install.bat`**，脚本会自动：
    - 创建虚拟环境 `.venv`
    - 安装项目依赖（`pip install -e .`）

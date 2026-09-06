@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-WuppoRelay 管理面板（无窗口运行，pythonw 启动）
+WRelay 管理面板（无窗口运行，pythonw 启动）
 
 功能：
   - 机器人 启动 / 停止 / 重启
@@ -9,7 +9,7 @@ WuppoRelay 管理面板（无窗口运行，pythonw 启动）
 
 启动方式：
   双击快捷方式「管理面板」，或：
-    pythonw "C:/Users/Era/Wuppo/panel/管理面板.pyw"
+    pythonw panel/管理面板.pyw   （在项目根目录下）
 """
 
 import os
@@ -25,7 +25,7 @@ import webbrowser
 
 # ---------------- 路径 ----------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))      # .../panel
-PROJECT_ROOT = os.path.dirname(BASE_DIR)                    # .../Wuppo
+PROJECT_ROOT = os.path.dirname(BASE_DIR)                    # 项目根目录
 os.chdir(PROJECT_ROOT)
 
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
@@ -71,10 +71,10 @@ except Exception:
     TEST_FORWARDING_GROUP_NAME = "测试组"
 
 # ---------------- 开机自启 ----------------
-# 通过启动文件夹里的 WuppoRelayAutostart.vbs（隐藏窗口）运行 panel/autostart.pyw，
+# 通过启动文件夹里的 WRelayAutostart.vbs（隐藏窗口）运行 panel/autostart.pyw，
 # autostart.pyw 追加 --autostart 标志后调用本面板 main()：
 #   后台启动面板(不开浏览器) + 自动拉起机器人
-AUTOSTART_VBS_NAME = "WuppoRelayAutostart.vbs"
+AUTOSTART_VBS_NAME = "WRelayAutostart.vbs"
 AUTOSTART_FLAG = "--autostart"
 
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -657,7 +657,7 @@ def get_autostart():
 
 
 def set_autostart(enabled):
-    """开启/关闭开机自启：向启动文件夹写/删 WuppoRelayAutostart.vbs
+    """开启/关闭开机自启：向启动文件夹写/删 WRelayAutostart.vbs
     内容全为 ASCII，避免中文路径在 VBS 里的编码问题（由 autostart.pyw 中转）"""
     path = autostart_vbs_path()
     if enabled:

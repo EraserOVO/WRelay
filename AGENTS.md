@@ -1,8 +1,8 @@
-﻿# WuppoRelay 开发规则
+﻿# WRelay 开发规则
 
 ## 项目方向
 
-WuppoRelay 是 Discord → QQ 消息转发器。
+WRelay 是 Discord → QQ 消息转发器。
 
 - 只做 Discord → QQ
 - 不做 QQ → Discord

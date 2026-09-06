@@ -1,8 +1,8 @@
-; WuppoRelay 安装脚本
+; WRelay 安装脚本
 ; 打包自包含 Python 运行时（python-build-standalone 3.12.14）+ 项目源码
 ; 目标机器无需预装 Python
 
-#define MyAppName "WuppoRelay"
+#define MyAppName "WRelay"
 #define MyAppVersion "0.1.0"
 #define MyAppExeName "bot.py"
 #define SourceRoot "."
@@ -10,20 +10,20 @@
 [Setup]
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-AppPublisher=Wuppo
-DefaultDirName={autopf}\WuppoRelay
+AppPublisher=WRelay
+DefaultDirName={autopf}\WRelay
 DefaultGroupName={#MyAppName}
-OutputBaseFilename=WuppoRelay-Setup
+OutputBaseFilename=WRelay-Setup
 OutputDir=.
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
-UninstallDisplayIcon={app}\panel\wuppo_panel.ico
+UninstallDisplayIcon={app}\panel\wrelay_panel.ico
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 DisableProgramGroupPage=yes
-SetupIconFile=panel\wuppo_panel.ico
+SetupIconFile=panel\wrelay_panel.ico
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "compiler:Default.isl"
@@ -64,12 +64,12 @@ Source: "scripts\*.py"; DestDir: "{app}\scripts"; Flags: recursesubdirs ignoreve
 Source: ".runtime\python\*"; DestDir: "{app}\python"; Flags: recursesubdirs ignoreversion; Excludes: "*.pdb,__pycache__,.git"
 
 [Icons]
-Name: "{group}\启动 WuppoRelay 管理面板"; Filename: "{app}\启动面板.bat"; IconFilename: "{app}\panel\wuppo_panel.ico"
-Name: "{group}\卸载 WuppoRelay"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\WuppoRelay管理面板"; Filename: "{app}\启动面板.bat"; IconFilename: "{app}\panel\wuppo_panel.ico"
+Name: "{group}\启动 WRelay 管理面板"; Filename: "{app}\启动面板.bat"; IconFilename: "{app}\panel\wrelay_panel.ico"
+Name: "{group}\卸载 WRelay"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\WRelay管理面板"; Filename: "{app}\启动面板.bat"; IconFilename: "{app}\panel\wrelay_panel.ico"
 
 [Run]
-Filename: "{app}\启动面板.bat"; Description: "启动 WuppoRelay 管理面板"; Flags: postinstall nowait shellexec skipifsilent
+Filename: "{app}\启动面板.bat"; Description: "启动 WRelay 管理面板"; Flags: postinstall nowait shellexec skipifsilent
 
 [UninstallDelete]
 ; 移除运行时生成的数据，保证卸载干净
