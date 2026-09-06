@@ -22,10 +22,13 @@ function openAboutLink(url, label) {
 }
 
 let settings = null;
-// 主题偏好：夜间/日间模式，持久化到 localStorage，默认夜间（与旧版视觉一致）
+// 主题偏好：夜间/日间模式，持久化到 localStorage，默认日间（仅首次使用/未保存偏好时生效）
 const THEME_KEY = "wrelay_theme";
 const THEME_DARK = "dark";
 const THEME_LIGHT = "light";
+// 面板默认主题：日间。只影响"没有保存过主题偏好"的首次打开；
+// 用户已保存的 dark/light 偏好始终照常恢复，不会被默认值覆盖
+const THEME_DEFAULT = THEME_LIGHT;
 function applyTheme(theme) {
   document.body.classList.toggle("theme-light", theme === THEME_LIGHT);
   const btn = document.getElementById("btnTheme");
@@ -39,9 +42,9 @@ function toggleTheme() {
   applyTheme(next);
 }
 (function initTheme() {
-  let t = THEME_DARK;
-  try { t = localStorage.getItem(THEME_KEY) || THEME_DARK; } catch (e) {}
-  if (t !== THEME_LIGHT) t = THEME_DARK;
+  let t = THEME_DEFAULT;
+  try { t = localStorage.getItem(THEME_KEY) || THEME_DEFAULT; } catch (e) {}
+  if (t !== THEME_LIGHT && t !== THEME_DARK) t = THEME_DEFAULT;
   applyTheme(t);
 })();
 // Discord 频道真实名称映射 {频道ID: 真实名}，由 /api/channel-names 拉取（仅展示，不写入 settings）

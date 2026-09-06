@@ -65,7 +65,7 @@ class FakeSender:
         return {g: True for g in (groups or [])}
 
 
-async def fake_build_parts(message, source_label="自动转发来自"):
+async def fake_build_parts(message, source_label="自动转发来自", enabled_types=None):
     return (["占位"], [], True)
 
 

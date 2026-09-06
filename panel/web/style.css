@@ -231,11 +231,13 @@
   #btnAutostart svg { flex: none; }
   /* √/× 图案中心与「开机自启」文字中心对齐：SVG 略向下移、控制高度 */
   #btnAutostart svg { transform: translateY(1px); }
-  /* 开机自启/启用补发 选中态：复用「模式选择」选中按钮的选中颜色（背景/边框），不改尺寸/图标/文字 */
+  /* 开机自启/启用补发 选中态：复用「模式选择」选中按钮的选中颜色（背景/边框），不改尺寸/图标/文字；
+     中央文字/图标颜色统一为 --btn-fg（与「关于作者」按钮中央图案同源） */
   #btnAutostart[data-on="1"],
   #btnBackfillToggle[data-on="1"] {
     background: var(--primary);
     border-color: var(--primary-border);
+    color: var(--btn-fg);
   }
   .cardrow .card > .hint { margin-top: auto; padding-top: 8px; }
   /* 展开/折叠按钮：宽度与表格行内垃圾桶按钮一致（28px），纵向尺寸为当前的 60%（≈17px），
@@ -284,6 +286,8 @@
   button.rowicon.filter-active {
     background: var(--filter-active-bg);
     border: 1px solid var(--filter-active-border);
+    /* 蓝色背景下的漏斗图标颜色统一为 --btn-fg（与「关于作者」按钮中央图案同源） */
+    color: var(--btn-fg);
   }
   button.rowicon.filter-active:hover {
     background: var(--filter-active-border);
@@ -325,6 +329,8 @@
   .flt-type-btn[data-on="1"] {
     background: var(--primary);
     border-color: var(--primary-border);
+    /* 选中态蓝色背景下的文字/图标颜色统一为 --btn-fg（与「关于作者」按钮中央图案同源） */
+    color: var(--btn-fg);
   }
 
   /* ---------- 拖拽排序（转发组 / 私聊权限 表格行） ---------- */
@@ -353,7 +359,9 @@
     border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer;
     display: inline-flex; align-items: center; gap: 6px;
   }
-  .fgtab.active { background: var(--primary); border-color: var(--primary-border); color: var(--fgtab-active-fg); }
+  /* .fgtab.active 背景为蓝色（--primary），中央文字颜色统一为 --btn-fg
+    （与「关于作者」按钮中央图案同源；日间主题原值相同，夜间由 #e6e8eb 统一为基准色） */
+  .fgtab.active { background: var(--primary); border-color: var(--primary-border); color: var(--btn-fg); }
   .fgtab-add {
     background: transparent; border: 1px dashed var(--field-border); color: var(--muted);
     /* 与 .fgtab 相同内边距/字号：外框高度与转发组一致（虚线边框额外占 2px 高度） */

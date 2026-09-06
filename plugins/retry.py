@@ -3,11 +3,13 @@ import time
 
 from nonebot import logger
 
+from plugins.config import get_channel_filter
 from plugins.dedup import (
     apply_success,
     normalize_channel_map,
 )
 from plugins.fetch import build_parts
+from plugins.filter import get_enabled_message_types
 from plugins.history import (
     load_last_messages,
     update_last_messages,
@@ -184,9 +186,14 @@ async def _process_due(channel_id):
         )
 
         try:
+            # 消息类型筛选：与实时转发/补发共用同一渲染逻辑，
+            # 按内容组件过滤（重试时读当前配置，改开关立即生效）
             text_parts, media_items, has_content = await build_parts(
                 entry.message,
                 source_label=entry.source_label,
+                enabled_types=get_enabled_message_types(
+                    get_channel_filter(channel_id)
+                ),
             )
         except Exception:
             logger.warning(
