@@ -79,8 +79,8 @@ BASE = {
 }
 
 
-def xfg(gid, name, src, grp):
-    return {"id": gid, "name": name, "sources": src, "groups": grp}
+def xfg(gid, name, src, grp, enabled=True):
+    return {"id": gid, "name": name, "enabled": enabled, "sources": src, "groups": grp}
 
 
 # =====================================================
@@ -105,6 +105,16 @@ def test_scenarios_1_to_6():
           str(cfg.get_x_groups_for_source("A")))
     check("场景2 源B只到QB", cfg.get_x_groups_for_source("B") == ["QB"],
           str(cfg.get_x_groups_for_source("B")))
+
+    # 场景 2b：暂停组不投递，但同一源所属的工作组仍正常投递
+    s = dict(BASE, x_forwarding_groups=[
+        xfg("g1", "暂停组", ["A"], ["QA"], enabled=False),
+        xfg("g2", "工作组", ["A"], ["QB"], enabled=True),
+    ])
+    load_case(s)
+    check("场景2b 暂停X组后跳过该组且保留工作组",
+          cfg.get_x_groups_for_source("A") == ["QB"],
+          str(cfg.get_x_groups_for_source("A")))
 
     # 场景 3：一个源属于两个组 → 并集（按全局启用顺序）
     s = dict(BASE, x_forwarding_groups=[
@@ -178,6 +188,20 @@ def test_scenarios_7_to_8():
           str(cfg.get_x_groups_for_source("A")))
     check("独立性 Discord路由不受影响",
           cfg.get_groups_for_channel("C1") == ["QA"],
+          str(cfg.get_groups_for_channel("C1")))
+
+    # Discord 转发组暂停：跳过暂停组，保留同频道所属的工作组
+    s = dict(BASE,
+             discord_channels=[{"id": "C1", "name": "chan", "enabled": True}],
+             forwarding_groups=[
+                 {"id": "d1", "name": "暂停组", "enabled": False,
+                  "channels": ["C1"], "groups": ["QA"]},
+                 {"id": "d2", "name": "工作组", "enabled": True,
+                  "channels": ["C1"], "groups": ["QB"]},
+             ])
+    load_case(s)
+    check("Discord暂停组后跳过该组且保留工作组",
+          cfg.get_groups_for_channel("C1") == ["QB"],
           str(cfg.get_groups_for_channel("C1")))
 
 
