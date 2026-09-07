@@ -65,6 +65,7 @@ from plugins.json_io import (
     load_json,
     atomic_write_json,
 )
+from plugins.settings_schema import validate_settings
 
 SETTINGS_FILE = "data/settings.json"
 
@@ -72,12 +73,6 @@ SETTINGS_FILE = "data/settings.json"
 # 旧配置缺省时内存归一化为默认转发组（channels/groups = 当前全局启用项），
 # 路由结果与旧的"全局启用即全量转发"完全一致；面板保存后固化落盘。
 FORWARDING_GROUP_DEFAULT_ID = "default"
-
-# 「测试组」：固定 id + 固定名称，不可删除、不可改名，计入转发组数量上限。
-# 测试隔离完全由它实现：加入测试组的频道/QQ群即属于测试路由，
-# 不再使用频道/QQ群自身的 is_test 属性（旧测试属性由迁移并入测试组）。
-TEST_FORWARDING_GROUP_ID = "test"
-TEST_FORWARDING_GROUP_NAME = "测试组"
 
 
 def _default_settings():
@@ -151,11 +146,8 @@ def _load_settings():
         default=None
     )
 
-    if not (
-        isinstance(data, dict)
-        and isinstance(data.get("qq_group_openids"), list)
-        and isinstance(data.get("discord_channels"), list)
-    ):
+    validation_error = validate_settings(data)
+    if validation_error:
         # 文件损坏/结构无效：绝不用默认值覆盖原文件（会清空真实配置），
         # 记错误日志并内存降级为安全默认值，原文件原样保留；
         # 修复后 mtime 变化会自动重新加载
@@ -164,7 +156,7 @@ def _load_settings():
         logger.error(
             "settings.json 损坏或结构无效，已临时改用内存默认配置"
             "（原文件未改动，修复后自动恢复）: {}",
-            SETTINGS_FILE,
+            "{} ({})".format(SETTINGS_FILE, validation_error),
         )
         data = None
     elif not isinstance(data.get("qq_user_openids"), list):
@@ -265,26 +257,15 @@ def _ensure_forwarding_groups(data):
     """转发组内存归一化（只改内存 data，不写盘）。
 
     - 结构合法 → 清洗保留（id 去重、字段转 str、name 缺省回退 id）
-    - 缺省/空/结构无效（旧配置升级）→ 生成默认转发组 + 「测试组」：
-      默认组 = 当前全部启用且非测试的频道/群；测试组 = 旧 is_test 标记的频道/群，
-      与旧的"全局启用即全量转发（测试/非测试分开路由）"行为一致。
-    - 始终确保「测试组」存在：id 固定、名称固定，不可删除/改名。
-    - 旧 is_test 属性废弃：读取后从条目中移除，成员并入「测试组」（幂等）。"""
+    - 缺省/空/结构无效（旧配置升级）→ 生成默认转发组（当前全部启用频道/群），
+      与旧的"全局启用即全量转发"行为一致。
+    - 已存在的转发组原样保留（含普通 id 组），不合并、不重建、不删除。
+    - 旧 is_test 属性废弃：读取后从条目中移除（不再有测试组概念）。"""
     groups = data.get("forwarding_groups")
     if not isinstance(groups, list):
         groups = []
 
-    # 旧测试属性 → 测试组成员（先收集，再清洗/生成，最后移除 is_test 字段）
-    legacy_test_groups = {
-        str(item["openid"])
-        for item in data.get("qq_group_openids", [])
-        if isinstance(item, dict) and item.get("is_test") and item.get("openid")
-    }
-    legacy_test_channels = {
-        str(item["id"])
-        for item in data.get("discord_channels", [])
-        if isinstance(item, dict) and item.get("is_test") and item.get("id")
-    }
+    # 旧 is_test 属性废弃：一律从频道/群条目移除（不并入任何"测试组"）
     for item in data.get("qq_group_openids", []):
         if isinstance(item, dict):
             item.pop("is_test", None)
@@ -304,6 +285,7 @@ def _ensure_forwarding_groups(data):
         normalized.append({
             "id": gid,
             "name": str(item.get("name") or "").strip() or gid,
+            "enabled": item.get("enabled", True) is not False,
             "channels": [str(c) for c in (item.get("channels") or []) if c],
             "groups": [str(o) for o in (item.get("groups") or []) if o],
         })
@@ -312,33 +294,10 @@ def _ensure_forwarding_groups(data):
         normalized = [{
             "id": FORWARDING_GROUP_DEFAULT_ID,
             "name": "转发组1",
-            "channels": [
-                c for c in _enabled_channel_ids(data)
-                if c not in legacy_test_channels
-            ],
-            "groups": [
-                o for o in _enabled_group_openids(data)
-                if o not in legacy_test_groups
-            ],
+            "enabled": True,
+            "channels": _enabled_channel_ids(data),
+            "groups": _enabled_group_openids(data),
         }]
-
-    # 确保「测试组」存在：id/name 固定；旧 is_test 成员并入（去重，幂等）
-    test_fg = next(
-        (fg for fg in normalized if fg["id"] == TEST_FORWARDING_GROUP_ID),
-        None,
-    )
-    if test_fg is None:
-        test_fg = {
-            "id": TEST_FORWARDING_GROUP_ID,
-            "name": TEST_FORWARDING_GROUP_NAME,
-            "channels": sorted(legacy_test_channels),
-            "groups": sorted(legacy_test_groups),
-        }
-        normalized.append(test_fg)
-    else:
-        test_fg["name"] = TEST_FORWARDING_GROUP_NAME  # 测试组不可改名
-        test_fg["channels"] = sorted(set(test_fg["channels"]) | legacy_test_channels)
-        test_fg["groups"] = sorted(set(test_fg["groups"]) | legacy_test_groups)
 
     data["forwarding_groups"] = normalized
     return normalized
@@ -378,6 +337,8 @@ def get_groups_for_channel(channel_id):
 
     targets = set()
     for fg in _ensure_forwarding_groups(data):
+        if fg.get("enabled", True) is False:
+            continue
         if channel_id not in fg["channels"]:
             continue
         targets.update(fg["groups"])
@@ -422,24 +383,29 @@ def get_active_user_openids():
     return []
 
 
-def get_test_group_openids():
-    """返回「测试组」内的 QQ 群 openid 集合。
+def get_related_group_openids(group_openid):
+    """返回与指定 QQ 群至少共同属于一个转发组的其他 QQ 群 openid 集合。
 
-    测试隔离完全由「测试组」实现：加入测试组的群即属于测试路由，
-    不再读取群条目的 is_test 属性。供 QQ→QQ 手动转发（qq_fwd）
-    判断目标群归属使用；缺省时返回空集合。"""
+    转发组（forwarding_groups）只表达 Discord频道→QQ群 路由，但 QQ→QQ
+    手动转发（qq_fwd）复用其成员关系：候选目标 = 与当前群同属至少一个
+    转发组的群（跨多个转发组合并去重）。与测试组无关。
+    当前群不属于任何转发组时返回空集合；不包含当前群自身。"""
     data = _load_settings()
+    gid = str(group_openid)
+    result = set()
     for fg in _ensure_forwarding_groups(data):
-        if fg["id"] == TEST_FORWARDING_GROUP_ID:
-            return set(fg["groups"])
-    return set()
+        members = [str(o) for o in fg["groups"]]
+        if gid in members:
+            result.update(members)
+    result.discard(gid)
+    return result
 
 
 # =====================================================
 # QQ→QQ 手动转发配置
 #
-# 不依赖转发组（forwarding_groups 只表达 Discord频道→QQ群 路由），
-# QQ→QQ 转发目标候选由「已注册群条目」的 enabled 与「测试组」成员关系决定。
+# 复用 forwarding_groups 的成员关系：QQ→QQ 转发目标候选 = 与当前群
+# 共同属于至少一个转发组的已注册(enabled)群（见 get_related_group_openids）。
 # =====================================================
 
 def get_qq_group_entries():
@@ -553,7 +519,7 @@ def get_channel_filter(channel_id):
 # X 转发组：与 Discord forwarding_groups 完全独立的一套组配置。
 # 旧配置缺省时内存归一化为默认 X 转发组（sources/groups = 当前启用项 /
 # 旧全局白名单），路由结果与旧版完全一致；面板保存后固化落盘。
-# X 组没有固定"测试组"（测试路由是 Discord 转发组的概念）。
+# x_default 是 X 的默认/旧配置兼容组，保留为普通 X 转发组。
 X_FORWARDING_GROUP_DEFAULT_ID = "x_default"
 X_FORWARDING_GROUP_DEFAULT_NAME = "转发组1"
 
@@ -709,6 +675,7 @@ def _ensure_x_forwarding_groups(data):
         normalized.append({
             "id": gid,
             "name": str(item.get("name") or "").strip() or gid,
+            "enabled": item.get("enabled", True) is not False,
             "sources": sources,
             "groups": xgroups,
         })
@@ -723,6 +690,7 @@ def _ensure_x_forwarding_groups(data):
         normalized = [{
             "id": X_FORWARDING_GROUP_DEFAULT_ID,
             "name": X_FORWARDING_GROUP_DEFAULT_NAME,
+            "enabled": True,
             "sources": sorted(_x_source_keys(data, only_enabled=True)),
             "groups": target,
         }]
@@ -761,6 +729,8 @@ def get_x_groups_for_source(source_key):
 
     targets = set()
     for fg in _ensure_x_forwarding_groups(data):
+        if fg.get("enabled", True) is False:
+            continue
         if source_key in fg["sources"]:
             targets.update(fg["groups"])
 

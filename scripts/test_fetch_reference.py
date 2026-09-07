@@ -12,7 +12,11 @@
 用法：.venv/Scripts/python.exe scripts/test_fetch_reference.py
 """
 import asyncio
+import sys
 import unittest.mock as mock
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 import nonebot
 
