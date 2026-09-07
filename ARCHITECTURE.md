@@ -13,11 +13,14 @@ WRelay/
 ├── plugins/                  NoneBot 插件目录（所有转发逻辑都在这里）
 │   ├── config.py             配置读取 + 内存缓存（settings.json 的消费者）
 │   ├── relay.py              Discord → QQ 实时转发主逻辑
+│   ├── x_rss.py              X/Twitter RSS → QQ 轮询与投递
+│   ├── x_rss_parser.py       RSS 内容解析
 │   ├── command.py            QQ 私聊 relay 命令（手动转发）
 │   ├── manage.py             QQ 私聊管理命令（status/restart/mode 等）
 │   ├── registration.py       QQ 注册指令（register / register-group）+ 申请存储
 │   ├── fetch.py              Discord 消息抓取 + 渲染（统一解析层）
 │   ├── sender.py             QQ 群发送（重试、分片、降级）
+│   ├── retry.py              失败消息延迟重试与持久化队列
 │   ├── media.py              文本美化 + Emoji 解析 + 媒体下载
 │   ├── history.py            去重记录读写（discord_last.json）
 │   ├── dedup.py              去重判断逻辑（纯函数，不碰 I/O）
@@ -52,7 +55,7 @@ WRelay/
 |------|------|
 | **Discord 侧** | 接收 Discord 消息事件、通过 REST API 抓取消息内容、下载媒体 |
 | **QQ 侧** | 向 QQ 群发送消息、接收 QQ 私聊命令、自动发现群/用户 OpenID |
-| **Relay** | 把 Discord 消息转发到 QQ 群（唯一方向，不做 QQ → Discord） |
+| **Relay** | 自动把 Discord / X RSS 消息转发到 QQ 群；不做 QQ → Discord 或双向同步 |
 | **管理面板** | 本地 Web 界面，管理群/频道/权限的启用状态、启停机器人、查看日志 |
 | **数据文件** | JSON 格式的配置、去重记录、统计、身份信息，是 bot 与面板之间的 IPC 通道 |
 
@@ -127,9 +130,32 @@ plugins/backfill.py → _backfill_missed()
 > 极大缺口需在面板「清除待补发」处置。补发翻页请求间隔 0.5s，429 按
 > Retry-After 退避重试。
 
+实时发送失败时，`plugins/retry.py` 会把规范化消息、失败群、重试次数和下次
+重试时间写入 `data/retry_pending.json`。重试队列与成功游标分离：某个群成功后
+立即清除该群欠账，其余群继续重试；进程重启后恢复队列。队列只保存可重建消息，
+不保存媒体字节，内容重建失败或达到 3 次上限后移除，最终由低游标补发兜底。
+
+## 4.1 X RSS → QQ 轮询流程
+
+```
+定时器（最短 30 秒）
+    │
+    ▼
+plugins/x_rss.py
+    │ ① 读取启用的 X 来源与 X 转发组
+    │ ② 请求 RSSHub，复用 ETag / 304 缓存
+    │ ③ 解析原创、转发、引用、图片和视频
+    │ ④ 以 x_rss:{handle} 作为独立来源游标去重
+    │ ⑤ 复用 fetch/media/sender 投递到 QQ 群
+    └── 发送失败或 QQ 未连接时不推进游标，后续轮询继续补投
+```
+
+X RSS 与 Discord 使用独立的转发组配置。RSSHub 不可用、解析失败或发送失败
+只影响对应来源，不会阻断 Discord → QQ 链路。
+
 ---
 
-## 5. QQ → Bot 私聊命令流程
+## 5. QQ 私聊命令与手动转发流程
 
 ```
 QQ 私聊消息
@@ -155,6 +181,10 @@ QQ 私聊消息
                                            │ ④ 通过 HTTP 调用面板 8090 API
                                            └── ⑤ 回复执行结果
 ```
+
+`relay-list` 查看启用群，`relay <序号>` 或 `relay all` 选择目标，下一条消息
+转发到 QQ 群。若下一条是 Discord 消息链接，会从 Discord API 抓取并复用正常
+渲染流程；这是授权用户触发的 QQ → QQ 手动操作，不是 QQ → Discord 自动同步。
 
 QQ 群消息中的 `register-group <群号> <群名称>`（plugins/registration.py）：
 发送者 `member_openid` 必须在 `qq_user_openids` 白名单内，申请绑定当前
@@ -259,6 +289,9 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | `data/runtime_log_level.json` | 面板 | bot | 运行时日志级别（面板写入后 bot 3 秒内自动生效） |
 | `data/bot.pid` | 面板 | 面板 | 机器人进程 PID（进程管理用） |
 | `data/restart_pending.json` | bot（manage.py） | bot（manage.py） | 跨进程重启确认标记 |
+| `data/retry_pending.json` | bot（retry.py） | bot（retry.py）、面板 | 失败消息摘要、失败群、重试次数和下次重试时间；不保存媒体字节 |
+| `data/panel_auth.json` | 面板 | 面板、bot（manage.py） | 本机面板 API 认证令牌，不应外传 |
+| `data/x_rss.json` | bot（x_rss.py） | bot（x_rss.py） | RSS ETag/Last-Modified 等轮询缓存 |
 
 ---
 
@@ -274,6 +307,9 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | `plugins/manage.py` | QQ 私聊管理命令（通过 HTTP 调用面板 API） | 中 |
 | `plugins/fetch.py` | Discord 消息抓取 + 归一化 + 渲染为 QQ 消息段（唯一渲染逻辑） | 中 |
 | `plugins/sender.py` | QQ 群发送：分片、重试、限流退避、降级 | 低 |
+| `plugins/retry.py` | 发送失败欠账队列、持久化恢复与延迟重试 | 中 |
+| `plugins/x_rss.py` | X RSS 轮询、游标和投递 | 中 |
+| `plugins/x_rss_parser.py` | RSS 条目解析 | 中 |
 | `plugins/media.py` | 文本美化（Markdown → 纯文本）+ Emoji 提取 + 媒体下载 | 低 |
 | `plugins/dedup.py` | 去重纯函数：该不该发、发给谁、成功后怎么记 | 低 |
 | `plugins/filter.py` | 频道消息筛选纯函数（用户名/关键词，relay 与 backfill 共用） | 低 |
@@ -297,6 +333,8 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | **修改 Discord 频道列表** | 同上；频道权限扫描逻辑在 `scripts/diagnose_channels.py` |
 | **修改转发逻辑**（消息格式、渲染、过滤规则） | `plugins/relay.py`（实时）+ `plugins/fetch.py`（渲染）+ `plugins/sender.py`（发送） |
 | **修改补发逻辑** | `plugins/backfill.py`（自动补发）+ `plugins/backfill_api.py`（手动触发接口） |
+| **修改失败重试逻辑** | `plugins/retry.py`（队列/恢复/退避）+ `plugins/sender.py`（发送返回值） |
+| **修改 X RSS 转发** | `plugins/x_rss.py`（轮询/游标）+ `plugins/x_rss_parser.py`（解析） |
 | **修改 OpenID 自动发现** | `plugins/command.py`（`save_group_openid` / `save_user_openid`） |
 | **修改注册/审核机制** | `plugins/registration.py`（指令 + 存储）+ `panel/管理面板.pyw`（`/api/registrations*`）+ `panel/web/app.js`（审核弹窗） |
 | **修改身份资料库** | `plugins/identities.py` |
@@ -364,4 +402,4 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | `qq_registrations.json` | 注册申请存储，与白名单数据独立；**不参与任何权限判断**，审核通过 ≠ 自动启用 |
 | `qq_identities.json` | 纯身份资料库（昵称、群名、管理员备注），只用于面板展示，**绝不参与任何权限判断** |
 | 不存在主动反查群名 | QQ 官方 API 不提供群名/昵称查询接口。群名只在机器人收到群消息时从事件中提取并记录，无法通过 openid 主动查询 |
-| 只做 Discord → QQ | 项目不做 QQ → Discord，不做双向同步 |
+| 自动转发方向 | 自动链路为 Discord → QQ、X RSS → QQ；项目不做 QQ → Discord 或双向同步；QQ → QQ 仅限授权用户手动 relay 命令 |
