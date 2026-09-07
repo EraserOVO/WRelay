@@ -4,6 +4,8 @@ from nonebot import get_bots
 from nonebot.adapters.discord import Bot as DiscordBot
 from nonebot.adapters.qq import Bot as QQBot
 
+from plugins.retry import get_retry_status
+
 
 # =====================================================
 # bot 健康接口（供管理面板显示真实运行状态）
@@ -31,4 +33,5 @@ async def api_health():
             isinstance(b, QQBot)
             for b in bots.values()
         ),
+        "retry": get_retry_status(),
     }

@@ -22,6 +22,8 @@ import socket
 import threading
 import subprocess
 import webbrowser
+import secrets
+import uuid
 
 # ---------------- 路径 ----------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))      # .../panel
@@ -37,6 +39,7 @@ PANEL_LOG = os.path.join(LOG_DIR, "panel.log")
 PID_FILE = os.path.join(DATA_DIR, "bot.pid")
 RUNTIME_LEVEL_FILE = os.path.join(DATA_DIR, "runtime_log_level.json")
 STATS_FILE = os.path.join(DATA_DIR, "stats.json")
+PANEL_AUTH_FILE = os.path.join(DATA_DIR, "panel_auth.json")
 
 # 正式安装包使用 {项目根}\python\python.exe（standalone Python，无 .venv）；
 # 开发环境若存在 .venv 则优先使用，否则回退到项目根的 python。
@@ -52,23 +55,11 @@ BOT_PORT = 8082
 # ---------------- 转发组 ----------------
 # 与 plugins/config.py（bot 侧）保持一致：
 #   默认组 id=default / name=转发组1；成员 = 当前全局 enabled 的频道/群。
-#   「测试组」id=test / name=测试组，固定存在，不可删除、不可改名，计入上限。
-# 转发组只表达"频道→群"路由关系，不参与 enabled 语义；测试隔离完全由
-# 「测试组」实现，不再使用频道/QQ群条目的 is_test 属性。
+# 转发组只表达"频道→群"路由关系，不参与 enabled 语义。
 # 磁盘迁移在 main() 启动时一次性执行，不能放 load_settings()：
 # 测试用临时 settings 文件做"其他字段逐字节不变"断言，load 路径写盘会破坏它。
 FORWARDING_GROUP_DEFAULT_ID = "default"
-FORWARDING_GROUP_MAX = 11
-
-# 「测试组」常量与 bot 侧 plugins/config.py 保持一致（唯一来源）
-try:
-    from plugins.config import (
-        TEST_FORWARDING_GROUP_ID,
-        TEST_FORWARDING_GROUP_NAME,
-    )
-except Exception:
-    TEST_FORWARDING_GROUP_ID = "test"
-    TEST_FORWARDING_GROUP_NAME = "测试组"
+FORWARDING_GROUP_MAX = 10
 
 # ---------------- 开机自启 ----------------
 # 通过启动文件夹里的 WRelayAutostart.vbs（隐藏窗口）运行 panel/autostart.pyw，
@@ -76,6 +67,7 @@ except Exception:
 #   后台启动面板(不开浏览器) + 自动拉起机器人
 AUTOSTART_VBS_NAME = "WRelayAutostart.vbs"
 AUTOSTART_FLAG = "--autostart"
+RESTART_FLAG = "--restart"
 
 os.makedirs(LOG_DIR, exist_ok=True)
 
@@ -90,7 +82,8 @@ except Exception:
 sys.path.insert(0, PROJECT_ROOT)
 
 # 面板与 bot 共用的 JSON 原子写（唯一 tmp + os.replace 重试）
-from plugins.json_io import atomic_write_json
+from plugins.json_io import atomic_write_json, load_json
+from plugins.settings_schema import validate_settings
 
 # X 转发组：复用 bot 侧的归一化结果（GET 注入默认组）与 source key 派生
 # （保存时清理悬空引用）。导入失败时用最小回退（等价于不做注入/清理）。
@@ -116,6 +109,19 @@ def _log(msg):
         pass
 
 
+def _load_panel_token():
+    data = load_json(PANEL_AUTH_FILE, default=None)
+    token = data.get("token") if isinstance(data, dict) else ""
+    if isinstance(token, str) and len(token) >= 32:
+        return token
+    token = secrets.token_urlsafe(32)
+    atomic_write_json(PANEL_AUTH_FILE, {"token": token}, indent=2)
+    return token
+
+
+PANEL_TOKEN = _load_panel_token()
+
+
 # ---------------- 配置读写 ----------------
 def load_settings():
     default = get_default_settings()
@@ -133,6 +139,15 @@ def load_settings():
         return data
     except Exception:
         return default
+
+
+def _settings_revision():
+    """返回 settings.json 当前版本，用于阻止旧页面覆盖新配置。"""
+    try:
+        st = os.stat(SETTINGS_FILE)
+        return "%s:%s" % (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return "missing"
 
 
 def get_default_settings():
@@ -170,90 +185,23 @@ def get_default_settings():
 
 
 def _validate_settings(data):
-    """保存前最小结构校验，返回错误信息；None 表示通过。
-
-    非法结构一律拒绝落盘：坏结构进入 settings.json 后会被 bot 判为
-    损坏配置（旧版 bot 会直接用默认值覆盖真实配置）。只校验关键
-    结构，不做字段级强校验，避免误伤前端合法负载。"""
-    if not isinstance(data, dict):
-        return "配置必须是 JSON 对象"
-    for key in ("qq_group_openids", "qq_user_openids", "discord_channels"):
-        items = data.get(key)
-        if not isinstance(items, list):
-            return "%s 必须是列表" % key
-        for item in items:
-            if not isinstance(item, dict):
-                return "%s 的每一项必须是对象" % key
-    if "backfill_enabled" in data and not isinstance(data["backfill_enabled"], bool):
-        return "backfill_enabled 必须是布尔值"
-    if "backfill_limit" in data:
-        limit = data["backfill_limit"]
-        if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
-            return "backfill_limit 必须是正整数"
-    # 转发组结构校验：key 缺失视为合法（旧载荷/测试），存在时才逐项检查
-    if "forwarding_groups" in data:
-        fgs = data["forwarding_groups"]
-        if not isinstance(fgs, list):
-            return "forwarding_groups 必须是列表"
-        if not fgs:
-            return "forwarding_groups 至少保留 1 个转发组"
-        if len(fgs) > FORWARDING_GROUP_MAX:
-            return "forwarding_groups 最多 %d 个" % FORWARDING_GROUP_MAX
-        ids = set()
-        for fg in fgs:
-            if not isinstance(fg, dict):
-                return "forwarding_groups 的每一项必须是对象"
-            gid = str(fg.get("id") or "").strip()
-            if not gid:
-                return "forwarding_groups 的每一项必须有非空 id"
-            if gid in ids:
-                return "forwarding_groups 存在重复 id: %s" % gid
-            ids.add(gid)
-            if not isinstance(fg.get("name"), str):
-                return "forwarding_groups 的每一项 name 必须是字符串"
-            for field in ("channels", "groups"):
-                if not isinstance(fg.get(field), list):
-                    return "forwarding_groups 的 %s 必须是列表" % field
-        # 「测试组」固定存在且不可改名，其 id 不被其他组占用
-        if TEST_FORWARDING_GROUP_ID not in ids:
-            return "forwarding_groups 必须包含「测试组」（id=%s）" % TEST_FORWARDING_GROUP_ID
-        for fg in fgs:
-            if str(fg.get("id")) == TEST_FORWARDING_GROUP_ID:
-                if fg.get("name") != TEST_FORWARDING_GROUP_NAME:
-                    return "「测试组」名称固定，不可改名"
-    # X 转发组：key 缺失/空列表视为合法（旧配置走 bot 侧默认组兼容）；
-    # 存在时才逐项检查。无固定测试组，其余规则与 forwarding_groups 一致。
-    if "x_forwarding_groups" in data:
-        xfgs = data["x_forwarding_groups"]
-        if not isinstance(xfgs, list):
-            return "x_forwarding_groups 必须是列表"
-        if len(xfgs) > FORWARDING_GROUP_MAX:
-            return "x_forwarding_groups 最多 %d 个" % FORWARDING_GROUP_MAX
-        xids = set()
-        for xfg in xfgs:
-            if not isinstance(xfg, dict):
-                return "x_forwarding_groups 的每一项必须是对象"
-            xid = str(xfg.get("id") or "").strip()
-            if not xid:
-                return "x_forwarding_groups 的每一项必须有非空 id"
-            if xid in xids:
-                return "x_forwarding_groups 存在重复 id: %s" % xid
-            xids.add(xid)
-            if not isinstance(xfg.get("name"), str):
-                return "x_forwarding_groups 的每一项 name 必须是字符串"
-            for field in ("sources", "groups"):
-                if not isinstance(xfg.get(field), list):
-                    return "x_forwarding_groups 的 %s 必须是列表" % field
-    return None
+    """保存前结构校验；规则与 Bot 侧共用。"""
+    return validate_settings(
+        data,
+        max_forwarding_groups=FORWARDING_GROUP_MAX,
+        require_nonempty_forwarding_groups=True,
+        validate_forwarding_groups=True,
+    )
 
 
 def _normalize_forwarding_groups(data):
     """写盘前归一化转发组（fg 缺失时仅清理 is_test，兼容旧载荷/测试）。
 
-    - 移除群/频道条目上的旧 is_test 属性（测试隔离由测试组实现）
+    - 移除群/频道条目上的旧 is_test 属性（测试组概念已取消，不并入任何测试组）
     - 每项规整为 {id, name, channels[], groups[]}，id/name 取 str
     - channels/groups 去重并剔除已被删除的频道/群（不留悬空引用）
-    - 始终保留「测试组」：id/name 固定，空成员也保留（不可删除）
+    - 不自动创建或强制保留任何特殊「测试组」；已存在的组（含普通 id 组）
+      原样保留，不再赋予其特殊意义
     - 不按 enabled 裁剪：转发组保留路由关系，全局启用切换不丢勾选"""
     # 旧测试属性一律清理（写盘后不再出现该字段）
     for key in ("discord_channels", "qq_group_openids"):
@@ -284,6 +232,7 @@ def _normalize_forwarding_groups(data):
         clean.append({
             "id": gid,
             "name": str(fg.get("name") or "").strip() or gid,
+            "enabled": fg.get("enabled", True) is not False,
             "channels": sorted({
                 str(c) for c in fg.get("channels") or []
                 if str(c) and str(c) in known_channels
@@ -293,20 +242,6 @@ def _normalize_forwarding_groups(data):
                 if str(g) and str(g) in known_groups
             }),
         })
-    # 「测试组」常驻：空成员也保留，id/name 固定
-    test_idx = next(
-        (i for i, f in enumerate(clean) if f["id"] == TEST_FORWARDING_GROUP_ID),
-        None,
-    )
-    if test_idx is None:
-        clean.append({
-            "id": TEST_FORWARDING_GROUP_ID,
-            "name": TEST_FORWARDING_GROUP_NAME,
-            "channels": [],
-            "groups": [],
-        })
-    else:
-        clean[test_idx]["name"] = TEST_FORWARDING_GROUP_NAME
     data["forwarding_groups"] = clean
 
 
@@ -345,6 +280,7 @@ def _normalize_x_forwarding_groups(data):
         clean.append({
             "id": xid,
             "name": str(xfg.get("name") or "").strip() or xid,
+            "enabled": xfg.get("enabled", True) is not False,
             "sources": [
                 k for k in dict.fromkeys(str(s) for s in xfg.get("sources") or [])
                 if k and k in known_sources
@@ -371,22 +307,21 @@ def save_settings(data):
 
 
 def migrate_forwarding_groups():
-    """磁盘一次性迁移（幂等）：旧测试属性 →「测试组」，并确保测试组常驻。
+    """磁盘一次性迁移（幂等）：清理旧测试属性，不再创建/保留「测试组」。
 
-    1. 旧配置无 forwarding_groups → 生成默认转发组 + 「测试组」：
-       默认组 = 当前全局 enabled 且非测试的频道/群；测试组 = 旧测试实体。
-    2. 旧 test_group_openid / test_channel_id / is_test 标记 → 并入「测试组」。
-    3. 移除群/频道条目的 is_test 属性与顶层 mode 字段（旧模式选择废弃）。
-    4. 已有「测试组」时仅并入旧测试成员、固定名称，不破坏其他组。
+    1. 旧 test_group_openid / test_channel_id / is_test 标记 → 仅清理，
+       不再并入任何"测试组"（测试组概念已取消）。
+    2. 移除群/频道条目的 is_test 属性与顶层 mode 字段（旧模式选择废弃）。
+    3. 已存在 forwarding_groups → 原样保留（含普通 id 组，不合并、不重建）。
+    4. 旧配置完全无 forwarding_groups → 生成单个默认转发组（全部启用频道/群），
+       与旧的"全局启用即全量转发"行为一致。
 
-    与 plugins/config.py（bot 侧）的内存归一化规则一致，迁移后转发行为
-    与升级前完全一致（测试/非测试分开路由）。必须在 main() 启动时执行
-    而非 load_settings()：迁移写盘会破坏 test_backfill_toggle 临时文件的
-    "其他字段逐字节不变"断言。重复执行结果不变（幂等）。"""
+    必须在 main() 启动时执行而非 load_settings()：迁移写盘会破坏
+    test_backfill_toggle 临时文件的"其他字段逐字节不变"断言。重复执行结果不变（幂等）。"""
     data = load_settings()
     before = json.dumps(data, sort_keys=True, ensure_ascii=False)
 
-    # 旧顶层测试键（更早版本：单测试群/单测试频道）→ is_test 标记，统一并入
+    # 旧顶层测试键（更早版本：单测试群/单测试频道）→ is_test 标记，随后统一清理
     legacy_g = str(data.get("test_group_openid") or "").strip()
     legacy_c = str(data.get("test_channel_id") or "").strip()
     if legacy_g or legacy_c:
@@ -399,15 +334,7 @@ def migrate_forwarding_groups():
         data.pop("test_group_openid", None)
         data.pop("test_channel_id", None)
 
-    # 收集旧 is_test 成员；随后移除该字段（不再使用频道/群自身测试属性）
-    test_groups = {
-        str(g["openid"]) for g in data.get("qq_group_openids", [])
-        if isinstance(g, dict) and g.get("is_test") and g.get("openid")
-    }
-    test_channels = {
-        str(c["id"]) for c in data.get("discord_channels", [])
-        if isinstance(c, dict) and c.get("is_test") and c.get("id")
-    }
+    # 清理旧 is_test 属性（不再使用频道/群自身测试属性）
     for key in ("qq_group_openids", "discord_channels"):
         for item in data.get(key, []):
             if isinstance(item, dict):
@@ -415,65 +342,28 @@ def migrate_forwarding_groups():
     data.pop("mode", None)  # 旧模式选择（test/forward/custom）废弃
 
     fgs = data.get("forwarding_groups")
-    if isinstance(fgs, list) and fgs:
-        # 已有转发组：只确保测试组存在并并入旧测试成员，其余组原样保留
-        fgs = [dict(f) for f in fgs if isinstance(f, dict)]
-        test_fg = next(
-            (f for f in fgs if str(f.get("id")) == TEST_FORWARDING_GROUP_ID),
-            None,
-        )
-        if test_fg is None:
-            fgs.append({
-                "id": TEST_FORWARDING_GROUP_ID,
-                "name": TEST_FORWARDING_GROUP_NAME,
-                "channels": sorted(test_channels),
-                "groups": sorted(test_groups),
-            })
-        else:
-            test_fg["name"] = TEST_FORWARDING_GROUP_NAME
-            test_fg["channels"] = sorted(
-                set(test_fg.get("channels") or []) | test_channels)
-            test_fg["groups"] = sorted(
-                set(test_fg.get("groups") or []) | test_groups)
-        data["forwarding_groups"] = fgs
-    else:
-        # 旧配置无转发组：默认转发组（非测试实体）+ 测试组（旧测试实体）
-        data["forwarding_groups"] = [
-            {
-                "id": FORWARDING_GROUP_DEFAULT_ID,
-                "name": "转发组1",
-                "channels": [
-                    str(c["id"]) for c in data.get("discord_channels", [])
-                    if isinstance(c, dict) and c.get("enabled") and c.get("id")
-                    and str(c["id"]) not in test_channels
-                ],
-                "groups": [
-                    str(g["openid"]) for g in data.get("qq_group_openids", [])
-                    if isinstance(g, dict) and g.get("enabled") and g.get("openid")
-                    and str(g["openid"]) not in test_groups
-                ],
-            },
-            {
-                "id": TEST_FORWARDING_GROUP_ID,
-                "name": TEST_FORWARDING_GROUP_NAME,
-                "channels": sorted(test_channels),
-                "groups": sorted(test_groups),
-            },
-        ]
+    if not (isinstance(fgs, list) and fgs):
+        # 旧配置无转发组：默认转发组 = 全部启用频道/群（原"全局启用即全量转发"）
+        data["forwarding_groups"] = [{
+            "id": FORWARDING_GROUP_DEFAULT_ID,
+            "name": "转发组1",
+            "channels": [
+                str(c["id"]) for c in data.get("discord_channels", [])
+                if isinstance(c, dict) and c.get("enabled") and c.get("id")
+            ],
+            "groups": [
+                str(g["openid"]) for g in data.get("qq_group_openids", [])
+                if isinstance(g, dict) and g.get("enabled") and g.get("openid")
+            ],
+        }]
 
     if json.dumps(data, sort_keys=True, ensure_ascii=False) == before:
         return  # 已迁移过，无需写盘（幂等）
 
     save_settings(data)
     fg0 = data["forwarding_groups"][0]
-    tg = next(
-        (f for f in data["forwarding_groups"]
-         if f["id"] == TEST_FORWARDING_GROUP_ID),
-        {},
-    )
-    _log("转发组迁移：默认「%s」（%d 频道 / %d 群）；测试组（%d 频道 / %d 群）" % (
-        fg0.get("name"), len(fg0.get("channels", [])), len(fg0.get("groups", [])),
-        len(tg.get("channels", [])), len(tg.get("groups", []))))
+    _log("转发组迁移：默认「%s」（%d 频道 / %d 群）" % (
+        fg0.get("name"), len(fg0.get("channels", [])), len(fg0.get("groups", []))))
 
 
 def get_qq_appid():
@@ -514,7 +404,11 @@ def panel_alive():
     """
     import urllib.request
     try:
-        with urllib.request.urlopen(PANEL_PING_URL, timeout=1.5) as resp:
+        req = urllib.request.Request(
+            PANEL_PING_URL,
+            headers={"X-WRelay-Token": PANEL_TOKEN},
+        )
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
             return resp.status == 200
     except Exception:
         return False
@@ -540,9 +434,29 @@ def _proc_exists(pid):
             return False
         try:
             # 0 = WAIT_OBJECT_0（进程已终止）；0x102 = WAIT_TIMEOUT（仍在运行）
-            return (
+            alive = (
                 ctypes.windll.kernel32.WaitForSingleObject(handle, 0)
                 == 0x102
+            )
+            if not alive:
+                return False
+
+            # PID 可能在 Bot 退出后被 Windows 复用。只有进程镜像确实是
+            # 当前 WRelay 使用的 Python 解释器时，才允许面板接管/结束它。
+            size = ctypes.c_ulong(32768)
+            buf = ctypes.create_unicode_buffer(size.value)
+            query = ctypes.windll.kernel32.QueryFullProcessImageNameW
+            query.argtypes = [
+                ctypes.c_void_p,
+                ctypes.c_ulong,
+                ctypes.c_wchar_p,
+                ctypes.POINTER(ctypes.c_ulong),
+            ]
+            query.restype = ctypes.c_int
+            if not query(handle, 0, buf, ctypes.byref(size)):
+                return False
+            return os.path.normcase(os.path.abspath(buf.value)) == os.path.normcase(
+                os.path.abspath(VENV_PYTHON)
             )
         finally:
             ctypes.windll.kernel32.CloseHandle(handle)
@@ -788,7 +702,10 @@ def _ensure_bot_running():
         req = urllib.request.Request(
             "http://%s:%d/api/bot/start" % (PANEL_HOST, PANEL_PORT),
             data=b"{}",
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "X-WRelay-Token": PANEL_TOKEN,
+            },
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -919,18 +836,35 @@ app = FastAPI()
 # 人或重置配置。浏览器禁止自定义 Origin 头，故校验 Origin 即可堵住跨站请求：
 # 只放行面板自身来源（http://127.0.0.1:8090）与无 Origin 的本地调用（curl/urllib）。
 ALLOWED_ORIGIN = "http://%s:%s" % (PANEL_HOST, PANEL_PORT)
+ALLOWED_ORIGINS = {
+    ALLOWED_ORIGIN,
+    "http://localhost:%s" % PANEL_PORT,
+}
 
 
 @app.middleware("http")
 async def origin_guard(request: Request, call_next):
     origin = request.headers.get("origin")
-    if origin and origin != ALLOWED_ORIGIN:
+    if origin and origin not in ALLOWED_ORIGINS:
         return JSONResponse({"ok": False, "msg": "Forbidden"}, status_code=403)
+    path = request.url.path
+    if path == "/api/auth/bootstrap":
+        # 本地浏览器、内嵌浏览器可能不发送 Origin；令牌本身仍保护后续 API。
+        # 对带 Origin 的请求仍只允许面板自身的两个本地地址。
+        pass
+    elif path.startswith("/api/"):
+        if request.headers.get("x-wrelay-token") != PANEL_TOKEN:
+            return JSONResponse({"ok": False, "msg": "Unauthorized"}, status_code=401)
     response = await call_next(request)
     # 面板是本地单页应用，禁止浏览器缓存页面/接口，
     # 否则改版后浏览器仍显示旧页面（曾导致"机器人状态检测中…"残留）
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@app.get("/api/auth/bootstrap")
+def api_auth_bootstrap():
+    return {"ok": True, "token": PANEL_TOKEN}
 
 
 @app.get("/api/status")
@@ -966,6 +900,7 @@ def _settings_payload():
         data["x_forwarding_groups"] = get_x_forwarding_groups()
     except Exception:
         pass
+    data["_revision"] = _settings_revision()
     return data
 
 
@@ -985,6 +920,17 @@ async def api_settings_save(request: Request):
         data = await request.json()
     except Exception:
         return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
+    expected_revision = data.pop("_revision", None)
+    if expected_revision is not None and expected_revision != _settings_revision():
+        return JSONResponse(
+            {
+                "ok": False,
+                "conflict": True,
+                "msg": "配置已被其他页面或操作修改，请刷新后重试",
+                "settings": _settings_payload(),
+            },
+            status_code=409,
+        )
     err = _validate_settings(data)
     if err:
         # 校验失败绝不落盘，磁盘上的现有配置原样保留
@@ -1289,6 +1235,234 @@ def api_bot_restart():
     return start_bot()
 
 
+# ---------------- Bot 凭据配置（.env.prod 的 QQ_BOTS / DISCORD_BOTS） ----------------
+# 面板只负责把凭据安全写回 .env.prod，生效依赖受控重启
+# （/api/bot/restart）：新 Bot 进程启动时由 nonebot.init() 重新读取 .env.prod，
+# 适配器据此建连。本 API 绝不返回/打印 AppSecret 与 Discord Token 等敏感凭据。
+ENV_PROD = os.path.join(PROJECT_ROOT, ".env.prod")
+_ENV_WRITE_LOCK = threading.Lock()
+
+
+def _dotenv_line_value(raw):
+    """去掉 QQ_BOTS= 后字符串值的引号包裹，返回待 json 解析的原文；失败返回 None"""
+    s = raw.strip()
+    if not s:
+        return None
+    q = s[0]
+    if q in ("'", '"') and s[-1] == q:
+        s = s[1:-1]
+    return s
+
+
+def _brackets_balanced(s):
+    """粗略判断字符串内 [ ] { } 是否配平（忽略字符串字面量内的括号）"""
+    depth = 0
+    in_str = False
+    esc = False
+    for ch in s:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "[{":
+            depth += 1
+        elif ch in "]}":
+            depth -= 1
+    return depth <= 0
+
+
+def _read_bots(key):
+    """解析 .env.prod 的某 BOTS 键（QQ_BOTS / DISCORD_BOTS）；返回 (bots_list, line_idx, lines, end_idx)。
+
+    该 BOTS 的 JSON 可能是多行 JSON（值横跨多个物理行）也可能是单行，
+    这里从 key= 起把连续物理行收集到括号配平为止再解析。
+    end_idx 是值占用的最后一个物理行下标，供写回时删除被折叠
+    掉的多行续行。只改第一个 bot（当前适配器按此连接）。
+    解析失败/缺文件返回 None。"""
+    if not os.path.exists(ENV_PROD):
+        return None
+    with open(ENV_PROD, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    prefix = key + "="
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith(prefix):
+            raw_val = line.split("=", 1)[1] if "=" in line else ""
+            buf = [raw_val]
+            end = i
+            while not _brackets_balanced("".join(buf)) and end + 1 < len(lines):
+                end += 1
+                buf.append(lines[end])
+            txt = _dotenv_line_value("".join(buf))
+            if txt is None:
+                return None
+            try:
+                bots = json.loads(txt)
+            except Exception:
+                return None
+            if not isinstance(bots, list) or not bots:
+                return None
+            return bots, i, lines, end
+    return None
+
+
+def _write_bots(key, bots, lines, line_idx, end_idx):
+    """把新的 BOTS 序列化回首行（保留该行原换行符），其余行原样写回。
+
+    若原 BOTS 为多行 JSON，折叠成单行后需删除被占用的续行
+    （line_idx+1 .. end_idx），避免残留孤儿行污染 .env.prod。
+    用唯一 tmp + os.replace 原子替换，避免写坏 .env.prod。"""
+    new_val = json.dumps(bots, ensure_ascii=False)
+    orig = lines[line_idx]
+    ending = "\r\n" if orig.endswith("\r\n") else ("\r" if orig.endswith("\r") else "\n")
+    lines[line_idx] = key + "='" + new_val + "'" + ending
+    if end_idx > line_idx:
+        del lines[line_idx + 1:end_idx + 1]
+    # 令牌和 AppSecret 属于敏感配置：使用随机临时文件名并串行化写入，
+    # 避免并发保存 QQ/Discord 配置时共用固定 .tmp 文件。
+    tmp = "%s.%s.%s.tmp" % (ENV_PROD, os.getpid(), uuid.uuid4().hex)
+    with _ENV_WRITE_LOCK:
+        try:
+            with open(tmp, "w", encoding="utf-8", newline="") as f:
+                f.writelines(lines)
+            os.replace(tmp, ENV_PROD)
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+
+
+def _read_qq_bots():
+    """解析 .env.prod 的 QQ_BOTS；返回 (bots_list, line_idx, lines, end_idx)。"""
+    return _read_bots("QQ_BOTS")
+
+
+def _write_qq_bots(bots, lines, line_idx, end_idx):
+    """把新 QQ_BOTS 序列化回首行（保留该行原换行符），其余行原样写回。"""
+    _write_bots("QQ_BOTS", bots, lines, line_idx, end_idx)
+
+
+def _read_discord_bots():
+    """解析 .env.prod 的 DISCORD_BOTS；返回 (bots_list, line_idx, lines, end_idx)。"""
+    return _read_bots("DISCORD_BOTS")
+
+
+def _write_discord_bots(bots, lines, line_idx, end_idx):
+    """把新 DISCORD_BOTS 序列化回首行（保留该行原换行符），其余行原样写回。"""
+    _write_bots("DISCORD_BOTS", bots, lines, line_idx, end_idx)
+
+
+@app.get("/api/bot/qq-config")
+def api_bot_qq_config():
+    """返回当前 QQ Bot 的 AppID（从 .env.prod 读取真实配置）。
+
+    绝不返回 AppSecret；未配置时 appid 为空字符串。"""
+    parsed = _read_qq_bots()
+    if parsed is None:
+        return {"ok": False, "msg": "无法读取 .env.prod 的 QQ_BOTS 配置"}
+    bots, _line_idx, _lines, _end = parsed
+    bot0 = bots[0]
+    appid = str(bot0.get("id") or bot0.get("token") or "").strip()
+    return {"ok": True, "appid": appid}
+
+
+@app.post("/api/bot/qq-config")
+async def api_bot_qq_config_save(request: Request):
+    """保存新的 AppID / AppSecret 到 .env.prod。
+
+    请求体 {appid, secret}：secret 为空串表示保持原值。失败时绝不落盘，
+    磁盘上现有 .env.prod 保持原样。成功返回 appid，不返回 secret。"""
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
+    new_appid = str(data.get("appid") or "").strip()
+    new_secret = str(data.get("secret") or "").strip()
+    if not new_appid:
+        return JSONResponse({"ok": False, "msg": "AppID 不能为空"}, status_code=400)
+    parsed = _read_qq_bots()
+    if parsed is None:
+        return JSONResponse({"ok": False, "msg": "无法读取 .env.prod 的 QQ_BOTS 配置"}, status_code=400)
+    bots, line_idx, lines, end_idx = parsed
+    bot0 = bots[0]
+    bot0["id"] = new_appid
+    bot0["token"] = new_appid
+    if new_secret:
+        bot0["secret"] = new_secret
+    # 原子写回 .env.prod；绝不创建含 AppSecret 的持久化备份。
+    # 失败时清理 .tmp 并返回失败（不重启 Bot），磁盘上旧 .env.prod 保持不变。
+    try:
+        _write_qq_bots(bots, lines, line_idx, end_idx)
+    except Exception as exc:
+        _log("写入 .env.prod 失败: %s" % exc)
+        try:
+            if os.path.exists(ENV_PROD + ".tmp"):
+                os.remove(ENV_PROD + ".tmp")
+        except Exception:
+            pass
+        return JSONResponse({"ok": False, "msg": "保存 QQ Bot 配置失败"}, status_code=500)
+    _log("QQ Bot 配置已更新（AppID=%s）" % new_appid)
+    return {"ok": True, "appid": new_appid}
+
+
+@app.get("/api/bot/discord-config")
+def api_bot_discord_config():
+    """返回当前 Discord Bot 是否已配置 Token。
+
+    只返回 configured 布尔，绝不返回 Discord Token 内容。"""
+    parsed = _read_discord_bots()
+    if parsed is None:
+        return {"ok": False, "msg": "无法读取 .env.prod 的 DISCORD_BOTS 配置"}
+    bots, _line_idx, _lines, _end = parsed
+    bot0 = bots[0]
+    configured = bool(str(bot0.get("token") or "").strip())
+    return {"ok": True, "configured": configured}
+
+
+@app.post("/api/bot/discord-config")
+async def api_bot_discord_config_save(request: Request):
+    """保存新的 Discord Bot Token 到 .env.prod。
+
+    请求体 {token}：token 为空串表示保持原值。只改 DISCORD_BOTS 第一个
+    对象的 "token" 字段，保留 intent 等其他字段。失败时绝不落盘，
+    磁盘上现有 .env.prod 保持原样。成功只返回状态，不返回 Token。"""
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
+    if not isinstance(data, dict):
+        return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
+    new_token = str(data.get("token") or "").strip()
+    parsed = _read_discord_bots()
+    if parsed is None:
+        return JSONResponse({"ok": False, "msg": "无法读取 .env.prod 的 DISCORD_BOTS 配置"}, status_code=400)
+    bots, line_idx, lines, end_idx = parsed
+    bot0 = bots[0]
+    if new_token:
+        bot0["token"] = new_token
+    # 原子写回 .env.prod；绝不创建含 Token 的持久化备份。
+    # 失败时清理 .tmp 并返回失败（不重启 Bot），磁盘上旧 .env.prod 保持不变。
+    try:
+        _write_discord_bots(bots, lines, line_idx, end_idx)
+    except Exception as exc:
+        _log("写入 .env.prod 失败: %s" % exc)
+        try:
+            if os.path.exists(ENV_PROD + ".tmp"):
+                os.remove(ENV_PROD + ".tmp")
+        except Exception:
+            pass
+        return JSONResponse({"ok": False, "msg": "保存 Discord Bot 配置失败"}, status_code=500)
+    _log("Discord Bot 配置已更新")
+    return {"ok": True}
+
+
 @app.post("/api/panel/restart")
 def api_panel_restart():
     """重启面板自身：拉起独立 worker 进程，待本进程退出并释放
@@ -1463,6 +1637,7 @@ def _open_browser():
 
 def main():
     autostart = AUTOSTART_FLAG in sys.argv
+    restarting = RESTART_FLAG in sys.argv
 
     _log("面板启动 autostart=%s" % autostart)
 
@@ -1491,9 +1666,11 @@ def main():
         # 正常双击打开
         if panel_alive():
             # 面板已在运行，只需打开浏览器
-            webbrowser.open("http://%s:%d/" % (PANEL_HOST, PANEL_PORT))
+            if not restarting:
+                webbrowser.open("http://%s:%d/" % (PANEL_HOST, PANEL_PORT))
             return
-        threading.Thread(target=_open_browser, daemon=True).start()
+        if not restarting:
+            threading.Thread(target=_open_browser, daemon=True).start()
 
     # 面板接管时若机器人已在运行，视为期望运行：看门狗继续守护，崩溃后自动拉起
     if bot_status()["running"]:
@@ -1505,7 +1682,7 @@ def main():
         uvicorn.run(app, host=PANEL_HOST, port=PANEL_PORT, log_level="info")
     except Exception as exc:
         _log("面板启动失败: %s" % exc)
-        if not autostart:
+        if not autostart and not restarting:
             # 双击容错：端口被占（面板已由其它实例启动）时也打开浏览器
             try:
                 webbrowser.open("http://%s:%d/" % (PANEL_HOST, PANEL_PORT))

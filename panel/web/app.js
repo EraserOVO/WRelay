@@ -3,6 +3,8 @@ const SVG_TRASH = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" s
 const SVG_GRIP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>';
 // 统一笔图标：空心笔、笔尖朝左下角（转发组重命名 / 频道名称编辑共用）
 const SVG_PEN = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>';
+const SVG_PAUSE = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>';
+const SVG_PLAY = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
 // 主题按钮图标：实心月亮（夜间）/ 太阳（日间），跟随按钮文字色
 const SVG_MOON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
 const SVG_SUN = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
@@ -53,10 +55,7 @@ let channelNames = {};
 // 状态 / id 前缀等），组相关函数全部按 ctx 参数化复用，两边交互一致。
 // active 组 id 各自持久化到 localStorage，刷新后恢复且互不影响；
 // 组内成员随 settings 整体保存。
-const MAX_FG = 11;
-// 「测试组」（仅 Discord 转发组）：固定 id / 名称，不可删除、不可改名，计入上限
-const TEST_FG_ID = "test";
-const TEST_FG_NAME = "测试组";
+const MAX_FG = 10;
 const FG_DISCORD = {
   key: "discord",
   field: "forwarding_groups",
@@ -66,7 +65,6 @@ const FG_DISCORD = {
   idPrefix: "fg_",
   tabsId: "fgTabs",
   addBtnId: "btnAddFg",
-  testGroupId: TEST_FG_ID,
   activeId: null,
 };
 const FG_X = {
@@ -78,7 +76,6 @@ const FG_X = {
   idPrefix: "xfg_",
   tabsId: "xFgTabs",
   addBtnId: "btnAddXFg",
-  testGroupId: null,          // X 转发组没有固定测试组
   activeId: null,
 };
 const FG_CTX = {discord: FG_DISCORD, x: FG_X};
@@ -109,19 +106,44 @@ function setActivePage(page) {
   try { localStorage.setItem(PAGE_STORAGE_KEY, activePage); } catch (e) {}
   document.getElementById("pageDiscord").style.display = activePage === "discord" ? "" : "none";
   document.getElementById("pageX").style.display = activePage === "x" ? "" : "none";
+  // 顶部第二张卡按页面切换：Discord → 离线补发；X → X RSS 状态（同一位置）
+  const backfillCard = document.getElementById("backfillCard");
+  if (backfillCard) backfillCard.style.display = activePage === "discord" ? "" : "none";
+  const xrssCard = document.getElementById("xrssCard");
+  if (xrssCard) xrssCard.style.display = activePage === "x" ? "" : "none";
   document.querySelectorAll('#pageTabs [data-kind="pageTab"]').forEach(function (btn) {
     btn.classList.toggle("active", btn.dataset.page === activePage);
   });
 }
 
+let panelToken = "";
+
+async function ensurePanelToken() {
+  if (panelToken) return panelToken;
+  const r = await fetch("/api/auth/bootstrap", {
+    headers: {"Accept": "application/json"},
+  });
+  const data = await r.json();
+  if (!r.ok || !data.token) throw new Error(data.msg || "面板认证失败");
+  panelToken = data.token;
+  return panelToken;
+}
+
 async function jget(url) {
-  const r = await fetch(url);
+  await ensurePanelToken();
+  const r = await fetch(url, {
+    headers: {"X-WRelay-Token": panelToken},
+  });
   return r.json();
 }
 async function jpost(url, body) {
+  await ensurePanelToken();
   const r = await fetch(url, {
     method: "POST",
-    headers: {"Content-Type": "application/json"},
+    headers: {
+      "Content-Type": "application/json",
+      "X-WRelay-Token": panelToken,
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   return r.json();
@@ -141,7 +163,19 @@ function renderStatus(st) {
     document.getElementById("btnStop").disabled = false;
     document.getElementById("btnRestart").disabled = false;
     const h = st.health;
-    if (h && h.discord && h.qq) {
+    if (activePage === "x") {
+      // X → QQ 页面只关心 QQ 连接状态，不显示与当前页面无关的 Discord 状态。
+      if (h && h.qq) {
+        b.textContent = "运行中";
+        b.className = "badge on";
+      } else if (h) {
+        b.textContent = "运行中（QQ 未连接）";
+        b.className = "badge warn";
+      } else {
+        b.textContent = "运行中（检测中…）";
+        b.className = "badge warn";
+      }
+    } else if (h && h.discord && h.qq) {
       b.textContent = "运行中";
       b.className = "badge on";
     } else if (h) {
@@ -160,15 +194,19 @@ function renderStatus(st) {
   }
   document.getElementById("pidinfo").textContent = st.pid ? ("PID: " + st.pid) : "";
   const stats = st.stats || {};
+  const retry = (st.health && st.health.retry) || {};
+  const retryText = retry.pending_entries
+    ? " · 待重试 " + retry.pending_entries + " 条"
+    : "";
   const statsEl = document.getElementById("stats");
-  statsEl.textContent = (stats.total_forwarded || stats.total_failed)
-    ? ("今日转发 " + (stats.today_forwarded || 0) + " 条 · 累计 " + (stats.total_forwarded || 0) + " 条 · 失败 " + (stats.total_failed || 0) + " 条")
+  statsEl.textContent = (stats.total_forwarded || stats.total_failed || retry.pending_entries)
+    ? ("今日转发 " + (stats.today_forwarded || 0) + " 条 · 累计 " + (stats.total_forwarded || 0) + " 条 · 失败 " + (stats.total_failed || 0) + " 条" + retryText)
     : "";
   const lvlEl = document.getElementById("logLevel");
   if (lvlEl && st.level) lvlEl.value = st.level;
   const hint = document.getElementById("managedHint");
   hint.textContent = st.running && !st.managed
-    ? "检测到机器人可能由其他方式启动，本面板无法完全控制；如需接管请先手动停止。"
+    ? "机器人由其他方式启动，面板无法完全控制；请先手动停止后再接管。"
     : "";
   const el = document.getElementById("log");
   const stick = logFollow;
@@ -244,7 +282,7 @@ function removeFgMember(ctx, id, field) {
   saveAndReload();
 }
 function fgCandidate(kind) {
-  // kind → 已注册实体列表 / 条目 id / 展示文案（Discord 频道、X 来源、QQ 群共用）
+  // kind → 已注册实体列表 / 条目 id / 展示文案（Discord 频道、X 转发账号、QQ 群共用）
   if (kind === "group") {
     return {
       all: settings.qq_group_openids,
@@ -262,7 +300,7 @@ function fgCandidate(kind) {
       labelOf: function (c) { return ((c.name || "") + " " + c.id).trim(); },
     };
   }
-  // source（X 来源）：组内以 key（去 @ handle）为标识
+  // source（X 转发账号）：组内以 key（去 @ handle）为标识
   return {
     all: settings.x_rss_sources,
     idOf: function (s) { return xSourceKey(s.source); },
@@ -354,7 +392,7 @@ function deleteRegisteredItem(kind, item, reopenPicker) {
   const kindName = isGroup ? "群" : isChan ? "频道" : isSource ? "来源" : "用户";
   hideConfirm();
   showConfirmDlg("删除注册记录",
-    "确定删除「" + label + "」的注册记录？\n删除后该" + kindName + "不再出现在「从已注册项新增」列表中（若已加入转发组也会一并移出），再次使用需重新注册。",
+    "确定删除「" + label + "」的注册记录？\n删除后将从已注册列表移除，并从所属转发组中移出；如需使用请重新注册。",
     async function () {
       if (isGroup) {
         const idx = settings.qq_group_openids.findIndex(function (o) { return String(o.openid) === id; });
@@ -419,49 +457,49 @@ function renderFgTabs(ctx) {
   const list = getFgList(ctx);
   getActiveFg(ctx);   // 顺带校正 activeId（失效则回退并持久化）
   wrap.innerHTML = "";
-  // 渲染顺序：Discord 测试组始终排在最左侧，其余组保持原顺序（X 无测试组）
   const ordered = list.slice();
-  if (ctx.testGroupId) {
-    ordered.sort(function (a, b) {
-      if (a.id === ctx.testGroupId) return -1;
-      if (b.id === ctx.testGroupId) return 1;
-      return 0;
-    });
-  }
   ordered.forEach(function (fg) {
     const isActive = fg.id === ctx.activeId;
-    const isTest = !!ctx.testGroupId && fg.id === ctx.testGroupId;
+    const enabled = fg.enabled !== false;
     const tab = document.createElement("button");
     tab.type = "button";
-    tab.className = "fgtab" + (isActive ? " active" : "");
+    tab.className = "fgtab" + (isActive ? " active" : "") + (enabled ? "" : " paused");
     tab.dataset.kind = "fgTab";
     tab.dataset.ctx = ctx.key;
     tab.dataset.id = fg.id;
     tab.textContent = fg.name;
     wrap.appendChild(tab);
     if (isActive) {
-      // 重命名/删除只对当前组可用（与 tab 并列，避免按钮嵌套）；测试组无入口
-      if (!isTest) {
-        const rename = document.createElement("button");
-        rename.type = "button";
-        rename.className = "fgctrl rowicon";
-        rename.dataset.kind = "fgRename";
-        rename.dataset.ctx = ctx.key;
-        rename.innerHTML = SVG_PEN;
-        wrap.appendChild(rename);
-        if (list.length > 1) {
-          const del = document.createElement("button");
-          del.type = "button";
-          del.className = "fgctrl rowicon";
-          del.dataset.kind = "fgDel";
-          del.dataset.ctx = ctx.key;
-          del.innerHTML = SVG_TRASH;   // 与成员行内删除按钮同一白色垃圾桶图标
-          wrap.appendChild(del);
-        }
+      // 暂停/恢复、重命名/删除只对当前组可用（与 tab 并列，避免按钮嵌套）
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "fg-toggle rowicon" + (enabled ? "" : " paused");
+      toggle.dataset.kind = "fgToggle";
+      toggle.dataset.ctx = ctx.key;
+      toggle.dataset.id = fg.id;
+      toggle.title = enabled ? "暂停该转发组" : "恢复该转发组";
+      toggle.setAttribute("aria-label", toggle.title);
+      toggle.innerHTML = enabled ? SVG_PAUSE : SVG_PLAY;
+      wrap.appendChild(toggle);
+      const rename = document.createElement("button");
+      rename.type = "button";
+      rename.className = "fgctrl rowicon";
+      rename.dataset.kind = "fgRename";
+      rename.dataset.ctx = ctx.key;
+      rename.innerHTML = SVG_PEN;
+      wrap.appendChild(rename);
+      if (list.length > 1) {
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "fgctrl rowicon";
+        del.dataset.kind = "fgDel";
+        del.dataset.ctx = ctx.key;
+        del.innerHTML = SVG_TRASH;   // 与成员行内删除按钮同一白色垃圾桶图标
+        wrap.appendChild(del);
       }
     }
   });
-  // 达到上限(11)后直接不显示新增按钮，删除一个后自动恢复
+  // 达到上限(10)后直接不显示新增按钮，删除一个后自动恢复
   if (list.length < MAX_FG) {
     const add = document.createElement("button");
     add.type = "button";
@@ -482,6 +520,7 @@ function addForwardingGroup(ctx) {
   const fg = {
     id: ctx.idPrefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     name: "转发组" + n,
+    enabled: true,
   };
   ctx.emptyMembers.forEach(function (f) { fg[f] = []; });
   list.push(fg);
@@ -493,8 +532,8 @@ let fgRenameActive = false;
 let fgRenameCtxKey = null;   // 正在重命名的转发组上下文 key（discord / x）
 function startFgRename(ctx) {
   const fg = getActiveFg(ctx);
-  // 「测试组」（仅 Discord）为固定转发组，不允许重命名
-  if (!fg || fgRenameActive || (ctx.testGroupId && fg.id === ctx.testGroupId)) return;
+  // 转发组重命名
+  if (!fg || fgRenameActive) return;
   const wrap = document.getElementById(ctx.tabsId);
   const tabs = Array.prototype.slice.call(wrap.querySelectorAll(".fgtab"));
   const tabBtn = tabs.find(function (b) { return b.dataset.id === fg.id; });
@@ -650,7 +689,7 @@ function renderXPage() {
   renderFgTabs(FG_X);
   const xfg = getActiveFg(FG_X);
 
-  // X 来源：只渲染当前 X 转发组的来源成员；「启用」仍是全局注册源状态
+  // X 转发账号：只渲染当前 X 转发组的账号成员；「启用」仍是全局注册源状态
   const allSources = Array.isArray(settings.x_rss_sources) ? settings.x_rss_sources : [];
   srcBody.innerHTML = "";
   const memberKeys = {};
@@ -675,7 +714,7 @@ function renderXPage() {
       '<td style="text-align:right"><button class="danger rowicon" data-kind="xFgSourceRemove" data-id="' + escapeHtml(handle) + '" title="移出当前转发组">' + SVG_TRASH + '</button></td>';
     srcBody.appendChild(tr);
   });
-  // 表头全选框状态反映当前组成员，勾选/取消作用于全部注册源（与 Discord 页同语义）
+  // 表头全选框状态反映当前组成员，勾选/取消只作用于当前 X 转发组来源
   syncHeaderAll("xSourceAllEnabled", srcRows, "enabled");
 
   // QQ 接收群：只渲染当前 X 转发组的群成员；「启用」仍是全局群状态
@@ -709,7 +748,7 @@ function renderXPage() {
   });
   syncHeaderAll("xGroupAllEnabled", grpRows, "enabled");
 
-  // QQ 私聊白名单：全局数据（settings.qq_user_openids），与 Discord → QQ 页
+  // 白名单：全局数据（settings.qq_user_openids），与 Discord → QQ 页
   // 共用同一份 settings 数组，任一页修改经 saveAndReload 后两边同步重渲染
   const xb = document.getElementById("xUserBody");
   if (xb) {
@@ -754,10 +793,6 @@ function renderXPage() {
 // 数据来自面板 /api/xrss/status（代理 bot 的 /api/x-rss/status 运行时状态）。
 // 只更新本卡片的 textContent，不重建任何表格/输入框：转发组重命名输入框
 // （fgRenameCtxKey 保护）与 RSSHub/间隔输入框都不会被本刷新打断。
-function xrssFmtInterval(sec) {
-  return (sec >= 60 && sec % 60 === 0) ? (sec / 60) + " 分钟" : sec + " 秒";
-}
-
 function xrssFmtTime(ts) {
   const d = new Date(ts * 1000);
   const time = d.toLocaleTimeString("zh-CN", {hour12: false});
@@ -772,27 +807,25 @@ function xrssSet(id, text) {
 
 function renderXStatus(st) {
   const badge = document.getElementById("xrssBadge");
-  if (!badge) return;
+  if (!badge || !st) return;
+
+  const botUp = st.bot_running === true;
+  const pollTs = Number(st.last_poll_ts) || 0;
+  const pollText = pollTs ? xrssFmtTime(pollTs) : "—";
 
   // 订阅源：接口值（bot 当前实际读到）优先，面板 settings 兜底
   let srcText = "—";
-  if (st && st.sources_total !== undefined) {
-    srcText = st.sources_enabled + " / " + st.sources_total + " 个";
+  if (st.sources_total !== undefined) {
+    srcText = st.sources_enabled + " / " + st.sources_total;
   } else if (settings && Array.isArray(settings.x_rss_sources)) {
     const all = settings.x_rss_sources;
-    srcText = all.filter(function (s) { return s.enabled; }).length + " / " + all.length + " 个";
+    srcText = all.filter(function (s) { return s.enabled; }).length + " / " + all.length;
   }
-  xrssSet("xrssSources", srcText);
-
-  if (!st) return;
-  const botUp = st.bot_running === true;
-  const pollTs = Number(st.last_poll_ts) || 0;
-  xrssSet("xrssLastPoll", pollTs ? xrssFmtTime(pollTs) : "—");
 
   // 徽章：真实运行状态（写死「轮询中」已废弃）。
   // 优先级：bot 停止 > bot 接口不可用 > 轮询循环未启动（等 QQ） >
   // QQ 掉线（RSS 可能仍正常，必须与「运行中」区分）> 拉取/解析失败 > 运行中
-  let badgeText, badgeCls;
+  let badgeText, badgeCls, failed = false;
   if (!botUp) {
     badgeText = "未运行";
     badgeCls = "badge off";
@@ -809,9 +842,11 @@ function renderXStatus(st) {
   } else if (st.last_result === "fetch_failed") {
     badgeText = "RSSHub 请求失败";
     badgeCls = "badge off";
+    failed = true;
   } else if (st.last_result === "parse_failed") {
     badgeText = "RSS 解析失败";
     badgeCls = "badge off";
+    failed = true;
   } else {
     badgeText = "运行中";
     badgeCls = "badge on";
@@ -819,30 +854,70 @@ function renderXStatus(st) {
   badge.textContent = badgeText;
   badge.className = badgeCls;
 
-  // 上次结果 + 简短错误原因（成功轮不残留上一次错误）
-  const failed = st.last_result === "fetch_failed" || st.last_result === "parse_failed";
-  const resultEl = document.getElementById("xrssLastResult");
-  if (resultEl) {
-    if (!pollTs) {
-      resultEl.textContent = "—";
-      resultEl.style.color = "";
+  // 摘要行：正常态一行概况（订阅源 / 上次轮询 / 发现 / 发送）；
+  // 异常态只突出错误原因，不再堆叠正常信息。
+  // 「发送失败」仅在有失败时才出现，属于异常信息。
+  const summary = document.getElementById("xrssSummary");
+  if (summary) {
+    const sendFailed = Number(st.last_failed_count) || 0;
+    const err = failed || sendFailed > 0;
+    summary.classList.toggle("err", err);
+    if (!botUp) {
+      summary.textContent = "—";
     } else if (failed) {
-      resultEl.textContent = "失败" + (st.last_error ? "（" + st.last_error + "）" : "");
-      resultEl.style.color = "var(--badge-off-fg)";
+      summary.textContent = (st.last_error || "请求失败") + " · 上次轮询 " + pollText;
     } else {
-      resultEl.textContent = "成功";
-      resultEl.style.color = "";
+      summary.textContent = "订阅源 " + srcText + " · 上次轮询 " + pollText
+        + " · 发现 " + (Number(st.last_new_count) || 0) + " 条"
+        + " · 发送 " + (Number(st.last_sent_count) || 0) + " 条"
+        + (sendFailed > 0 ? " · 发送失败 " + sendFailed + " 条" : "");
     }
   }
-  xrssSet("xrssNew", pollTs ? (Number(st.last_new_count) || 0) + " 条" : "—");
-  xrssSet("xrssSent", pollTs ? (Number(st.last_sent_count) || 0) + " 条" : "—");
-  xrssSet("xrssFailed", pollTs ? (Number(st.last_failed_count) || 0) + " 条" : "—");
 }
 
 async function refreshXStatus() {
   try {
     renderXStatus(await jget("/api/xrss/status"));
   } catch (err) { /* 面板瞬断：保留当前显示，下一轮覆盖 */ }
+}
+
+// 「注册 X 转发账号」二级窗口：主界面的两个输入框移入此弹窗。
+// 字段含义 / placeholder 说明 / 校验与错误提示 / 注册逻辑均与原主界面版本一致：
+// 登记为全局 X 转发账号（默认启用），不自动加入任何转发组。
+function openXSourceRegister() {
+  document.getElementById("confirmTitle").textContent = "注册 X 转发账号";
+  const body = document.getElementById("confirmBody");
+  body.innerHTML = "";
+  function field(labelText, placeholder) {
+    const wrap = document.createElement("div");
+    wrap.style.marginBottom = "10px";
+    const label = document.createElement("div");
+    label.className = "bf-limit-label";
+    label.textContent = labelText;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = placeholder;
+    input.style.width = "100%";
+    wrap.appendChild(label);
+    wrap.appendChild(input);
+    body.appendChild(wrap);
+    return input;
+  }
+  const input = field("X 账号", "");
+  const nameInput = field("显示名称（可选）", "");
+  setConfirmButtons("注册", true);
+  confirmAction = async function () {
+    const handle = input.value.trim().replace(/^@/, "");
+    if (!handle) { showAlert("注册新源", "请先填写 X 账号"); return; }
+    if (!Array.isArray(settings.x_rss_sources)) settings.x_rss_sources = [];
+    const dup = settings.x_rss_sources.some(function (s) {
+      return xSourceKey(s.source).toLowerCase() === handle.toLowerCase();
+    });
+    if (dup) { showAlert("注册新源", "该账号已在源列表中"); return; }
+    settings.x_rss_sources.push({source: handle, name: nameInput.value.trim(), enabled: true});
+    await saveAndReload();
+  };
+  document.getElementById("confirmModal").style.display = "flex";
 }
 
 function syncHeaderAll(id, items, field) {
@@ -998,6 +1073,83 @@ function memberIdSet(arr) {
   (arr || []).forEach(function (id) { m[String(id)] = true; });
   return m;
 }
+
+// ---------------- 转发组 tab 左右拖拽排序（鼠标事件实现 + 数组持久化） ----------------
+// 作用区域：Discord 页 #fgTabs 与 X 页 #xFgTabs 两个转发组条（.fgtabs）。
+// 按住转发组按钮（.fgtab）左右拖动调整顺序；松手后重排 settings 的
+// forwarding_groups / x_forwarding_groups 数组并 saveAndReload() 持久化（刷新后保持）。
+let fgDnd = null;   // {wrap, btn, startX, startY} —— 正在拖拽的源转发组按钮
+function fgCtxByWrap(wrap) {
+  return (wrap && wrap.id === "xFgTabs") ? FG_X : FG_DISCORD;
+}
+document.addEventListener("mousedown", function (e) {
+  const btn = e.target.closest(".fgtab");
+  if (!btn || btn.dataset.kind !== "fgTab") return;         // 只允许拖转发组按钮
+  const wrap = btn.parentElement;
+  if (!wrap || !wrap.classList.contains("fgtabs")) return;
+  if (fgRenameActive) return;                              // 重命名进行中不拖（避免与输入框冲突）
+  e.preventDefault();                                      // 防止文本选择干扰拖动
+  fgDnd = {wrap: wrap, btn: btn, startX: e.clientX, startY: e.clientY};
+  btn.classList.add("drag-src");
+});
+document.addEventListener("mousemove", function (e) {
+  if (!fgDnd) return;
+  e.preventDefault();
+  // 指针移动超过阈值才算拖拽（区分“单击切换转发组”）
+  if (Math.abs(e.clientX - fgDnd.startX) < 3 && Math.abs(e.clientY - fgDnd.startY) < 3) return;
+  const wrap = fgDnd.wrap;
+  // 清除上次的插入指示
+  wrap.querySelectorAll(".fgtab.drop-before, .fgtab.drop-after").forEach(function (b) {
+    b.classList.remove("drop-before", "drop-after");
+  });
+  // 计算指针下的目标按钮（限制在同一转发组条）
+  const under = document.elementFromPoint(e.clientX, e.clientY);
+  const tab = under ? under.closest(".fgtab") : null;
+  if (!tab || tab.parentElement !== wrap || tab === fgDnd.btn) return;
+  const r = tab.getBoundingClientRect();
+  const after = e.clientX > r.left + r.width / 2;
+  tab.classList.add(after ? "drop-after" : "drop-before");
+});
+document.addEventListener("mouseup", function (e) {
+  if (!fgDnd) return;
+  e.preventDefault();
+  const st = fgDnd;
+  fgDnd = null;
+  st.btn.classList.remove("drag-src");
+  const wrap = st.wrap;
+  wrap.querySelectorAll(".fgtab.drop-before, .fgtab.drop-after").forEach(function (b) {
+    b.classList.remove("drop-before", "drop-after");
+  });
+  // 拖动距离太小视为单击（切换转发组），不重排
+  if (Math.abs(e.clientX - st.startX) < 3 && Math.abs(e.clientY - st.startY) < 3) return;
+  if (!st.btn.isConnected) return;                          // 按钮已被重建，放弃
+  // 计算目标按钮（跨转发组条直接忽略）
+  const under = document.elementFromPoint(e.clientX, e.clientY);
+  const targetTab = under ? under.closest(".fgtab") : null;
+  if (targetTab && targetTab.parentElement === wrap && targetTab !== st.btn) {
+    const r = targetTab.getBoundingClientRect();
+    const after = e.clientX > r.left + r.width / 2;
+    wrap.insertBefore(st.btn, after ? targetTab.nextSibling : targetTab);
+  } else if (!targetTab && wrap.lastElementChild && wrap.lastElementChild !== st.btn) {
+    wrap.appendChild(st.btn);                               // 拖到条尾空白处
+  } else {
+    return;                                                 // 落回原位，无变化
+  }
+  // 读取拖拽后的显示顺序，重排对应 settings 转发组数组并持久化
+  const ctx = fgCtxByWrap(wrap);
+  const ids = [];
+  wrap.querySelectorAll(".fgtab").forEach(function (b) { ids.push(b.dataset.id); });
+  const list = getFgList(ctx);
+  if (!ids.length || ids.length !== list.length) return;
+  const byId = {};
+  list.forEach(function (fg) { byId[fg.id] = fg; });
+  const ordered = [];
+  ids.forEach(function (id) { if (byId[id]) ordered.push(byId[id]); });
+  if (ordered.length !== list.length) return;
+  if (ctx.field === "x_forwarding_groups") settings.x_forwarding_groups = ordered;
+  else settings.forwarding_groups = ordered;
+  saveAndReload();                                         // 现有保存：POST settings + 重渲染
+});
 
 // ---------------- OpenID 身份识别（辅助数据源） ----------------
 // 身份库只作为「QQ 接收群」「私聊权限」表格的辅助数据源：
@@ -1414,10 +1566,121 @@ document.getElementById("filterSave").addEventListener("click", async function (
 });
 
 async function saveAndReload() {
-  await jpost("/api/settings/save", settings);
+  const result = await jpost("/api/settings/save", settings);
+  if (!result.ok) {
+    if (result.conflict) {
+      settings = result.settings || await jget("/api/settings");
+      renderSettings();
+      showAlert("配置已刷新", "配置已被其他操作修改，当前页面已刷新，请重新确认本次修改。");
+    } else {
+      showAlert("保存失败", result.msg || "配置保存失败");
+    }
+    return false;
+  }
   settings = await jget("/api/settings");
   renderSettings();
   await refreshChannelNames();
+  await refreshStatus();
+  return true;
+}
+
+// ---------- QQ Bot 配置弹窗 ----------
+function closeQQConfigModal() {
+  document.getElementById("qqConfigModal").style.display = "none";
+}
+async function openQQConfigModal() {
+  document.getElementById("qqConfigAppid").value = "";
+  document.getElementById("qqConfigSecret").value = "";
+  document.getElementById("qqConfigModal").style.display = "flex";
+  let r;
+  try {
+    r = await jget("/api/bot/qq-config");
+  } catch (e) { r = null; }
+  if (r && r.ok) {
+    document.getElementById("qqConfigAppid").value = r.appid || "";
+  } else {
+    showAlert("读取配置失败", (r && r.msg) || "无法读取当前 QQ Bot 配置");
+  }
+}
+async function saveQQConfig() {
+  const appid = document.getElementById("qqConfigAppid").value.trim();
+  const secret = document.getElementById("qqConfigSecret").value;
+  if (!appid) { showAlert("QQ Bot 配置", "AppID 不能为空"); return; }
+  const saveBtn = document.getElementById("qqConfigSave");
+  const cancelBtn = document.getElementById("qqConfigCancel");
+  saveBtn.disabled = true;
+  cancelBtn.disabled = true;
+  let r;
+  try {
+    r = await jpost("/api/bot/qq-config", { appid: appid, secret: secret });
+  } catch (e) { r = { ok: false, msg: "保存失败，请重试" }; }
+  if (!r || !r.ok) {
+    saveBtn.disabled = false;
+    cancelBtn.disabled = false;
+    showAlert("保存失败", (r && r.msg) || "保存 QQ Bot 配置失败");
+    return;
+  }
+  // 保存成功后再重启，使新配置生效；重启失败不回滚配置
+  let rr;
+  try {
+    rr = await jpost("/api/bot/restart");
+  } catch (e) { rr = { ok: false }; }
+  if (!rr || !rr.ok) {
+    saveBtn.disabled = false;
+    cancelBtn.disabled = false;
+    showAlert("配置已保存", "配置已保存，但机器人重启失败，请稍后手动重启");
+    return;
+  }
+  closeQQConfigModal();
+  await refreshStatus();
+}
+
+// ---------- Discord Bot 配置弹窗 ----------
+// 绝不在 localStorage / console 保存或输出 Token；打开时输入框留空，
+// Token 留空提交表示保持当前 Token 不变（后端处理）。
+function closeDiscordConfigModal() {
+  document.getElementById("discordConfigModal").style.display = "none";
+}
+async function openDiscordConfigModal() {
+  document.getElementById("discordConfigToken").value = "";
+  document.getElementById("discordConfigToken").type = "password";
+  document.getElementById("discordConfigModal").style.display = "flex";
+  let r;
+  try {
+    r = await jget("/api/bot/discord-config");
+  } catch (e) { r = null; }
+  if (!r || !r.ok) {
+    showAlert("读取配置失败", (r && r.msg) || "无法读取当前 Discord Bot 配置");
+  }
+}
+async function saveDiscordConfig() {
+  const token = document.getElementById("discordConfigToken").value;
+  const saveBtn = document.getElementById("discordConfigSave");
+  const cancelBtn = document.getElementById("discordConfigCancel");
+  saveBtn.disabled = true;
+  cancelBtn.disabled = true;
+  let r;
+  try {
+    r = await jpost("/api/bot/discord-config", { token: token });
+  } catch (e) { r = { ok: false, msg: "保存失败，请重试" }; }
+  if (!r || !r.ok) {
+    saveBtn.disabled = false;
+    cancelBtn.disabled = false;
+    showAlert("保存失败", (r && r.msg) || "保存 Discord Bot 配置失败");
+    return;
+  }
+  // 保存成功后再重启，使新配置生效；重启失败不回滚配置
+  let rr;
+  try {
+    rr = await jpost("/api/bot/restart");
+  } catch (e) { rr = { ok: false }; }
+  if (!rr || !rr.ok) {
+    saveBtn.disabled = false;
+    cancelBtn.disabled = false;
+    showAlert("配置已保存", "配置已保存，但机器人重启失败，请稍后手动重启");
+    return;
+  }
+  closeDiscordConfigModal();
   await refreshStatus();
 }
 
@@ -1435,6 +1698,8 @@ document.addEventListener("click", async function (e) {
       confirmModal: hideConfirm,
       filterModal: closeFilterModal,
       aboutModal: function () { document.getElementById("aboutModal").style.display = "none"; },
+      qqConfigModal: closeQQConfigModal,
+      discordConfigModal: closeDiscordConfigModal,
     };
     const closer = closeMap[btn.dataset.close];
     if (closer) closer();
@@ -1461,6 +1726,15 @@ document.addEventListener("click", async function (e) {
     setActiveFg(FG_CTX[btn.dataset.ctx] || FG_DISCORD, btn.dataset.id);
     return;
   }
+  if (k === "fgToggle") {
+    const ctx = FG_CTX[btn.dataset.ctx] || FG_DISCORD;
+    const list = getFgList(ctx);
+    const fg = list.find(function (item) { return item.id === btn.dataset.id; });
+    if (!fg) return;
+    fg.enabled = fg.enabled === false;
+    await saveAndReload();
+    return;
+  }
   if (k === "fgRename") {
     startFgRename(FG_CTX[btn.dataset.ctx] || FG_DISCORD);
     return;
@@ -1468,10 +1742,9 @@ document.addEventListener("click", async function (e) {
   if (k === "fgDel") {
     const ctx = FG_CTX[btn.dataset.ctx] || FG_DISCORD;
     const fg = getActiveFg(ctx);
-    // 「测试组」（仅 Discord）为固定转发组，不允许删除；
     // 普通转发组可删除（每套组至少保留 1 个）
-    if (!fg || (ctx.testGroupId && fg.id === ctx.testGroupId)) return;
-    showConfirmDlg("删除转发组", "删除转发组「" + fg.name + "」将移除其成员→群路由关系，" + (ctx.key === "x" ? "来源和群" : "频道和群") + "本身不受影响。确定删除？", async function () {
+    if (!fg) return;
+    showConfirmDlg("删除转发组", "确定删除转发组「" + fg.name + "」？成员关系会移除，但" + (ctx.key === "x" ? "来源和群" : "频道和群") + "本身不会删除。", async function () {
       // 确认时基于最新 settings 解析，避免弹窗期间对象被替换
       const curList = getFgList(ctx);
       const target = curList.find(function (x) { return x.id === fg.id; });
@@ -1494,25 +1767,37 @@ document.addEventListener("click", async function (e) {
     addForwardingGroup(FG_X);
     return;
   }
+  if (btn.id === "btnQQConfig") {
+    openQQConfigModal();
+    return;
+  }
+  if (btn.id === "qqConfigCancel") {
+    closeQQConfigModal();
+    return;
+  }
+  if (btn.id === "qqConfigSave") {
+    saveQQConfig();
+    return;
+  }
+  if (btn.id === "btnDiscordConfig") {
+    openDiscordConfigModal();
+    return;
+  }
+  if (btn.id === "discordConfigCancel") {
+    closeDiscordConfigModal();
+    return;
+  }
+  if (btn.id === "discordConfigSave") {
+    saveDiscordConfig();
+    return;
+  }
   if (btn.id === "btnAddXSource") {
-    // 「注册新源」：登记为全局 X 来源（默认启用），不自动加入任何转发组
-    const input = document.getElementById("xSourceInput");
-    const nameInput = document.getElementById("xSourceNameInput");
-    const handle = input.value.trim().replace(/^@/, "");
-    if (!handle) { showAlert("注册新源", "请先填写 X 账号"); return; }
-    if (!Array.isArray(settings.x_rss_sources)) settings.x_rss_sources = [];
-    const dup = settings.x_rss_sources.some(function (s) {
-      return xSourceKey(s.source).toLowerCase() === handle.toLowerCase();
-    });
-    if (dup) { showAlert("注册新源", "该账号已在源列表中"); return; }
-    settings.x_rss_sources.push({source: handle, name: nameInput.value.trim(), enabled: true});
-    input.value = "";
-    nameInput.value = "";
-    await saveAndReload();
+    // 「注册」：打开二级窗口登记全局 X 转发账号（默认启用），不自动加入任何转发组
+    openXSourceRegister();
     return;
   }
   if (btn.id === "btnAddXFgSource") {
-    // 「＋ 新增」（X 来源）：从已注册来源中选择加入当前 X 转发组
+    // 「＋ 新增」（X 转发账号）：从已注册账号中选择加入当前 X 转发组
     openFgAddPicker(FG_X, "source");
     return;
   }
@@ -1528,6 +1813,11 @@ document.addEventListener("click", async function (e) {
   }
   if (btn.id === "btnQQPlatformX") {
     window.open("https://q.qq.com/qqbot/dashboard/", "_blank");
+    return;
+  }
+  if (btn.id === "btnOpenX") {
+    // 与 QQ 开放平台管理页同一新标签页跳转方式
+    window.open("https://x.com/", "_blank");
     return;
   }
   if (btn.id === "btnAddXUser") {
@@ -1702,7 +1992,11 @@ document.addEventListener("change", async function (e) {
     return;
   }
   if (el.id === "xSourceAllEnabled") {
-    (settings.x_rss_sources || []).forEach(function (s) { s.enabled = el.checked; });
+    const xfg = getActiveFg(FG_X);
+    const sourceSet = memberIdSet(xfg && xfg.sources);
+    (settings.x_rss_sources || []).forEach(function (s) {
+      if (sourceSet[xSourceKey(s.source)]) s.enabled = el.checked;
+    });
     await saveAndReload();
     return;
   }
@@ -1727,12 +2021,21 @@ document.addEventListener("change", async function (e) {
     return;
   }
   if (el.id === "groupAllEnabled" || el.id === "xGroupAllEnabled") {
-    settings.qq_group_openids.forEach(function (g) { g.enabled = el.checked; });
+    const ctx = el.id === "xGroupAllEnabled" ? FG_X : FG_DISCORD;
+    const fg = getActiveFg(ctx);
+    const groupSet = memberIdSet(fg && fg.groups);
+    settings.qq_group_openids.forEach(function (g) {
+      if (groupSet[String(g.openid)]) g.enabled = el.checked;
+    });
     await saveAndReload();
     return;
   }
   if (el.id === "chanAllEnabled") {
-    settings.discord_channels.forEach(function (c) { c.enabled = el.checked; });
+    const fg = getActiveFg(FG_DISCORD);
+    const channelSet = memberIdSet(fg && fg.channels);
+    settings.discord_channels.forEach(function (c) {
+      if (channelSet[String(c.id)]) c.enabled = el.checked;
+    });
     await saveAndReload();
     return;
   }

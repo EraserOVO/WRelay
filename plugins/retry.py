@@ -1,7 +1,7 @@
 import asyncio
 import time
 
-from nonebot import logger
+from nonebot import get_driver, logger
 
 from plugins.config import get_channel_filter
 from plugins.dedup import (
@@ -15,6 +15,7 @@ from plugins.history import (
     update_last_messages,
 )
 from plugins.sender import send_relay_message
+from plugins.json_io import atomic_write_json, load_json
 
 
 # =====================================================
@@ -25,15 +26,15 @@ from plugins.sender import send_relay_message
 #     失败群入队，任何一路径成功送达都会清除对应欠账（_purge_delivered）
 #   - in-flight 注册表保证同一 (频道, 消息, 群) 同时只有一个发送者，
 #     retry / relay / backfill 统一走 send_and_record 判重后发送
-#   - 队列仅存内存（存规范化消息 dict，重试时经 build_parts 重建内容，
-#     不缓存媒体字节），不持久化：
-#     进程重启后未跳过的缺口由 backfill 按低游标兜底
+#   - 队列持久化为 data/retry_pending.json（只存规范化消息，不缓存媒体字节），
+#     进程重启后恢复未完成条目；耗尽后仍由 backfill 按低游标兜底
 # =====================================================
 
 RETRY_BACKOFFS = (30.0, 60.0, 120.0)  # 第 1/2/3 次重试前等待秒数
 MAX_RETRY_ATTEMPTS = 3
 MAX_TOTAL_PENDING = 10
 MAX_PER_CHANNEL_PENDING = 5
+RETRY_FILE = "data/retry_pending.json"
 
 # 测试可关闭：登记失败时自动拉起频道重试循环，改由测试手动驱动
 _LOOP_AUTO_START = True
@@ -42,6 +43,7 @@ _pending = {}        # channel_id -> {message_id: _RetryEntry}
 _inflight = set()    # {(channel_id, message_id, group_openid)}
 _retry_loops = set()  # 已拉起的频道重试循环（防重复拉起）
 _retry_tasks = set()  # 持有任务引用防 GC
+_last_error = ""
 
 
 class _RetryEntry:
@@ -55,6 +57,72 @@ class _RetryEntry:
         self.groups = set(groups)
         self.attempts = 0
         self.next_try = next_try
+
+
+def _save_pending():
+    """把待重试队列写入磁盘；失败不影响内存重试。"""
+    entries = []
+    for channel_id, channel_entries in _pending.items():
+        for message_id, entry in channel_entries.items():
+            entries.append({
+                "channel_id": str(channel_id),
+                "message_id": str(message_id),
+                "message": entry.message,
+                "source_label": entry.source_label,
+                "groups": sorted(entry.groups),
+                "attempts": entry.attempts,
+                # monotonic 只在当前进程有效，跨进程改存 wall-clock 时间。
+                "next_try_at": time.time() + max(0.0, entry.next_try - time.monotonic()),
+            })
+    try:
+        atomic_write_json(
+            RETRY_FILE,
+            {"version": 1, "last_error": _last_error, "entries": entries},
+            indent=2,
+        )
+    except Exception as exc:
+        logger.warning("保存延迟重试队列失败: {}", exc)
+
+
+def _load_pending():
+    """恢复上次进程留下的待重试条目；损坏条目单独跳过。"""
+    global _last_error
+    data = load_json(RETRY_FILE, default=None)
+    if not isinstance(data, dict):
+        return
+    _last_error = str(data.get("last_error") or "")
+    raw_entries = data.get("entries")
+    if not isinstance(raw_entries, list):
+        return
+    for raw in raw_entries:
+        if not isinstance(raw, dict):
+            continue
+        channel_id = str(raw.get("channel_id") or "")
+        message_id = str(raw.get("message_id") or "")
+        message = raw.get("message")
+        groups = [str(g) for g in raw.get("groups") or [] if str(g)]
+        if not channel_id or not message_id or not isinstance(message, dict) or not groups:
+            continue
+        if len(_pending) >= MAX_TOTAL_PENDING:
+            break
+        if len(_pending.get(channel_id) or {}) >= MAX_PER_CHANNEL_PENDING:
+            continue
+        try:
+            next_try_at = float(raw.get("next_try_at"))
+            attempts = max(0, int(raw.get("attempts") or 0))
+        except (TypeError, ValueError):
+            continue
+        entry = _RetryEntry(
+            message,
+            str(raw.get("source_label") or "自动转发来自"),
+            groups,
+            time.monotonic() + max(0.0, next_try_at - time.time()),
+        )
+        entry.attempts = attempts
+        _pending.setdefault(channel_id, {})[message_id] = entry
+
+
+_load_pending()
 
 
 def _claim(channel_id, message_id, group_openid):
@@ -88,6 +156,7 @@ def _purge_delivered(channel_id, message_id, success_groups):
         entry.groups.discard(group)
     if not entry.groups:
         _remove_entry(channel_id, message_id)
+    _save_pending()
 
 
 def schedule_retry(
@@ -101,6 +170,7 @@ def schedule_retry(
 
     已存在条目时只合并失败群（不重复排队）；
     队列满 / 无失败群时返回 False，缺口交给 backfill 兜底。"""
+    global _last_error
     groups = [g for g in failed_groups if g]
     if not groups:
         return False
@@ -109,11 +179,13 @@ def schedule_retry(
 
     if entry:
         entry.groups.update(groups)
+        _save_pending()
         return False
 
     total = sum(len(ch) for ch in _pending.values())
     per_channel = len(_pending.get(channel_id) or {})
     if total >= MAX_TOTAL_PENDING or per_channel >= MAX_PER_CHANNEL_PENDING:
+        _last_error = "重试队列已满，消息将由离线补发兜底"
         logger.warning(
             "延迟重试队列已满，丢弃 频道{} 消息{}（等待重连补发）",
             channel_id,
@@ -127,6 +199,7 @@ def schedule_retry(
         groups,
         time.monotonic() + RETRY_BACKOFFS[0],
     )
+    _save_pending()
 
     if _LOOP_AUTO_START:
         _ensure_loop(channel_id)
@@ -143,6 +216,13 @@ def _ensure_loop(channel_id):
     _retry_tasks.add(
         asyncio.create_task(_loop_wrapper(channel_id))
     )
+
+
+@get_driver().on_startup
+async def _resume_pending_retries():
+    """Bot 启动后恢复持久化队列的重试循环。"""
+    for channel_id in list(_pending):
+        _ensure_loop(channel_id)
 
 
 async def _loop_wrapper(channel_id):
@@ -166,6 +246,7 @@ async def _process_due(channel_id):
     if not entries:
         return
 
+    global _last_error
     now = time.monotonic()
 
     for message_id in list(entries):
@@ -196,12 +277,14 @@ async def _process_due(channel_id):
                 ),
             )
         except Exception:
+            _last_error = f"频道{channel_id} 消息{message_id} 内容重建失败"
             logger.warning(
                 "延迟重试内容重建失败，放弃 频道{} 消息{}",
                 channel_id,
                 message_id,
             )
             _remove_entry(channel_id, message_id)
+            _save_pending()
             continue
 
         if not has_content:
@@ -211,6 +294,7 @@ async def _process_due(channel_id):
                 message_id,
             )
             _remove_entry(channel_id, message_id)
+            _save_pending()
             continue
 
         ok_map = await send_and_record(
@@ -242,9 +326,28 @@ async def _process_due(channel_id):
                 sorted(entry.groups),
             )
             _remove_entry(channel_id, message_id)
+            _save_pending()
             continue
 
         entry.next_try = now + RETRY_BACKOFFS[entry.attempts - 1]
+        _save_pending()
+
+
+def get_retry_status():
+    """返回供健康接口/管理面板展示的重试队列摘要，不包含消息正文。"""
+    pending_entries = sum(len(entries) for entries in _pending.values())
+    pending_groups = sum(
+        len(entry.groups)
+        for entries in _pending.values()
+        for entry in entries.values()
+    )
+    return {
+        "pending_entries": pending_entries,
+        "pending_groups": pending_groups,
+        "channels": len(_pending),
+        "max_entries": MAX_TOTAL_PENDING,
+        "last_error": _last_error,
+    }
 
 
 async def send_and_record(

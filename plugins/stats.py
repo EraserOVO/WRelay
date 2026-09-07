@@ -1,3 +1,4 @@
+import asyncio
 import time
 
 from plugins.json_io import (
@@ -18,6 +19,7 @@ STATS_FILE = "data/stats.json"
 # =====================================================
 
 _stats = None
+_stats_lock = asyncio.Lock()
 
 
 def _load():
@@ -41,26 +43,29 @@ def get_stats():
     return dict(_load())
 
 
-def record(ok):
+async def record(ok):
     """转发一条消息后记录统计（ok = 至少一个群送达）"""
-    data = _load()
+    async with _stats_lock:
+        data = _load()
 
-    today = time.strftime("%Y-%m-%d")
+        today = time.strftime("%Y-%m-%d")
 
-    if data.get("today") != today:
-        data["today"] = today
-        data["today_forwarded"] = 0
-        data["today_failed"] = 0
+        if data.get("today") != today:
+            data["today"] = today
+            data["today_forwarded"] = 0
+            data["today_failed"] = 0
 
-    if ok:
-        data["total_forwarded"] = int(data.get("total_forwarded", 0)) + 1
-        data["today_forwarded"] = int(data.get("today_forwarded", 0)) + 1
-    else:
-        data["total_failed"] = int(data.get("total_failed", 0)) + 1
-        data["today_failed"] = int(data.get("today_failed", 0)) + 1
+        if ok:
+            data["total_forwarded"] = int(data.get("total_forwarded", 0)) + 1
+            data["today_forwarded"] = int(data.get("today_forwarded", 0)) + 1
+        else:
+            data["total_failed"] = int(data.get("total_failed", 0)) + 1
+            data["today_failed"] = int(data.get("today_failed", 0)) + 1
 
-    atomic_write_json(
-        STATS_FILE,
-        data,
-        indent=2
-    )
+        snapshot = dict(data)
+        await asyncio.to_thread(
+            atomic_write_json,
+            STATS_FILE,
+            snapshot,
+            2,
+        )

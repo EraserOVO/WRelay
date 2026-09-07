@@ -158,6 +158,17 @@ async def handle(
     if not has_content:
         return
 
+    # 组状态可能在消息处理期间被面板修改；发送前重新计算目标，避免暂停后仍投递一条。
+    active_groups = get_groups_for_channel(channel_id)
+    if not active_groups:
+        return
+    target_groups = select_target_groups(
+        normalize_channel_map(load_last_messages(), channel_id),
+        active_groups,
+        message_id,
+    )
+    if not target_groups:
+        return
 
     ok_map = await send_and_record(
         channel_id,
@@ -181,9 +192,9 @@ async def handle(
 
 
     if any(ok_map.values()):
-        record(True)
+        await record(True)
     else:
-        record(False)
+        await record(False)
 
 
     failed_groups = [

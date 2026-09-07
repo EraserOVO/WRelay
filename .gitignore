@@ -9,3 +9,6 @@ backup/
 *.egg-info/
 /data/
 *.lnk
+.runtime/
+WRelay-Setup.exe
+gui-test-screenshots/

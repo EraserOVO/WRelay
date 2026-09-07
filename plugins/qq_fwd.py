@@ -6,19 +6,18 @@
   relay-list                  列出当前可作为转发目标的、已注册且 enabled 的 QQ 群（带序号）
   relay {序号}                将用户接下来发送的下一条普通消息，转发到序号对应的目标群
 
-发送前会再次校验目标群（仍注册 / enabled / 测试组隔离 / 排除当前群），
+发送前会再次校验目标群（仍注册 / enabled / 与当前群仍属同一转发组 / 排除当前群），
 配置变化导致失效时回复「转发失败」并结束本次交互。等待下一条消息期间绑定
 (当前群, 发送者 member_openid)，防止多人串台；超过 qq_fwd_select_timeout 秒仍未收到
 下一条可转发消息时静默清除 pending（不发送任何提示）。
 
 实现要点：
   - 不再依赖“上一条消息”缓存：转发的就是 relay {序号} 之后收到的下一条普通用户消息。
-  - 测试隔离完全由「测试组」实现：当前群在测试组内 → 只能转发给同为测试组成员的群；
-    否则只能转发给非测试组成员的群。不再读取群条目的 is_test 属性。
+  - 候选目标群 = 与当前群至少共同属于一个转发组（forwarding_groups）的其他已注册(enabled)群，
+    跨多个转发组合并去重；当前群不属于任何转发组时候选为空。与测试组无关。
   - 过滤 Bot 消息（author.bot == True），relay / relay-list 等指令本身不会进入转发内容。
   - 发送复用 plugins/sender（分片/重试/限流退避/媒体降级）与 plugins/media（图片/音视频字节上传+链接降级）。
-  - 不依赖白名单、不依赖转发组（forwarding_groups 只表达 Discord频道→QQ群 路由；
-    此处仅复用其中的「测试组」做测试隔离）。
+  - 不依赖白名单；转发组（forwarding_groups）在此仅复用其群成员关系做候选筛选。
 """
 import asyncio
 import time
@@ -37,7 +36,7 @@ from nonebot.adapters.qq.event import GroupMessageCreateEvent
 from plugins.config import (
     get_qq_group_entries,
     get_qq_fwd_select_timeout,
-    get_test_group_openids,
+    get_related_group_openids,
 )
 from plugins.media import make_text, make_media_link
 from plugins.sender import send_relay_message
@@ -54,20 +53,20 @@ CMD_BARE = "relay"
 # =====================================================
 # 目标群计算（纯函数）
 #
-# 候选 = 已注册(enabled) 且 测试组成员关系与当前群一致 且 非当前群。
-# 独立于 forwarding_groups（仅复用「测试组」成员做测试隔离）。
+# 候选 = 与当前群至少共同属于一个转发组的已注册(enabled)群，且非当前群。
+# 跨多个转发组合并去重（由 related_openids 集合保证）。
 # =====================================================
 
-def compute_target_list(entries, current_openid, test_openids):
+def compute_target_list(entries, current_openid, related_openids):
     """从群条目列表计算可转发目标群。
 
-    test_openids：测试组内的群 openid 集合（set 或可 in 判断的容器）。
-    返回 [{"openid", "name", "in_test_group"}]；只含 enabled、
-    与当前群测试组成员关系一致且非当前群。
+    related_openids：与当前群至少共同属于一个转发组的其他群 openid 集合
+    （见 config.get_related_group_openids；set 或可 in 判断的容器）。
+    返回 [{"openid", "name"}]；只含 enabled、在 related 集合内且非当前群。
     顺序与 settings 中条目顺序一致，relay-list / relay {序号} 共用同一顺序。
     """
     current = str(current_openid)
-    current_test = current in set(test_openids or ())
+    related = set(related_openids or ())
     targets = []
     seen = set()
     for item in entries:
@@ -79,13 +78,11 @@ def compute_target_list(entries, current_openid, test_openids):
             continue
         if not item.get("enabled"):
             continue
-        in_test = oid in test_openids
-        if in_test != current_test:
+        if oid not in related:
             continue
         targets.append({
             "openid": oid,
             "name": str(item.get("name") or item.get("remark") or "").strip(),
-            "in_test_group": in_test,
         })
     return targets
 
@@ -97,8 +94,7 @@ def build_relay_list(targets):
     lines = ["【Relay群列表】"]
     for i, t in enumerate(targets, start=1):
         label = t["name"] or t["openid"]
-        mark = "（测试）" if t["in_test_group"] else ""
-        lines.append(f"{i}. {label}{mark}")
+        lines.append(f"{i}. {label}")
     return "\n".join(lines)
 
 
@@ -126,11 +122,11 @@ def parse_relay(text):
     return (None, None)
 
 
-def resolve_target_by_number(entries, current_openid, test_openids, number):
+def resolve_target_by_number(entries, current_openid, related_openids, number):
     """relay {序号} → 目标群；序号越界返回 None。"""
     if number < 1:
         return None
-    targets = compute_target_list(entries, current_openid, test_openids)
+    targets = compute_target_list(entries, current_openid, related_openids)
     if number > len(targets):
         return None
     return targets[number - 1]
@@ -141,7 +137,7 @@ def resolve_target_by_number(entries, current_openid, test_openids, number):
 #
 # _pending[(group_openid, member_openid)] = {
 #     "created_ts": float,
-#     "target": {"openid","name","in_test_group"},
+#     "target": {"openid","name"},
 # }
 # 绑定 (群, 用户)，超时由 qq_fwd_select_timeout 决定。
 # =====================================================
@@ -313,14 +309,13 @@ async def _default_custom_send(text_parts, media_items, groups=None):
 custom_send = _default_custom_send  # 测试可替换
 
 
-# 目标群实际发送前再次校验（测试组隔离由 test_openids 决定，不读 is_test 属性）
-def _target_still_valid(target, group, entries, test_openids):
-    test_openids = set(test_openids or ())
-    current_test = str(group) in test_openids
+# 目标群实际发送前再次校验（目标群须仍与当前群同属至少一个转发组且仍 enabled）
+def _target_still_valid(target, group, entries, related_openids):
+    related = set(related_openids or ())
     return any(
         str(e.get("openid")) == target["openid"]
         and e.get("enabled")
-        and (str(e.get("openid")) in test_openids) == current_test
+        and str(e.get("openid")) in related
         for e in entries
     )
 
@@ -362,8 +357,8 @@ async def handle_fwd(bot: Bot, event: Event):
 async def _cmd_relay_list(bot, event):
     group = event.group_openid
     entries = get_qq_group_entries()
-    test_openids = get_test_group_openids()
-    targets = compute_target_list(entries, group, test_openids)
+    related = get_related_group_openids(group)
+    targets = compute_target_list(entries, group, related)
     await bot.send(event, build_relay_list(targets))
 
 
@@ -371,8 +366,8 @@ async def _cmd_relay_number(bot, event, number):
     group = event.group_openid
     user = event.author.member_openid
     entries = get_qq_group_entries()
-    test_openids = get_test_group_openids()
-    target = resolve_target_by_number(entries, group, test_openids, number)
+    related = get_related_group_openids(group)
+    target = resolve_target_by_number(entries, group, related, number)
     if target is None:
         await bot.send(event, "无法找到对应的转发群")
         return
@@ -400,7 +395,7 @@ async def _try_forward_next(bot, event, text):
     # 实际发送前再次校验目标群
     if not _target_still_valid(
         entry["target"], group,
-        get_qq_group_entries(), get_test_group_openids(),
+        get_qq_group_entries(), get_related_group_openids(group),
     ):
         await bot.send(event, "转发失败")
         return

@@ -4,7 +4,7 @@ import threading
 
 import httpx
 
-from nonebot import logger
+from nonebot import get_driver, logger
 from nonebot.adapters.qq import MessageSegment as QQMessageSegment
 
 
@@ -227,6 +227,27 @@ def _get_proxy():
 DEFAULT_MEDIA_TIMEOUT = 120
 DEFAULT_MEDIA_CONCURRENCY = 4
 DEFAULT_MAX_DOWNLOAD_BYTES = 30 * 1024 * 1024
+_media_client = None
+
+
+def _get_media_client():
+    global _media_client
+    if _media_client is None:
+        _media_client = httpx.AsyncClient(
+            proxy=_get_proxy(),
+            timeout=_get_timeout(),
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+    return _media_client
+
+
+@get_driver().on_shutdown
+async def _close_media_client():
+    global _media_client
+    if _media_client is not None:
+        await _media_client.aclose()
+        _media_client = None
 
 _semaphore = None
 _semaphore_lock = threading.Lock()
@@ -288,45 +309,40 @@ async def fetch_bytes(url):
     max_bytes = _get_max_download_bytes()
     try:
         async with _get_semaphore():
-            async with httpx.AsyncClient(
-                proxy=proxy,
-                timeout=timeout,
-                follow_redirects=True,
-                headers={"User-Agent": "Mozilla/5.0"},
-            ) as client:
-                async with client.stream("GET", url) as resp:
-                    if resp.status_code != 200:
+            client = _get_media_client()
+            async with client.stream("GET", url) as resp:
+                if resp.status_code != 200:
+                    logger.warning(
+                        "媒体下载失败: {} {}",
+                        resp.status_code,
+                        url
+                    )
+                    return None
+
+                length = resp.headers.get("content-length")
+                if (
+                    length
+                    and length.isdigit()
+                    and int(length) > max_bytes
+                ):
+                    logger.warning(
+                        "媒体超过大小上限({}>{})，放弃下载: {}",
+                        length,
+                        max_bytes,
+                        url
+                    )
+                    return None
+
+                data = bytearray()
+                async for chunk in resp.aiter_bytes():
+                    data.extend(chunk)
+                    if len(data) > max_bytes:
                         logger.warning(
-                            "媒体下载失败: {} {}",
-                            resp.status_code,
+                            "媒体超过大小上限，放弃下载: {}",
                             url
                         )
                         return None
-
-                    length = resp.headers.get("content-length")
-                    if (
-                        length
-                        and length.isdigit()
-                        and int(length) > max_bytes
-                    ):
-                        logger.warning(
-                            "媒体超过大小上限({}>{})，放弃下载: {}",
-                            length,
-                            max_bytes,
-                            url
-                        )
-                        return None
-
-                    data = bytearray()
-                    async for chunk in resp.aiter_bytes():
-                        data.extend(chunk)
-                        if len(data) > max_bytes:
-                            logger.warning(
-                                "媒体超过大小上限，放弃下载: {}",
-                                url
-                            )
-                            return None
-                    return bytes(data)
+                return bytes(data)
     except Exception as exc:
         logger.warning(
             "媒体下载异常: {}",

@@ -37,11 +37,19 @@ from plugins.json_io import (
 
 # 与管理面板 PANEL_PORT（panel/管理面板.pyw）保持一致
 PANEL_API_BASE = "http://127.0.0.1:8090"
+PANEL_AUTH_FILE = "data/panel_auth.json"
+
+
+def _panel_token():
+    data = load_json(PANEL_AUTH_FILE, default=None)
+    token = data.get("token") if isinstance(data, dict) else ""
+    return token if isinstance(token, str) else ""
 
 _panel_client = httpx.AsyncClient(
     base_url=PANEL_API_BASE,
     timeout=10.0,
     trust_env=False,
+    headers={"X-WRelay-Token": _panel_token()},
 )
 
 
@@ -190,6 +198,13 @@ async def _cmd_status():
             stats.get("total_failed", 0),
         )
     )
+    health = data.get("health")
+    retry = health.get("retry") if isinstance(health, dict) else None
+    if isinstance(retry, dict) and retry.get("pending_entries"):
+        lines.append("待重试：{}条（{}个群）".format(
+            retry.get("pending_entries", 0),
+            retry.get("pending_groups", 0),
+        ))
 
     lines.append("")
 

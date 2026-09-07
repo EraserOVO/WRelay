@@ -280,9 +280,9 @@ async def _backfill_channel(channel_id, channel_name, active_groups, limit):
         )
 
         if any(ok_map.values()):
-            record(True)
+            await record(True)
         else:
-            record(False)
+            await record(False)
 
         failed_groups = [
             group

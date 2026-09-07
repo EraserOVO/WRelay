@@ -25,6 +25,7 @@ RSSHub 拉取 → x_rss_parser 解析 → 去重 → 渲染 → sender.send_rela
 
 import asyncio
 import re
+import threading
 import time
 
 import httpx
@@ -62,6 +63,9 @@ from plugins.x_rss_parser import parse_feed, QUOTE_TEXT_LIMIT
 
 # RSS 拉取超时（RSSHub 为本机/内网服务，无需代理）
 FEED_TIMEOUT = 30
+# RSSHub 请求属于外部 I/O：有限并发避免慢源拖住整轮，
+# 同时避免一次性并发过多触发 RSSHub/代理限流。
+X_POLL_CONCURRENCY = 4
 
 # 运行时状态：每源的 ETag / 最近轮询时间（data/ 已在 .gitignore，
 # 文件首次轮询时自动创建，不进版本库）
@@ -70,6 +74,7 @@ X_STATE_FILE = "data/x_rss.json"
 # 每源最近一次解析结果（内存缓存）：304 时复用并重跑发送循环。
 # 进程重启后缓存丢失，此时收到 304 会强制重取一次全量（自愈）。
 _posts_cache = {}
+_state_file_lock = threading.Lock()
 
 
 # =====================================================
@@ -126,14 +131,16 @@ def _save_state(data):
 
 def _update_source_state(key, etag=None, clear_etag=False):
     """更新单个源的 ETag / 最近轮询时间并落盘。"""
-    state = _load_state()
-    src_state = state["sources"].setdefault(key, {})
-    src_state["last_poll_ts"] = int(time.time())
-    if clear_etag:
-        src_state.pop("etag", None)
-    elif etag:
-        src_state["etag"] = etag
-    _save_state(state)
+    # 多源并发时保护 read-modify-write，避免互相覆盖 ETag。
+    with _state_file_lock:
+        state = _load_state()
+        src_state = state["sources"].setdefault(key, {})
+        src_state["last_poll_ts"] = int(time.time())
+        if clear_etag:
+            src_state.pop("etag", None)
+        elif etag:
+            src_state["etag"] = etag
+        _save_state(state)
 
 
 # =====================================================
@@ -187,13 +194,13 @@ def _image_filename(url):
 async def _render_post(post, source_name):
     """推文 dict → (text_parts, media_items) 或 None（无可发送内容）
 
-    文字层级与 RSS 顺序一致：header → RT 行 → 主推文字 → 引用行 →
-    原推链接；媒体单独成条（主推媒体在前、引用媒体在后）。"""
+    文字层级与 RSS 顺序一致：header → RT 行 → 主推文字 → 引用行；
+    媒体单独成条（主推媒体在前、引用媒体在后）。"""
     text_parts = []
     media_items = []
 
     text_parts.append(
-        make_text(f"X 订阅 [{source_name}] 新推文：")
+        make_text(f"自动转发来自 X 中 [{source_name}] 的消息：")
     )
 
     has_body = False
@@ -221,11 +228,6 @@ async def _render_post(post, source_name):
             )
         )
         has_body = True
-
-    if post.get("link"):
-        text_parts.append(
-            make_text(f"\n原推：{post['link']}")
-        )
 
     all_media = list(post["media"])
     if quote:
@@ -345,7 +347,6 @@ async def _send_posts(source, posts):
             )
             if not targets:
                 continue
-            new_count += 1
 
             rendered = await _render_post(post, name)
             if rendered is None:
@@ -353,6 +354,19 @@ async def _send_posts(source, posts):
                 failed_count += 1
                 continue
             text_parts, media_items = rendered
+
+            # 组状态可能在渲染期间被面板修改；发送前重新计算目标，避免暂停后仍投递一条。
+            active_groups = get_x_groups_for_source(source["key"])
+            if not active_groups:
+                continue
+            targets = select_target_groups(
+                normalize_channel_map(load_last_messages(), channel_key),
+                active_groups,
+                post["id"],
+            )
+            if not targets:
+                continue
+            new_count += 1
 
             ok_map = await send_and_record(
                 channel_key,
@@ -374,7 +388,7 @@ async def _send_posts(source, posts):
 
             if any(ok_map.values()):
                 sent_count += 1
-                record(True)
+                await record(True)
                 logger.info(
                     "X 推文已发送: {} {} -> {}",
                     name,
@@ -383,7 +397,7 @@ async def _send_posts(source, posts):
                 )
             else:
                 failed_count += 1
-                record(False)
+                await record(False)
                 logger.warning(
                     "X 推文全部目标群发送失败（游标不动，下轮补投）: {} {}",
                     name,
@@ -465,10 +479,10 @@ async def _poll_source(source):
 # =====================================================
 
 async def _poll_all():
-    """轮询全部启用源（顺序执行：源间互不影响，且避免并发写状态文件）。
+    """有限并发轮询全部启用源；单源异常不影响其他源。
 
     一轮结束后把聚合结果（完成时间/结果/新帖与发送计数）写入
-    _runtime_status 供面板展示；只加统计，不改任何轮询与发送行为。"""
+    _runtime_status 供面板展示。状态文件的 read-modify-write 由锁保护。"""
     sources = [
         s for s in get_x_rss_sources()
         if s["enabled"]
@@ -476,17 +490,23 @@ async def _poll_all():
     if not sources:
         return
 
+    sem = asyncio.Semaphore(X_POLL_CONCURRENCY)
+
+    async def poll_one(source):
+        async with sem:
+            try:
+                return await _poll_source(source)
+            except Exception as exc:
+                # 单源任何未预期异常都不拖垮其他源与轮询循环
+                logger.exception("X RSS 源轮询异常: {} ({})", source["name"], source["key"])
+                return {"result": "fetch_failed", "error": _short_error(exc),
+                        "new": 0, "sent": 0, "failed": 0}
+
+    results = await asyncio.gather(*(poll_one(source) for source in sources))
     new_total = sent_total = failed_total = 0
     bad_result = ""
     bad_error = ""
-    for source in sources:
-        try:
-            res = await _poll_source(source)
-        except Exception as exc:
-            # 单源任何未预期异常都不拖垮其他源与轮询循环
-            logger.exception("X RSS 源轮询异常: {} ({})", source["name"], source["key"])
-            res = {"result": "fetch_failed", "error": _short_error(exc),
-                   "new": 0, "sent": 0, "failed": 0}
+    for res in results:
         new_total += res.get("new", 0)
         sent_total += res.get("sent", 0)
         failed_total += res.get("failed", 0)

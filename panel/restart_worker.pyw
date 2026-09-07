@@ -22,6 +22,7 @@ PANEL_HOST = "127.0.0.1"
 PANEL_PORT = 8090
 
 AUTOSTART_FLAG = "--autostart"
+RESTART_FLAG = "--restart"
 AUTOSTART = AUTOSTART_FLAG in sys.argv
 
 
@@ -58,8 +59,9 @@ def main():
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     env = os.environ.copy()
     try:
+        args = [sys.executable, entry, RESTART_FLAG]
         subprocess.Popen(
-            [sys.executable, entry],
+            args,
             cwd=PROJECT_ROOT,
             creationflags=flags,
             env=env,

@@ -4,7 +4,7 @@ import re
 
 import httpx
 
-from nonebot import logger
+from nonebot import get_driver, logger
 from nonebot.adapters.qq import MessageSegment as QQMessageSegment
 
 from plugins.config import get_discord_token
@@ -43,6 +43,25 @@ from plugins.media import (
 # =====================================================
 
 DISCORD_API_TIMEOUT = 20
+_discord_client = None
+
+
+def _get_discord_client():
+    global _discord_client
+    if _discord_client is None:
+        _discord_client = httpx.AsyncClient(
+            proxy=_get_proxy(),
+            timeout=DISCORD_API_TIMEOUT,
+        )
+    return _discord_client
+
+
+@get_driver().on_shutdown
+async def _close_discord_client():
+    global _discord_client
+    if _discord_client is not None:
+        await _discord_client.aclose()
+        _discord_client = None
 
 # =====================================================
 # 补发抓取分页参数（仅 fetch_channel_messages_after 使用）
@@ -237,14 +256,11 @@ async def fetch_message(url):
     }
 
     try:
-        async with httpx.AsyncClient(
-            proxy=_get_proxy(),
-            timeout=DISCORD_API_TIMEOUT,
-        ) as client:
-            response = await client.get(
-                api,
-                headers=headers,
-            )
+        client = _get_discord_client()
+        response = await client.get(
+            api,
+            headers=headers,
+        )
     except Exception as exc:
         logger.warning(
             "Discord API请求异常: {}",
@@ -314,14 +330,11 @@ async def fetch_channel_messages_after(channel_id, after_id, limit=10):
         for attempt in range(1, RATE_LIMIT_ATTEMPTS + 1):
 
             try:
-                async with httpx.AsyncClient(
-                    proxy=_get_proxy(),
-                    timeout=DISCORD_API_TIMEOUT,
-                ) as client:
-                    response = await client.get(
-                        api,
-                        headers=headers,
-                    )
+                client = _get_discord_client()
+                response = await client.get(
+                    api,
+                    headers=headers,
+                )
             except Exception as exc:
                 logger.warning(
                     "Discord API请求异常，本轮补发放弃: {}",
@@ -439,14 +452,11 @@ async def fetch_channel_latest(channel_id):
     }
 
     try:
-        async with httpx.AsyncClient(
-            proxy=_get_proxy(),
-            timeout=DISCORD_API_TIMEOUT,
-        ) as client:
-            response = await client.get(
-                api,
-                headers=headers,
-            )
+        client = _get_discord_client()
+        response = await client.get(
+            api,
+            headers=headers,
+        )
     except Exception as exc:
         logger.warning(
             "Discord API请求异常: {}",
@@ -480,14 +490,11 @@ async def fetch_channel_name(channel_id):
     }
 
     try:
-        async with httpx.AsyncClient(
-            proxy=_get_proxy(),
-            timeout=DISCORD_API_TIMEOUT,
-        ) as client:
-            response = await client.get(
-                api,
-                headers=headers,
-            )
+        client = _get_discord_client()
+        response = await client.get(
+            api,
+            headers=headers,
+        )
     except Exception as exc:
         logger.warning(
             "Discord API请求异常: {}",
@@ -538,14 +545,11 @@ async def fetch_channel_gap_count(channel_id, after_id, cap=1000):
             api += f"&before={before}"
 
         try:
-            async with httpx.AsyncClient(
-                proxy=_get_proxy(),
-                timeout=DISCORD_API_TIMEOUT,
-            ) as client:
-                response = await client.get(
-                    api,
-                    headers=headers,
-                )
+            client = _get_discord_client()
+            response = await client.get(
+                api,
+                headers=headers,
+            )
         except Exception as exc:
             logger.warning(
                 "Discord API请求异常: {}",
@@ -697,14 +701,11 @@ async def _fetch_reference_message(channel_id, message_id):
     }
 
     try:
-        async with httpx.AsyncClient(
-            proxy=_get_proxy(),
-            timeout=DISCORD_API_TIMEOUT,
-        ) as client:
-            response = await client.get(
-                api,
-                headers=headers,
-            )
+        client = _get_discord_client()
+        response = await client.get(
+            api,
+            headers=headers,
+        )
     except Exception:
         return None
 

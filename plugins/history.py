@@ -82,8 +82,8 @@ async def update_last_messages(mutate):
     避免多任务各自持有旧副本互相覆盖推进；业务层锁，
     不塞进通用 json_io.py。"""
     async with _save_lock:
-        last_messages = load_last_messages()
+        last_messages = await asyncio.to_thread(load_last_messages)
         changed = mutate(last_messages)
         if changed:
-            save_last_messages(last_messages)
+            await asyncio.to_thread(save_last_messages, last_messages)
         return changed
