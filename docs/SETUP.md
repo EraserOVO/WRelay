@@ -17,10 +17,11 @@ QQ 私聊命令执行的 QQ → QQ 手动转发。不提供 QQ → Discord 自�
 
 1. 把整个项目放到一个目录（例如 `C:\WRelay`），或 `git clone` 到本地。
 2. **双击 `install.bat`**，脚本会自动：
-   - 安装包版本使用随包提供的 `python\` 运行时
+   - 安装包版本使用随包提供的 `python\` 运行时，并自动从 `.env.example` 生成 `.env.prod`
    - 源码版本若没有内置 Python，则创建虚拟环境 `.venv`
-   - 源码版本安装项目依赖（`pip install -e .`）
-   - 若不存在 `.env.prod`，从 `.env.example` 复制生成
+   - 源码版本按 `requirements-lock.txt` 安装已验证的固定版本依赖
+   - 以可编辑模式安装项目（`pip install -r requirements-lock.txt -e .`）
+   - 源码版本若不存在 `.env.prod`，从 `.env.example` 复制生成
 3. 用记事本打开 **`.env.prod`**，按第 3、4、5 节填入你自己的配置。
 4. **双击 `启动面板.bat`** 打开管理面板（浏览器访问 `http://127.0.0.1:8090`）。
 5. 在面板中：勾选你的 Discord 频道和 QQ 群 → 点击「启动机器人」。
@@ -32,7 +33,33 @@ QQ 私聊命令执行的 QQ → QQ 手动转发。不提供 QQ → Discord 自�
 
 ---
 
-## 3. `.env.prod` 配置详解
+## 3. 开发者构建安装包
+
+需要先安装 Inno Setup，然后在项目根目录执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_installer.ps1
+```
+
+脚本会检查 `.runtime\python`、`requirements-lock.txt` 等构建输入，自动查找
+`ISCC.exe`，编译 `WRelay.iss`，并输出安装包大小和 SHA256。若编译器不在常见安装目录，
+可以先设置 `INNO_SETUP_ISCC` 为 `ISCC.exe` 的完整路径。
+
+`pyproject.toml` 也提供标准 Python 构建元数据，可用于构建插件依赖包；它不是完整的桌面应用安装方式。
+完整的 Bot、管理面板、内置 Python 和 Windows 快捷方式请使用上面的 Inno Setup 安装包。
+
+发布前请记录构建脚本输出的 SHA256，并在分发端验证：
+
+```powershell
+Get-FileHash .\WRelay-Setup.exe -Algorithm SHA256
+```
+
+发布包中不得包含 `.env.prod`、`data/` 运行数据或其他真实凭据。当前项目未配置代码签名证书，
+因此不能把“文件未被篡改”仅建立在 Windows 发布者名称上；应同时提供 SHA256，并从可信渠道分发校验值。
+
+---
+
+## 4. `.env.prod` 配置详解
 
 | 配置项 | 含义 | 说明 |
 |---|---|---|
@@ -48,7 +75,7 @@ QQ 私聊命令执行的 QQ → QQ 手动转发。不提供 QQ → Discord 自�
 
 ---
 
-## 4. 创建 Discord Bot
+## 5. 创建 Discord Bot
 
 1. 打开 [Discord Developer Portal](https://discord.com/developers/applications)，点 **New Application**。
 2. 左侧 **Bot** 页 → **Reset Token** → 复制 token，填到 `.env.prod` 的 `DISCORD_BOTS`。
@@ -60,7 +87,7 @@ QQ 私聊命令执行的 QQ → QQ 手动转发。不提供 QQ → Discord 自�
 
 ---
 
-## 5. 创建 QQ 官方机器人
+## 6. 创建 QQ 官方机器人
 
 1. 登录 [QQ 开放平台](https://q.qq.com)，创建应用/机器人，获得 **AppID** 和 **AppSecret**。
 2. 在 `.env.prod` 的 `QQ_BOTS` 中：`id` 与 `token` 都填 AppID，`secret` 填 AppSecret。
@@ -92,7 +119,7 @@ RSSHub 请求失败、QQ 暂时未连接或发送失败时不会推进来源游�
 
 ---
 
-## 6. 代理（国内访问 Discord 必需）
+## 7. 代理（国内访问 Discord 必需）
 
 Discord API 和 CDN 在国内无法直连，需要 HTTP 代理：
 
@@ -107,7 +134,7 @@ Discord API 和 CDN 在国内无法直连，需要 HTTP 代理：
 
 ---
 
-## 7. 常见问题
+## 8. 常见问题
 
 | 现象 | 排查 |
 |---|---|
@@ -119,7 +146,19 @@ Discord API 和 CDN 在国内无法直连，需要 HTTP 代理：
 
 ---
 
-## 8. 安全提醒
+## 9. 卸载与数据保留
+
+- 升级时直接运行新的 `WRelay-Setup.exe` 并选择原安装目录，不要先卸载旧版本；安装器会先尝试关闭正在运行的 WRelay 程序。
+- 升级前建议备份 `data/` 和 `.env.prod`。升级会覆盖程序文件，但默认保留用户数据和配置。
+- 旧版本如果安装在早期的 `Program Files` 目录，不会自动迁移到当前用户目录；请先备份数据，再按新目录安装并手动迁移需要的配置。
+- 卸载程序默认保留 `data/` 和 `.env.prod`，包括频道配置、去重游标、重试队列、面板认证信息和机器人凭据。
+- 这样可以避免卸载或升级时误删运行状态；重新安装到同一目录后可继续使用原配置。
+- 如果要彻底移除 WRelay，请先卸载程序，再确认不需要这些数据后，手动删除安装目录中残留的 `data/` 和 `.env.prod`。
+- 删除前请注意：`.env.prod` 含机器人密钥，`data/` 含运行配置和身份资料，建议先备份或使用安全删除方式。
+
+---
+
+## 10. 安全提醒
 
 - `.env.prod` 含密钥，**绝不提交、不分享**。
 - `data/` 目录是运行时数据（配置、去重记录、重试队列、日志），误删会丢失运行状态，
