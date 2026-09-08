@@ -1,3 +1,7 @@
+import asyncio
+from collections import deque
+
+from nonebot import get_driver
 from nonebot import logger
 from nonebot import on_message
 from nonebot.adapters import Event
@@ -37,8 +41,78 @@ relay = on_message(
 )
 
 
-@relay.handle()
-async def handle(
+# 实时 Discord 消息背压：同频道串行处理，跨频道有限并发。
+# 队列满时入口等待，不丢弃事件；失败仍由现有 retry/backfill 兜底。
+MAX_RELAY_PENDING = 128
+MAX_RELAY_CONCURRENCY = 4
+_relay_capacity = asyncio.Semaphore(MAX_RELAY_PENDING)
+_relay_processing = asyncio.Semaphore(MAX_RELAY_CONCURRENCY)
+_relay_queues = {}
+_relay_workers = set()
+_relay_tasks = set()
+
+
+async def _drain_relay_channel(channel_id):
+    """按消息进入队列的顺序处理一个频道的实时消息。"""
+    try:
+        while True:
+            queue = _relay_queues.get(channel_id)
+            if not queue:
+                _relay_queues.pop(channel_id, None)
+                _relay_workers.discard(channel_id)
+                return
+
+            bot, event = queue.popleft()
+            try:
+                async with _relay_processing:
+                    await _process_event(bot, event)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "实时 Discord 消息处理异常: 频道{} 消息{}",
+                    channel_id,
+                    getattr(event, "id", "?"),
+                )
+            finally:
+                _relay_capacity.release()
+    finally:
+        # 取消时释放尚未取出的队列项占用，避免关闭/测试场景泄漏容量。
+        queue = _relay_queues.pop(channel_id, None)
+        if queue:
+            for _ in range(len(queue)):
+                _relay_capacity.release()
+        _relay_workers.discard(channel_id)
+
+
+async def _enqueue_relay_event(channel_id, bot, event):
+    """把实时事件放入有界频道队列。"""
+    await _relay_capacity.acquire()
+    queue = _relay_queues.setdefault(channel_id, deque())
+    queue.append((bot, event))
+    if channel_id in _relay_workers:
+        return
+
+    _relay_workers.add(channel_id)
+    task = asyncio.create_task(_drain_relay_channel(channel_id))
+    _relay_tasks.add(task)
+    task.add_done_callback(_relay_tasks.discard)
+
+
+@get_driver().on_shutdown
+async def _shutdown_relay_queue():
+    """Bot 关闭时停止实时队列任务，避免遗留后台任务。"""
+    tasks = list(_relay_tasks)
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    _relay_tasks.clear()
+    _relay_queues.clear()
+    _relay_workers.clear()
+
+
+async def _process_event(
     bot: DiscordBot,
     event: Event
 ):
@@ -235,6 +309,19 @@ async def handle(
             channel_id,
             message_id
         )
+
+
+@relay.handle()
+async def handle(
+    bot: DiscordBot,
+    event: Event
+):
+    """实时事件入口：快速入队，把耗时处理移到有界频道队列。"""
+    if not isinstance(bot, DiscordBot):
+        return
+    if not isinstance(event, GuildMessageCreateEvent):
+        return
+    await _enqueue_relay_event(str(event.channel_id), bot, event)
 
 
 # =====================================================
