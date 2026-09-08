@@ -1,10 +1,11 @@
 from plugins.json_io import (
     load_json,
-    atomic_write_json,
+    update_json,
 )
+from plugins.paths import data_path
 
 
-IDENTITIES_FILE = "data/qq_identities.json"
+IDENTITIES_FILE = data_path("qq_identities.json")
 
 # 最后活动时间落盘节流：距上次已存值超过该秒数才更新，
 # 避免每条消息都写盘（QQ 消息量不小）。
@@ -37,40 +38,38 @@ def load_identities():
     return data
 
 
-def _persist(identities):
-    atomic_write_json(IDENTITIES_FILE, identities, indent=4)
-
-
 def _record(kind, openid, name_field, name, last_active):
     """写入/更新一条身份资料；仅在确实变化时落盘"""
     openid = str(openid or "").strip()
     if not openid:
         return
-    data = load_identities()
-    bucket = data.setdefault(kind, {})
-    if not isinstance(bucket, dict):
-        bucket = {}
-        data[kind] = bucket
-    entry = bucket.get(openid)
-    is_new = not isinstance(entry, dict)
-    if is_new:
-        entry = {}
-        bucket[openid] = entry
+    def mutate(data):
+        if not isinstance(data, dict):
+            data = {}
+        bucket = data.setdefault(kind, {})
+        if not isinstance(bucket, dict):
+            bucket = {}
+            data[kind] = bucket
+        entry = bucket.get(openid)
+        is_new = not isinstance(entry, dict)
+        if is_new:
+            entry = {}
+            bucket[openid] = entry
 
-    changed = is_new
-    if name:
-        name = str(name).strip()
-        if entry.get(name_field) != name:
-            entry[name_field] = name
-            changed = True
-    if last_active:
-        old = entry.get("last_active")
-        if old is None or last_active - old >= LAST_ACTIVE_THROTTLE:
-            entry["last_active"] = last_active
-            changed = True
+        changed = is_new
+        if name:
+            clean_name = str(name).strip()
+            if entry.get(name_field) != clean_name:
+                entry[name_field] = clean_name
+                changed = True
+        if last_active:
+            old = entry.get("last_active")
+            if old is None or last_active - old >= LAST_ACTIVE_THROTTLE:
+                entry["last_active"] = last_active
+                changed = True
+        return changed
 
-    if changed:
-        _persist(data)
+    update_json(IDENTITIES_FILE, mutate, default={}, indent=4, write_if=bool)
 
 
 def record_user_identity(openid, nickname=None, last_active=None):
@@ -90,15 +89,19 @@ def set_admin_remark(kind, openid, remark):
     openid = str(openid or "").strip()
     if not openid:
         return False
-    data = load_identities()
-    bucket = data.setdefault(kind, {})
-    if not isinstance(bucket, dict):
-        bucket = {}
-        data[kind] = bucket
-    entry = bucket.get(openid)
-    if not isinstance(entry, dict):
-        entry = {}
-        bucket[openid] = entry
-    entry["admin_remark"] = str(remark or "")
-    _persist(data)
+    def mutate(data):
+        if not isinstance(data, dict):
+            data = {}
+        bucket = data.setdefault(kind, {})
+        if not isinstance(bucket, dict):
+            bucket = {}
+            data[kind] = bucket
+        entry = bucket.get(openid)
+        if not isinstance(entry, dict):
+            entry = {}
+            bucket[openid] = entry
+        entry["admin_remark"] = str(remark or "")
+        return True
+
+    update_json(IDENTITIES_FILE, mutate, default={}, indent=4)
     return True

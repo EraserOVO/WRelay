@@ -58,6 +58,7 @@ from plugins.json_io import (
     load_json,
     atomic_write_json,
 )
+from plugins.paths import data_path
 from plugins.x_rss_parser import parse_feed, QUOTE_TEXT_LIMIT
 
 
@@ -69,7 +70,7 @@ X_POLL_CONCURRENCY = 4
 
 # 运行时状态：每源的 ETag / 最近轮询时间（data/ 已在 .gitignore，
 # 文件首次轮询时自动创建，不进版本库）
-X_STATE_FILE = "data/x_rss.json"
+X_STATE_FILE = data_path("x_rss.json")
 
 # 每源最近一次解析结果（内存缓存）：304 时复用并重跑发送循环。
 # 进程重启后缓存丢失，此时收到 304 会强制重取一次全量（自愈）。

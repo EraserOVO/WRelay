@@ -2,11 +2,15 @@
 
 ## 项目方向
 
-WRelay 是 Discord → QQ 消息转发器。
+WRelay 是以 Discord → QQ 为核心的消息转发器，并包含 X/Twitter RSS → QQ
+自动投递和经过授权的 QQ → QQ 手动转发工具。
 
-- 只做 Discord → QQ
+- 核心自动链路：Discord → QQ
+- 扩展自动链路：X/Twitter RSS → QQ
+- 手动工具：授权 QQ 用户发起 QQ → QQ 转发
 - 不做 QQ → Discord
-- 不做双向同步
+- 不做 Discord/QQ 双向自动同步
+- QQ → QQ 仅限明确授权的手动转发，不扩展为自动同步
 
 ## 修改规则
 

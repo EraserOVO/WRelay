@@ -30,8 +30,9 @@ from plugins.media import make_text
 from plugins.sender import send_relay_message
 from plugins.json_io import (
     load_json,
-    atomic_write_json,
+    update_json,
 )
+from plugins.paths import data_path
 
 
 relay_command = on_message(
@@ -49,36 +50,21 @@ relay_command = on_message(
 # 未放行的用户触发 relay 会被拒绝。
 # =====================================================
 
-OPENID_FILE = "data/qq_group_openids.json"
-USER_OPENID_FILE = "data/qq_user_openids.json"
+OPENID_FILE = data_path("qq_group_openids.json")
+USER_OPENID_FILE = data_path("qq_user_openids.json")
 
 
 def save_group_openid(openid):
-
-    data = load_json(
-        OPENID_FILE,
-        default={}
-    )
-
-    if not isinstance(data, dict):
-
-        data = {}
-
-
-    openids = data.setdefault(
-        "group_openids",
-        []
-    )
-
-    if openid not in openids:
-
+    def mutate(data):
+        if not isinstance(data, dict):
+            data = {}
+        openids = data.setdefault("group_openids", [])
+        if openid in openids:
+            return False
         openids.append(openid)
+        return True
 
-        atomic_write_json(
-            OPENID_FILE,
-            data,
-            indent=4
-        )
+    update_json(OPENID_FILE, mutate, default={}, indent=4, write_if=bool)
 
     logger.info(
         "[QQ group_openid] {}",
@@ -87,31 +73,16 @@ def save_group_openid(openid):
 
 
 def save_user_openid(openid):
-
-    data = load_json(
-        USER_OPENID_FILE,
-        default={}
-    )
-
-    if not isinstance(data, dict):
-
-        data = {}
-
-
-    openids = data.setdefault(
-        "user_openids",
-        []
-    )
-
-    if openid not in openids:
-
+    def mutate(data):
+        if not isinstance(data, dict):
+            data = {}
+        openids = data.setdefault("user_openids", [])
+        if openid in openids:
+            return False
         openids.append(openid)
+        return True
 
-        atomic_write_json(
-            USER_OPENID_FILE,
-            data,
-            indent=4
-        )
+    update_json(USER_OPENID_FILE, mutate, default={}, indent=4, write_if=bool)
 
     logger.info(
         "[QQ user_openid] {}",

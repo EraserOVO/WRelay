@@ -64,10 +64,13 @@ def get_discord_token():
 from plugins.json_io import (
     load_json,
     atomic_write_json,
+    file_revision,
+    ConcurrentWriteError,
 )
-from plugins.settings_schema import validate_settings
+from plugins.settings_model import SettingsModel, validate_settings
+from plugins.paths import data_path
 
-SETTINGS_FILE = "data/settings.json"
+SETTINGS_FILE = data_path("settings.json")
 
 # 转发组：固定 id + 可重命名 name + channels[]/groups[] 集合。
 # 旧配置缺省时内存归一化为默认转发组（channels/groups = 当前全局启用项），
@@ -76,26 +79,10 @@ FORWARDING_GROUP_DEFAULT_ID = "default"
 
 
 def _default_settings():
-    groups = [
-        {"openid": str(o), "enabled": True, "remark": ""}
-        for o in QQ_GROUP_OPENIDS
-    ]
-    channels = [
-        {"id": str(k), "name": v, "enabled": True}
-        for k, v in DISCORD_CHANNELS.items()
-    ]
-    return {
-        "qq_group_openids": groups,
-        "qq_user_openids": [],
-        "discord_channels": channels,
-        "backfill_enabled": True,
-        "backfill_limit": 10,
-        # X（Twitter）RSS 订阅（RSSHub）：源列表 / 轮询秒数 / RSSHub 地址。
-        # 旧配置缺省时只在内存补齐（见 _load_settings），不写回文件
-        "x_rss_sources": [],
-        "x_rss_poll_interval": 300,
-        "x_rsshub_base": "http://localhost:1200",
-    }
+    return SettingsModel.default(
+        DISCORD_CHANNELS,
+        QQ_GROUP_OPENIDS,
+    ).to_dict()
 
 
 def _ensure_settings_file():
@@ -106,47 +93,68 @@ def _ensure_settings_file():
     记错误日志并内存降级，管理员修复文件后 mtime 变化自动恢复。"""
     if os.path.exists(SETTINGS_FILE):
         return
-    atomic_write_json(
-        SETTINGS_FILE,
-        _default_settings(),
-        indent=2
-    )
+    try:
+        atomic_write_json(
+            SETTINGS_FILE,
+            _default_settings(),
+            indent=2,
+            expected_revision="missing",
+        )
+    except ConcurrentWriteError:
+        # 另一个进程可能已在本次初始化期间创建文件；只要目标现在
+        # 存在，就保留对方的配置，不用默认值覆盖。
+        if not os.path.exists(SETTINGS_FILE):
+            raise
 
 
 # settings.json 高频读取（每条消息、每个群都会调用），
-# 用内存缓存 + 文件 mtime/size 校验，避免每次重新解析 JSON；
-# 面板改配置走原子替换，mtime 会变化，缓存最长滞后一次读取。
+# 用内存缓存 + 文件版本指纹校验，避免每次重新解析 JSON；
+# 版本指纹同时包含 mtime_ns、ctime_ns 和 size，避免同一秒内或
+# 原地改写时缓存误判为新鲜。
 _settings_cache = None
 _settings_cache_mtime = None
 _settings_cache_size = None
+_settings_cache_revision = None
 
 
 def _load_settings():
 
-    global _settings_cache, _settings_cache_mtime, _settings_cache_size
+    global _settings_cache, _settings_cache_mtime
+    global _settings_cache_size, _settings_cache_revision
 
     if not os.path.exists(SETTINGS_FILE):
         _ensure_settings_file()
 
     try:
         st = os.stat(SETTINGS_FILE)
-        mtime, size = st.st_mtime, st.st_size
+        mtime, size = st.st_mtime_ns, st.st_size
     except OSError:
         mtime = size = None
+    revision = file_revision(SETTINGS_FILE)
 
     if (
         _settings_cache is not None
         and mtime == _settings_cache_mtime
         and size == _settings_cache_size
+        and revision == _settings_cache_revision
     ):
         return _settings_cache
 
-    data = load_json(
+    raw_data = load_json(
         SETTINGS_FILE,
         default=None
     )
 
-    validation_error = validate_settings(data)
+    if isinstance(raw_data, dict):
+        data = SettingsModel.from_data(
+            raw_data,
+            DISCORD_CHANNELS,
+            QQ_GROUP_OPENIDS,
+        )
+        validation_error = validate_settings(data)
+    else:
+        data = None
+        validation_error = validate_settings(raw_data)
     if validation_error:
         # 文件损坏/结构无效：绝不用默认值覆盖原文件（会清空真实配置），
         # 记错误日志并内存降级为安全默认值，原文件原样保留；
@@ -159,15 +167,6 @@ def _load_settings():
             "{} ({})".format(SETTINGS_FILE, validation_error),
         )
         data = None
-    elif not isinstance(data.get("qq_user_openids"), list):
-        # 结构完整但缺少新增字段：只在内存补齐，不写回文件
-        # （写回会与面板保存形成跨进程写竞争）
-        data["qq_user_openids"] = []
-
-    if isinstance(data, dict) and not isinstance(data.get("x_rss_sources"), list):
-        # X RSS 订阅源：同样只在内存补齐，不写回文件
-        data["x_rss_sources"] = []
-
     if data is None:
         _settings_cache = _default_settings()
     else:
@@ -176,7 +175,9 @@ def _load_settings():
     # 保证路由函数始终拿到合法结构；与下方 qq_user_openids 的内存
     # 补齐同理，绝不把归一化结果当作面板配置写回文件
     _ensure_forwarding_groups(_settings_cache)
-    _settings_cache_mtime, _settings_cache_size = mtime, size
+    _settings_cache_mtime = mtime
+    _settings_cache_size = size
+    _settings_cache_revision = revision
 
     return _settings_cache
 

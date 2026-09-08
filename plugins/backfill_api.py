@@ -14,6 +14,7 @@ from plugins.history import (
     save_last_messages,
 )
 from plugins.json_io import load_json
+from plugins.paths import data_path
 from plugins.fetch import (
     fetch_channel_latest,
     fetch_channel_gap_count,
@@ -215,7 +216,7 @@ async def api_channel_names():
 # POST /api/channels/refresh  运行诊断脚本重新扫描并更新记录
 # =====================================================
 
-AUDIT_FILE = "data/channels_audit.json"
+AUDIT_FILE = data_path("channels_audit.json")
 
 
 def _read_audit():

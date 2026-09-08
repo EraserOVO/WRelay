@@ -16,6 +16,7 @@ from plugins.history import (
 )
 from plugins.sender import send_relay_message
 from plugins.json_io import atomic_write_json, load_json
+from plugins.paths import data_path
 
 
 # =====================================================
@@ -34,7 +35,7 @@ RETRY_BACKOFFS = (30.0, 60.0, 120.0)  # 第 1/2/3 次重试前等待秒数
 MAX_RETRY_ATTEMPTS = 3
 MAX_TOTAL_PENDING = 10
 MAX_PER_CHANNEL_PENDING = 5
-RETRY_FILE = "data/retry_pending.json"
+RETRY_FILE = data_path("retry_pending.json")
 
 # 测试可关闭：登记失败时自动拉起频道重试循环，改由测试手动驱动
 _LOOP_AUTO_START = True

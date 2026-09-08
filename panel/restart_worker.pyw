@@ -17,6 +17,9 @@ import time
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE)
+sys.path.insert(0, PROJECT_ROOT)
+
+from plugins.paths import data_path
 
 PANEL_HOST = "127.0.0.1"
 PANEL_PORT = 8090
@@ -28,7 +31,7 @@ AUTOSTART = AUTOSTART_FLAG in sys.argv
 
 def _log(msg):
     try:
-        log_path = os.path.join(PROJECT_ROOT, "data", "logs", "panel.log")
+        log_path = data_path(os.path.join("logs", "panel.log"))
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         with open(log_path, "a", encoding="utf-8") as f:
             f.write("%s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg))

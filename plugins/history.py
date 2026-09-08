@@ -5,9 +5,10 @@ from plugins.json_io import (
     load_json,
     atomic_write_json,
 )
+from plugins.paths import data_path
 
 
-LAST_MESSAGE_FILE = "data/discord_last.json"
+LAST_MESSAGE_FILE = data_path("discord_last.json")
 
 
 # =====================================================

@@ -28,18 +28,20 @@ import uuid
 # ---------------- 路径 ----------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))      # .../panel
 PROJECT_ROOT = os.path.dirname(BASE_DIR)                    # 项目根目录
-os.chdir(PROJECT_ROOT)
+sys.path.insert(0, PROJECT_ROOT)
 
-DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+from plugins.paths import DATA_DIR as SHARED_DATA_DIR, data_path
+
+DATA_DIR = os.fspath(SHARED_DATA_DIR)
 LOG_DIR = os.path.join(DATA_DIR, "logs")
-SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+SETTINGS_FILE = data_path("settings.json")
 SETTINGS_BAK = SETTINGS_FILE + ".bak"
-BOT_LOG = os.path.join(LOG_DIR, "bot.log")
-PANEL_LOG = os.path.join(LOG_DIR, "panel.log")
-PID_FILE = os.path.join(DATA_DIR, "bot.pid")
-RUNTIME_LEVEL_FILE = os.path.join(DATA_DIR, "runtime_log_level.json")
-STATS_FILE = os.path.join(DATA_DIR, "stats.json")
-PANEL_AUTH_FILE = os.path.join(DATA_DIR, "panel_auth.json")
+BOT_LOG = data_path(os.path.join("logs", "bot.log"))
+PANEL_LOG = data_path(os.path.join("logs", "panel.log"))
+PID_FILE = data_path("bot.pid")
+RUNTIME_LEVEL_FILE = data_path("runtime_log_level.json")
+STATS_FILE = data_path("stats.json")
+PANEL_AUTH_FILE = data_path("panel_auth.json")
 
 # 正式安装包使用 {项目根}\python\python.exe（standalone Python，无 .venv）；
 # 开发环境若存在 .venv 则优先使用，否则回退到项目根的 python。
@@ -79,11 +81,17 @@ try:
 except Exception:
     pass
 
-sys.path.insert(0, PROJECT_ROOT)
-
 # 面板与 bot 共用的 JSON 原子写（唯一 tmp + os.replace 重试）
-from plugins.json_io import atomic_write_json, load_json
-from plugins.settings_schema import validate_settings
+from plugins.json_io import (
+    atomic_write_json,
+    load_json,
+    file_revision,
+    json_file_lock,
+    update_json,
+    _atomic_write_json_unlocked,
+    ConcurrentWriteError,
+)
+from plugins.settings_model import SettingsModel, validate_settings
 
 # X 转发组：复用 bot 侧的归一化结果（GET 注入默认组）与 source key 派生
 # （保存时清理悬空引用）。导入失败时用最小回退（等价于不做注入/清理）。
@@ -124,64 +132,53 @@ PANEL_TOKEN = _load_panel_token()
 
 # ---------------- 配置读写 ----------------
 def load_settings():
-    default = get_default_settings()
-    try:
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if not isinstance(data.get("qq_group_openids"), list):
-            data["qq_group_openids"] = default["qq_group_openids"]
-        if not isinstance(data.get("qq_user_openids"), list):
-            data["qq_user_openids"] = default["qq_user_openids"]
-        if not isinstance(data.get("discord_channels"), list):
-            data["discord_channels"] = default["discord_channels"]
-        # 旧测试属性 / 模式选择 的磁盘迁移统一在 main() 启动时
-        # migrate_forwarding_groups() 一次性执行（幂等），load 路径绝不写盘。
-        return data
-    except Exception:
-        return default
+    raw = load_json(SETTINGS_FILE, default=None)
+    model = SettingsModel.from_data(
+        raw,
+        _default_discord_channels(),
+        _default_qq_group_openids(),
+    )
+    # 旧测试属性 / 模式选择的磁盘迁移统一在 main() 启动时执行；
+    # load 路径只补齐共享模型字段，不写盘。
+    return model.to_dict()
 
 
 def _settings_revision():
     """返回 settings.json 当前版本，用于阻止旧页面覆盖新配置。"""
+    return file_revision(SETTINGS_FILE)
+
+
+def _load_settings_snapshot():
+    """读取配置及其写入前必须匹配的版本。
+
+    先取版本、再读配置：若中间被其他进程修改，后续保存会因版本不匹配
+    被拒绝，绝不把旧快照写回新文件。
+    """
+    revision = _settings_revision()
+    return load_settings(), revision
+
+
+def _default_discord_channels():
     try:
-        st = os.stat(SETTINGS_FILE)
-        return "%s:%s" % (st.st_mtime_ns, st.st_size)
-    except OSError:
-        return "missing"
+        from plugins.config import DISCORD_CHANNELS
+        return DISCORD_CHANNELS
+    except Exception:
+        return {}
+
+
+def _default_qq_group_openids():
+    try:
+        from plugins.config import QQ_GROUP_OPENIDS
+        return QQ_GROUP_OPENIDS
+    except Exception:
+        return []
 
 
 def get_default_settings():
-    try:
-        from plugins.config import DISCORD_CHANNELS, QQ_GROUP_OPENIDS
-    except Exception:
-        return {
-            "qq_group_openids": [],
-            "qq_user_openids": [],
-            "discord_channels": [],
-            "backfill_enabled": True,
-            "backfill_limit": 10,
-            "qq_appid": "",
-            "qq_fwd_recency_limit": 1800,
-            "qq_fwd_select_timeout": 60,
-        }
-    groups = [
-        {"openid": str(o), "enabled": True, "remark": ""}
-        for o in QQ_GROUP_OPENIDS
-    ]
-    channels = [
-        {"id": str(k), "name": v, "enabled": True}
-        for k, v in DISCORD_CHANNELS.items()
-    ]
-    return {
-        "qq_group_openids": groups,
-        "qq_user_openids": [],
-        "discord_channels": channels,
-        "backfill_enabled": True,
-        "backfill_limit": 10,
-        "qq_appid": "",
-        "qq_fwd_recency_limit": 1800,
-        "qq_fwd_select_timeout": 60,
-    }
+    return SettingsModel.default(
+        _default_discord_channels(),
+        _default_qq_group_openids(),
+    ).to_dict()
 
 
 def _validate_settings(data):
@@ -293,17 +290,23 @@ def _normalize_x_forwarding_groups(data):
     data["x_forwarding_groups"] = clean
 
 
-def save_settings(data):
+def save_settings(data, expected_revision=None):
     # 备份上一版配置（任何误写/损坏都可从 settings.json.bak 恢复），
     # 再走统一原子写（唯一 tmp + os.replace，见 plugins/json_io.py）
     _normalize_forwarding_groups(data)
     _normalize_x_forwarding_groups(data)
-    try:
-        if os.path.exists(SETTINGS_FILE):
-            shutil.copyfile(SETTINGS_FILE, SETTINGS_BAK)
-    except Exception as exc:
-        _log("备份 settings.json.bak 失败: %s" % exc)
-    atomic_write_json(SETTINGS_FILE, data, indent=2)
+    with json_file_lock(SETTINGS_FILE):
+        if (
+            expected_revision is not None
+            and file_revision(SETTINGS_FILE) != expected_revision
+        ):
+            raise ConcurrentWriteError("settings.json 已被其他进程修改")
+        try:
+            if os.path.exists(SETTINGS_FILE):
+                shutil.copyfile(SETTINGS_FILE, SETTINGS_BAK)
+        except Exception as exc:
+            _log("备份 settings.json.bak 失败: %s" % exc)
+        _atomic_write_json_unlocked(SETTINGS_FILE, data, indent=2)
 
 
 def migrate_forwarding_groups():
@@ -318,7 +321,7 @@ def migrate_forwarding_groups():
 
     必须在 main() 启动时执行而非 load_settings()：迁移写盘会破坏
     test_backfill_toggle 临时文件的"其他字段逐字节不变"断言。重复执行结果不变（幂等）。"""
-    data = load_settings()
+    data, revision = _load_settings_snapshot()
     before = json.dumps(data, sort_keys=True, ensure_ascii=False)
 
     # 旧顶层测试键（更早版本：单测试群/单测试频道）→ is_test 标记，随后统一清理
@@ -360,7 +363,11 @@ def migrate_forwarding_groups():
     if json.dumps(data, sort_keys=True, ensure_ascii=False) == before:
         return  # 已迁移过，无需写盘（幂等）
 
-    save_settings(data)
+    try:
+        save_settings(data, expected_revision=revision)
+    except ConcurrentWriteError:
+        _log("转发组迁移跳过：settings.json 已被其他进程修改")
+        return
     fg0 = data["forwarding_groups"][0]
     _log("转发组迁移：默认「%s」（%d 频道 / %d 群）" % (
         fg0.get("name"), len(fg0.get("channels", [])), len(fg0.get("groups", []))))
@@ -895,12 +902,12 @@ def _settings_payload():
     """load_settings() + 注入 X 转发组归一化结果（复用 bot 侧默认组兼容
     逻辑，仅内存不写盘）：旧配置缺省时前端也能拿到默认 X 转发组用于渲染，
     避免前端另写一套默认逻辑。"""
-    data = load_settings()
+    data, revision = _load_settings_snapshot()
     try:
         data["x_forwarding_groups"] = get_x_forwarding_groups()
     except Exception:
         pass
-    data["_revision"] = _settings_revision()
+    data["_revision"] = revision
     return data
 
 
@@ -920,8 +927,15 @@ async def api_settings_save(request: Request):
         data = await request.json()
     except Exception:
         return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
+    if not isinstance(data, dict):
+        return JSONResponse({"ok": False, "msg": "配置必须是对象"}, status_code=400)
     expected_revision = data.pop("_revision", None)
-    if expected_revision is not None and expected_revision != _settings_revision():
+    if not isinstance(expected_revision, str):
+        return JSONResponse(
+            {"ok": False, "msg": "缺少配置版本，请刷新页面后重试"},
+            status_code=409,
+        )
+    if expected_revision != _settings_revision():
         return JSONResponse(
             {
                 "ok": False,
@@ -937,7 +951,18 @@ async def api_settings_save(request: Request):
         return JSONResponse(
             {"ok": False, "msg": "配置校验失败: " + err}, status_code=400
         )
-    save_settings(data)
+    try:
+        save_settings(data, expected_revision=expected_revision)
+    except ConcurrentWriteError:
+        return JSONResponse(
+            {
+                "ok": False,
+                "conflict": True,
+                "msg": "配置已被其他页面或进程修改，请刷新后重试",
+                "settings": _settings_payload(),
+            },
+            status_code=409,
+        )
     return {"ok": True, "settings": _settings_payload()}
 
 
@@ -958,7 +983,7 @@ async def api_settings_backfill_toggle(request: Request):
         return JSONResponse(
             {"ok": False, "msg": "backfill_enabled 必须是布尔值"}, status_code=400
         )
-    data = load_settings()
+    data, revision = _load_settings_snapshot()
     if data.get("backfill_enabled") == enabled:
         return {
             "ok": True,
@@ -972,7 +997,13 @@ async def api_settings_backfill_toggle(request: Request):
         return JSONResponse(
             {"ok": False, "msg": "配置校验失败: " + err}, status_code=400
         )
-    save_settings(data)
+    try:
+        save_settings(data, expected_revision=revision)
+    except ConcurrentWriteError:
+        return JSONResponse(
+            {"ok": False, "conflict": True, "msg": "配置已被其他进程修改，请刷新后重试"},
+            status_code=409,
+        )
     return {"ok": True, "changed": True, "backfill_enabled": enabled}
 
 
@@ -990,14 +1021,20 @@ async def api_settings_sync(request: Request):
     kind = body.get("kind", "all") if isinstance(body, dict) else "all"
     openids = body.get("openids") if isinstance(body, dict) else None
 
-    data = load_settings()
+    data, revision = _load_settings_snapshot()
     added = 0
     if kind in ("all", "groups"):
         added += sync_discovered_groups(data, openids)
     if kind in ("all", "users"):
         added += sync_discovered_users(data, openids)
     if added:
-        save_settings(data)
+        try:
+            save_settings(data, expected_revision=revision)
+        except ConcurrentWriteError:
+            return JSONResponse(
+                {"ok": False, "conflict": True, "msg": "配置已被其他进程修改，请刷新后重试"},
+                status_code=409,
+            )
     return {"ok": True, "added": added, "settings": load_settings()}
 
 
@@ -1024,7 +1061,7 @@ def api_settings_sync_preview():
 # 身份资料库 data/qq_identities.json 由机器人自动写入（plugins/identities.py），
 # 只作为「QQ 接收群」「私聊权限」卡片的辅助数据源：在 OpenID 旁展示已识别的
 # 群名/昵称与管理员备注。与白名单/权限机制完全独立，不参与任何放行判断。
-IDENTITIES_FILE = os.path.join(DATA_DIR, "qq_identities.json")
+IDENTITIES_FILE = data_path("qq_identities.json")
 
 
 def _read_identities():
@@ -1071,7 +1108,7 @@ def api_identities():
 # 通过 = 按现有同步流程（sync_discovered_*）加入 settings（默认禁用，
 # 是否放行仍由管理员勾选）；拒绝 = 移除申请，重新注册会再次出现。
 # 注册数据与白名单数据独立存储。
-REGISTRATIONS_FILE = os.path.join(DATA_DIR, "qq_registrations.json")
+REGISTRATIONS_FILE = data_path("qq_registrations.json")
 
 
 def _read_registrations():
@@ -1085,8 +1122,13 @@ def _read_registrations():
     return {}
 
 
-def _write_registrations(data):
-    atomic_write_json(REGISTRATIONS_FILE, data, indent=2)
+def _write_registrations(data, expected_revision=None):
+    atomic_write_json(
+        REGISTRATIONS_FILE,
+        data,
+        indent=2,
+        expected_revision=expected_revision,
+    )
 
 
 def _registration_items(kind):
@@ -1122,22 +1164,20 @@ def _ensure_discovered(filename, key, openid):
     """确保 openid 在自动发现记录中：注册必经真实消息事件（openid 已被
     自动发现过），若发现记录被清理则按注册申请补回，保证 sync_discovered_*
     能正常把该 openid 加入 settings。"""
-    path = os.path.join(DATA_DIR, filename)
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+    path = data_path(filename)
+    def mutate(data):
         if not isinstance(data, dict):
             data = {}
-    except Exception:
-        data = {}
-    openids = data.setdefault(key, [])
-    if not isinstance(openids, list):
-        openids = []
-        data[key] = openids
-    if str(openid) in openids:
-        return
-    openids.append(str(openid))
-    atomic_write_json(path, data, indent=4)
+        openids = data.setdefault(key, [])
+        if not isinstance(openids, list):
+            openids = []
+            data[key] = openids
+        if str(openid) in openids:
+            return False
+        openids.append(str(openid))
+        return True
+
+    update_json(path, mutate, default={}, indent=4, write_if=bool)
 
 
 def _fill_registration_info(data, list_key, openid, reg_entry):
@@ -1174,6 +1214,7 @@ async def api_registrations_review(request: Request):
     if action not in ("approve", "reject"):
         return JSONResponse({"ok": False, "msg": "无效的审核操作"}, status_code=400)
 
+    registrations_revision = file_revision(REGISTRATIONS_FILE)
     regs = _read_registrations()
     store = regs.get(kind)
     entry = store.pop(openid, None) if isinstance(store, dict) else None
@@ -1186,17 +1227,29 @@ async def api_registrations_review(request: Request):
     if action == "approve":
         if kind == "users":
             _ensure_discovered("qq_user_openids.json", "user_openids", openid)
-            data = load_settings()
+            data, settings_revision = _load_settings_snapshot()
             added = sync_discovered_users(data, [openid])
             _fill_registration_info(data, "qq_user_openids", openid, entry)
         else:
             _ensure_discovered("qq_group_openids.json", "group_openids", openid)
-            data = load_settings()
+            data, settings_revision = _load_settings_snapshot()
             added = sync_discovered_groups(data, [openid])
             _fill_registration_info(data, "qq_group_openids", openid, entry)
-        save_settings(data)
+        try:
+            save_settings(data, expected_revision=settings_revision)
+        except ConcurrentWriteError:
+            return JSONResponse(
+                {"ok": False, "msg": "settings 已被其他进程修改，请刷新后重试"},
+                status_code=409,
+            )
 
-    _write_registrations(regs)
+    try:
+        _write_registrations(regs, expected_revision=registrations_revision)
+    except ConcurrentWriteError:
+        return JSONResponse(
+            {"ok": False, "msg": "注册申请已被其他进程修改，请刷新后重试"},
+            status_code=409,
+        )
     _log("注册审核 kind=%s action=%s openid=%s 加入settings=%s" % (kind, action, openid, added))
     return {"ok": True, "added": added, "settings": load_settings()}
 
@@ -1509,8 +1562,11 @@ async def api_bot_loglevel_set(request: Request):
     if level not in ("DEBUG", "INFO", "WARNING", "ERROR"):
         return JSONResponse({"ok": False, "msg": "无效的日志级别"}, status_code=400)
     try:
-        with open(RUNTIME_LEVEL_FILE, "w", encoding="utf-8") as f:
-            json.dump({"level": level}, f, ensure_ascii=False, indent=2)
+        atomic_write_json(
+            RUNTIME_LEVEL_FILE,
+            {"level": level},
+            indent=2,
+        )
     except Exception as exc:
         _log("设置日志级别失败: %s" % exc)
         return {"ok": False, "msg": "写入失败"}

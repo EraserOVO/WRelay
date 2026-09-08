@@ -5,9 +5,10 @@ from plugins.json_io import (
     load_json,
     atomic_write_json,
 )
+from plugins.paths import data_path
 
 
-STATS_FILE = "data/stats.json"
+STATS_FILE = data_path("stats.json")
 
 
 # =====================================================

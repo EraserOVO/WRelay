@@ -8,11 +8,13 @@ import nonebot
 from nonebot import get_driver
 from nonebot import logger
 
+from plugins.paths import PROJECT_ROOT, data_path
+
 from nonebot.adapters.qq import Adapter as QQAdapter
 from nonebot.adapters.discord import Adapter as DiscordAdapter
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = str(PROJECT_ROOT)
 
 # =====================================================
 # 首次配置检查（安装后引导）
@@ -173,18 +175,9 @@ nonebot.init()
 # 面板写入 runtime_log_level.json 后，后台任务 3 秒内自动生效，无需重启。
 # =====================================================
 
-BOT_LOG = os.path.join(
-    BASE_DIR,
-    "data",
-    "logs",
-    "bot.log",
-)
+BOT_LOG = data_path(os.path.join("logs", "bot.log"))
 
-RUNTIME_LEVEL_FILE = os.path.join(
-    BASE_DIR,
-    "data",
-    "runtime_log_level.json",
-)
+RUNTIME_LEVEL_FILE = data_path("runtime_log_level.json")
 
 os.makedirs(
     os.path.dirname(BOT_LOG),

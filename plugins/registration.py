@@ -13,8 +13,9 @@ from nonebot.adapters.qq.event import (
 from plugins.config import get_active_user_openids
 from plugins.json_io import (
     load_json,
-    atomic_write_json,
+    update_json,
 )
+from plugins.paths import data_path
 
 
 # =====================================================
@@ -38,7 +39,7 @@ from plugins.json_io import (
 # 是否放行仍由管理员在面板勾选。
 # =====================================================
 
-REGISTRATIONS_FILE = "data/qq_registrations.json"
+REGISTRATIONS_FILE = data_path("qq_registrations.json")
 
 
 def load_registrations():
@@ -57,13 +58,20 @@ def register_user(user_openid, qq_id, nickname):
     openid = str(user_openid or "").strip()
     if not openid:
         return False
-    data = load_registrations()
-    data["users"][openid] = {
-        "qq_id": str(qq_id).strip(),
-        "nickname": str(nickname).strip(),
-        "time": int(time.time()),
-    }
-    atomic_write_json(REGISTRATIONS_FILE, data, indent=4)
+    def mutate(data):
+        if not isinstance(data, dict):
+            data = {}
+        for kind in ("users", "groups"):
+            if not isinstance(data.get(kind), dict):
+                data[kind] = {}
+        data["users"][openid] = {
+            "qq_id": str(qq_id).strip(),
+            "nickname": str(nickname).strip(),
+            "time": int(time.time()),
+        }
+        return True
+
+    update_json(REGISTRATIONS_FILE, mutate, default={}, indent=4)
     return True
 
 
@@ -72,14 +80,21 @@ def register_group(group_openid, qq_id, group_name, operator_openid):
     openid = str(group_openid or "").strip()
     if not openid:
         return False
-    data = load_registrations()
-    data["groups"][openid] = {
-        "qq_id": str(qq_id).strip(),
-        "group_name": str(group_name).strip(),
-        "operator_openid": str(operator_openid or "").strip(),
-        "time": int(time.time()),
-    }
-    atomic_write_json(REGISTRATIONS_FILE, data, indent=4)
+    def mutate(data):
+        if not isinstance(data, dict):
+            data = {}
+        for kind in ("users", "groups"):
+            if not isinstance(data.get(kind), dict):
+                data[kind] = {}
+        data["groups"][openid] = {
+            "qq_id": str(qq_id).strip(),
+            "group_name": str(group_name).strip(),
+            "operator_openid": str(operator_openid or "").strip(),
+            "time": int(time.time()),
+        }
+        return True
+
+    update_json(REGISTRATIONS_FILE, mutate, default={}, indent=4)
     return True
 
 
@@ -90,10 +105,21 @@ def remove_registration(kind, openid):
     openid = str(openid or "").strip()
     if not openid:
         return False
-    data = load_registrations()
-    existed = data.get(kind, {}).pop(openid, None) is not None
-    if existed:
-        atomic_write_json(REGISTRATIONS_FILE, data, indent=4)
+    def mutate(data):
+        if not isinstance(data, dict):
+            data = {}
+        bucket = data.setdefault(kind, {})
+        if not isinstance(bucket, dict):
+            data[kind] = bucket = {}
+        return bucket.pop(openid, None) is not None
+
+    existed = update_json(
+        REGISTRATIONS_FILE,
+        mutate,
+        default={},
+        indent=4,
+        write_if=bool,
+    )
     return existed
 
 

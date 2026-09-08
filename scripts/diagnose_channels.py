@@ -19,6 +19,12 @@ import sys
 import httpx
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE not in sys.path:
+    sys.path.insert(0, BASE)
+
+from plugins.json_io import atomic_write_json
+from plugins.paths import data_path
+
 ENV_FILE = os.path.join(BASE, ".env.prod")
 OUT_FILE = os.path.join(BASE, "docs", "CHANNELS.md")
 
@@ -194,10 +200,9 @@ async def main():
         ],
     }
 
-    audit_file = os.path.join(BASE, "data", "channels_audit.json")
+    audit_file = data_path("channels_audit.json")
     os.makedirs(os.path.dirname(audit_file), exist_ok=True)
-    with open(audit_file, "w", encoding="utf-8") as f:
-        json.dump(audit, f, ensure_ascii=False, indent=2)
+    atomic_write_json(audit_file, audit, indent=2)
 
     print(f"可见频道 {total_visible} 个，可读内容 {total_readable} 个")
     print(f"记录已写入 {OUT_FILE} 与 {audit_file}")

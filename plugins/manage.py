@@ -20,6 +20,7 @@ from plugins.json_io import (
     load_json,
     atomic_write_json,
 )
+from plugins.paths import data_path
 
 
 # =====================================================
@@ -37,7 +38,7 @@ from plugins.json_io import (
 
 # 与管理面板 PANEL_PORT（panel/管理面板.pyw）保持一致
 PANEL_API_BASE = "http://127.0.0.1:8090"
-PANEL_AUTH_FILE = "data/panel_auth.json"
+PANEL_AUTH_FILE = data_path("panel_auth.json")
 
 
 def _panel_token():
@@ -62,7 +63,7 @@ _panel_client = httpx.AsyncClient(
 # 私聊回复"重启完毕"，并清除标记。
 # =====================================================
 
-RESTART_PENDING_FILE = "data/restart_pending.json"
+RESTART_PENDING_FILE = data_path("restart_pending.json")
 RESTART_CONFIRM_MAX_AGE = 300  # 标记超过 5 分钟视为过期，避免误发
 
 
