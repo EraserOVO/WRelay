@@ -27,6 +27,7 @@ from plugins.fetch import (
     fetch_channel_messages_after,
 )
 from plugins.sender import log_partial_failure
+from plugins.translation import translate_text_parts
 from plugins.retry import (
     send_and_record,
     schedule_retry,
@@ -262,6 +263,12 @@ async def _backfill_channel(channel_id, channel_name, active_groups, limit):
                 )
             )
             continue
+
+        text_parts = await translate_text_parts(
+            text_parts,
+            ("discord", channel_id, message_id),
+            skip_leading_parts=1,
+        )
 
         ok_map = await send_and_record(
             channel_id,

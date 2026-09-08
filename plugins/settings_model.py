@@ -32,6 +32,38 @@ class SettingsModel(dict):
             "x_rss_sources": [],
             "x_rss_poll_interval": 300,
             "x_rsshub_base": "http://localhost:1200",
+            # 翻译链路开关：Discord/QQ 与 X RSS 各自独立。
+            # 服务本身是否可调用由地址、模型和密钥是否完整决定。
+            "translation": {
+                "enabled": False,
+                "provider": "tencent_tmt",
+                "fallback_provider": "ai",
+                "target_language": "zh",
+                "append_original": True,
+                "only_non_chinese": True,
+            },
+            # X RSS 使用独立开关和服务路由；服务凭据与 AI/TMT 配置共享。
+            "x_translation": {
+                "enabled": False,
+                "provider": "tencent_tmt",
+                "fallback_provider": "ai",
+                "target_language": "zh",
+                "append_original": True,
+                "only_non_chinese": True,
+            },
+            "ai": {
+                "base_url": "",
+                "model": "",
+                "api_key_env": "WRELAY_AI_API_KEY",
+                "timeout_seconds": 25,
+                "max_output_tokens": 800,
+            },
+            "tencent_tmt": {
+                "secret_id_env": "WRELAY_TENCENT_SECRET_ID",
+                "secret_key_env": "WRELAY_TENCENT_SECRET_KEY",
+                "region": "ap-guangzhou",
+                "project_id": 0,
+            },
         })
 
     @classmethod
@@ -45,6 +77,16 @@ class SettingsModel(dict):
         if not isinstance(data, dict):
             return cls(deepcopy(defaults))
         result = cls(deepcopy(dict(data)))
+        # AI 对话不属于 WRelay 的功能范围。兼容曾保存过该字段的配置：
+        # 读取时忽略，后续由管理面板保存时自然从磁盘配置移除。
+        result.pop("ai_chat", None)
+        # 服务级 enabled 从未参与实际调用；链路级 translation.enabled /
+        # x_translation.enabled 才是唯一开关。读取时移除遗留字段，避免
+        # 用户误以为它能关闭某个服务，后续保存时会自然完成迁移。
+        for service_name in ("ai", "tencent_tmt"):
+            service = result.get(service_name)
+            if isinstance(service, dict):
+                service.pop("enabled", None)
         for key, value in defaults.items():
             if key not in result:
                 result[key] = deepcopy(value)
@@ -79,6 +121,42 @@ def validate_settings(
         limit = data["backfill_limit"]
         if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
             return "backfill_limit 必须是正整数"
+
+    for name in ("translation", "x_translation"):
+        translation = data.get(name)
+        if not isinstance(translation, dict):
+            return "%s 必须是对象" % name
+        if not isinstance(translation.get("enabled"), bool):
+            return "%s.enabled 必须是布尔值" % name
+        if translation.get("provider") not in ("tencent_tmt", "ai"):
+            return "%s.provider 不支持" % name
+        if translation.get("fallback_provider") not in ("", "tencent_tmt", "ai"):
+            return "%s.fallback_provider 不支持" % name
+        if not isinstance(translation.get("target_language"), str):
+            return "%s.target_language 必须是字符串" % name
+        for key in ("append_original", "only_non_chinese"):
+            if not isinstance(translation.get(key), bool):
+                return "%s.%s 必须是布尔值" % (name, key)
+
+    ai = data.get("ai")
+    if not isinstance(ai, dict):
+        return "ai 必须是对象"
+    for key in ("base_url", "model", "api_key_env"):
+        if not isinstance(ai.get(key), str):
+            return "ai.%s 必须是字符串" % key
+    for key in ("timeout_seconds", "max_output_tokens"):
+        value = ai.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            return "ai.%s 必须是正整数" % key
+    tmt = data.get("tencent_tmt")
+    if not isinstance(tmt, dict):
+        return "tencent_tmt 必须是对象"
+    for key in ("secret_id_env", "secret_key_env", "region"):
+        if not isinstance(tmt.get(key), str):
+            return "tencent_tmt.%s 必须是字符串" % key
+    if not isinstance(tmt.get("project_id"), int) or isinstance(tmt.get("project_id"), bool):
+        return "tencent_tmt.project_id 必须是整数"
+
     for key, fields in (
         ("forwarding_groups", ("channels", "groups")),
         ("x_forwarding_groups", ("sources", "groups")),

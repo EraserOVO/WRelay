@@ -23,6 +23,7 @@ from plugins.fetch import (
     build_parts,
 )
 from plugins.sender import log_partial_failure
+from plugins.translation import translate_text_parts
 from plugins.stats import record
 from plugins.retry import (
     send_and_record,
@@ -165,6 +166,12 @@ async def handle(
             )
         )
         return
+
+    text_parts = await translate_text_parts(
+        text_parts,
+        ("discord", channel_id, message_id),
+        skip_leading_parts=1,
+    )
 
     # 组状态可能在消息处理期间被面板修改；发送前重新计算目标，避免暂停后仍投递一条。
     active_groups = get_groups_for_channel(channel_id)

@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
+  <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
     <div style="display:flex;flex-direction:column;align-items:flex-start;gap:8px;">
       <div>
         <h1 style="display:flex;align-items:center;gap:10px;margin:0 0 4px;">WRelay 管理面板
@@ -25,7 +25,7 @@
     </div>
   </div>
 
-  <div class="cardrow">
+  <div class="cardrow page-content">
     <div class="card">
       <h2 style="display:flex;align-items:center;gap:6px;">机器人状态 <button class="hintbtn" data-hint="managedHint" data-title="机器人状态">?</button></h2>
       <div class="row">
@@ -86,7 +86,7 @@
     </div>
   </div>
 
-  <div id="pageDiscord">
+  <div id="pageDiscord" class="page-content">
   <div class="card">
     <h2 style="display:flex;align-items:center;gap:6px;">转发组 <button class="hintbtn" data-hint="hint-fg" data-title="转发组">?</button></h2>
     <div id="fgBody">
@@ -154,9 +154,28 @@
       <div class="hint" id="hint-user" style="display:none">仅启用的用户可使用 relay 命令。注册审核通过后，还需点击「＋ 新增」加入白名单；删除注册记录后需重新注册。</div>
     </div>
   </div>
+
+  <div class="card">
+    <h2 style="display:flex;align-items:center;gap:6px;">自动翻译 <button class="hintbtn" data-hint="hint-auto-translation" data-title="自动翻译">?</button></h2>
+    <div class="auto-translation-section">
+      <div class="row auto-translation-fields">
+        <label class="auto-translation-field"><span>主服务</span><select id="translationProvider"><option value="tencent_tmt">腾讯 TMT</option><option value="ai">AI API</option></select></label>
+        <label class="auto-translation-field"><span>失败后</span><select id="translationFallback"><option value="ai">AI API</option><option value="tencent_tmt">腾讯 TMT</option><option value="">仅原文</option></select></label>
+        <label class="auto-translation-check"><input type="checkbox" id="translationAppendOriginal"> 保留原文</label>
+      </div>
+    </div>
+    <div class="row auto-translation-actions">
+      <div class="hint" id="hint-auto-translation" style="display:none">翻译失败时会按“失败后”选择降级；所有翻译服务不可用时仍会发送原文。</div>
+      <button id="btnTranslationToggle" class="sec translation-toggle" type="button"><span>启用翻译</span></button>
+      <span class="auto-translation-action-buttons">
+        <button id="btnSaveAISettings" type="button">保存设置</button>
+        <button id="btnTranslationConfig" class="sec iconbtn" title="翻译服务配置" aria-label="翻译服务配置"><svg width="20" height="20" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10.5" cy="17.5" r="7" stroke="currentColor" stroke-width="2.1"/><line x1="15.9834" y1="11.9145" x2="24.398" y2="3.49992" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="23.5054" y1="5.83398" x2="26.1453" y2="8.47385" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="20.5894" y1="8.75" x2="22.5693" y2="10.7299" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg></button>
+      </span>
+    </div>
+  </div>
   </div>
 
-  <div id="pageX" style="display:none">
+  <div id="pageX" class="page-content" style="display:none">
     <div class="card">
       <h2 style="display:flex;align-items:center;gap:6px;">转发组 <button class="hintbtn" data-hint="hint-xfg" data-title="转发组">?</button></h2>
       <div id="xFgBody">
@@ -224,6 +243,25 @@
           <button id="btnSyncXUsers" class="sec">注册审核</button>
         </div>
         <div class="hint" id="hint-xuser" style="display:none">全局白名单，与 Discord → QQ 页共用。仅启用的用户可使用 relay 命令；注册审核通过后，还需点击「＋ 新增」加入白名单。</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="display:flex;align-items:center;gap:6px;">X 自动翻译 <button class="hintbtn" data-hint="hint-x-auto-translation" data-title="X 自动翻译">?</button></h2>
+      <div class="auto-translation-section">
+        <div class="row auto-translation-fields">
+          <label class="auto-translation-field"><span>主服务</span><select id="xTranslationProvider"><option value="tencent_tmt">腾讯 TMT</option><option value="ai">AI API</option></select></label>
+          <label class="auto-translation-field"><span>失败后</span><select id="xTranslationFallback"><option value="ai">AI API</option><option value="tencent_tmt">腾讯 TMT</option><option value="">仅原文</option></select></label>
+          <label class="auto-translation-check"><input type="checkbox" id="xTranslationAppendOriginal"> 保留原文</label>
+        </div>
+      </div>
+      <div class="row auto-translation-actions">
+        <div class="hint" id="hint-x-auto-translation" style="display:none">X 翻译开关和服务选择独立于 Discord/QQ；服务密钥与 API 地址仍共用下方服务配置。</div>
+        <button id="btnXTranslationToggle" class="sec translation-toggle" type="button"><span>启用翻译</span></button>
+        <span class="auto-translation-action-buttons">
+          <button id="btnSaveXTranslationSettings" type="button">保存设置</button>
+          <button id="btnXTranslationConfig" class="sec iconbtn" title="翻译服务配置（共享）" aria-label="翻译服务配置（共享）"><svg width="20" height="20" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10.5" cy="17.5" r="7" stroke="currentColor" stroke-width="2.1"/><line x1="15.9834" y1="11.9145" x2="24.398" y2="3.49992" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="23.5054" y1="5.83398" x2="26.1453" y2="8.47385" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="20.5894" y1="8.75" x2="22.5693" y2="10.7299" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg></button>
+        </span>
       </div>
     </div>
   </div>
@@ -302,6 +340,28 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
         <span>GitHub</span>
       </button>
+    </div>
+  </div>
+</div>
+<div id="translationConfigModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;align-items:center;justify-content:center;">
+  <div style="position:relative;background:var(--modal-bg);border:1px solid var(--modal-border);border-radius:10px;padding:18px;max-width:460px;width:92%;display:flex;flex-direction:column;">
+    <button type="button" class="modal-x" data-close="translationConfigModal" aria-label="关闭">×</button>
+    <h3 style="margin:0 0 14px;">翻译服务配置</h3>
+    <h4 style="margin:0 0 10px;font-size:14px;">AI API</h4>
+    <label for="aiBaseUrl" style="font-size:13px;color:var(--muted);margin-bottom:4px;">AI API 地址</label>
+    <input type="text" id="aiBaseUrl" placeholder="https://.../v1" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
+    <label for="aiModel" style="font-size:13px;color:var(--muted);margin:14px 0 4px;">AI 模型</label>
+    <input type="text" id="aiModel" placeholder="qwen-flash" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
+    <h4 style="margin:18px 0 10px;font-size:14px;">腾讯 TMT</h4>
+    <label for="tencentSecretId" style="font-size:13px;color:var(--muted);margin-bottom:4px;">SecretId</label>
+    <input type="text" id="tencentSecretId" placeholder="留空表示保持当前配置" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
+    <label for="tencentSecretKey" style="font-size:13px;color:var(--muted);margin:14px 0 4px;">SecretKey</label>
+    <input type="password" id="tencentSecretKey" placeholder="留空表示保持当前配置" autocomplete="new-password" spellcheck="false" style="width:100%;box-sizing:border-box;">
+    <p id="tencentConfigStatus" style="font-size:12px;color:var(--muted);margin:10px 0 0;line-height:1.6;">TMT 配置状态读取中……</p>
+    <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.6;">翻译服务不再单独启用；左下角总开关打开后，主服务和失败后服务会按配置自动尝试。保存密钥后机器人会自动重启。</p>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
+      <button id="translationConfigCancel" class="sec">取消</button>
+      <button id="translationConfigSave">保存</button>
     </div>
   </div>
 </div>

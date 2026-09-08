@@ -12,8 +12,10 @@ requires-python = ">=3.10, <4.0"
 dependencies = [
     # [fastapi] = FastAPI + uvicorn[standard]（含 websockets），
     #             供 NoneBot 默认 FastAPI 驱动、面板与适配器 WebSocket 连接使用
-    # [httpx]    = 项目 plugins 与 NoneBot HTTP 客户端驱动直接使用
+    # [httpx]    = 项目 plugins 与 NoneBot HTTP 客户端驱动直接使用；
+    #              启用 SOCKS extra，以支持 .env.prod 中的 socks5 代理
     "nonebot2[fastapi,httpx]>=2.5.0,<3.0.0",
+    "httpx[socks]>=0.28.1,<0.29.0",
     "nonebot-adapter-qq>=1.7.0,<2.0.0",
     "nonebot-adapter-discord>=1.1.9,<2.0.0",
 ]

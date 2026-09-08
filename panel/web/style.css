@@ -74,9 +74,14 @@
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; padding: 24px;
+    margin: 0; padding: 24px clamp(32px, 6vw, 120px);
     font-family: "Microsoft YaHei", Arial, sans-serif;
     background: var(--bg); color: var(--fg);
+  }
+  /* 内容区限制最大宽度，并在宽屏左右保留稳定留白，避免卡片贴满窗口。 */
+  .page-header, .page-content, body > .card {
+    width: 100%; max-width: 1440px;
+    margin-left: auto; margin-right: auto;
   }
   h1 { font-size: 22px; margin: 0 0 4px; }
   .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
@@ -241,6 +246,56 @@
   .addrow input { flex: 1; }
   .addrow button { flex: none; }
   .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  /* 自动翻译卡：沿用转发组的“标题—分区—操作—说明”层次，
+     避免把所有开关和输入框挤在一行。 */
+  .auto-translation-section {
+    border-top: 1px solid var(--table-border);
+    padding: 12px 0;
+  }
+  .auto-translation-section:first-of-type { border-top: none; padding-top: 0; }
+  .auto-translation-section h3 {
+    margin: 0 0 10px;
+    color: var(--card-heading);
+    font-size: 14px;
+  }
+  .auto-translation-fields { gap: 10px 14px; }
+  .auto-translation-check,
+  .auto-translation-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .auto-translation-check { color: var(--fg); }
+  .auto-translation-field select,
+  .auto-translation-field input[type=text] {
+    width: 150px;
+    box-sizing: border-box;
+    background: var(--field-bg);
+    border: 1px solid var(--field-border);
+    border-radius: 5px;
+    color: var(--field-fg);
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+  .auto-translation-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: end;
+  }
+  .auto-translation-actions .hint { margin-top: 0; }
+  .auto-translation-actions .hint { grid-column: 1 / -1; }
+  .auto-translation-actions > .translation-toggle { grid-column: 1; justify-self: start; }
+  .auto-translation-action-buttons { grid-column: 2; display: inline-flex; align-items: center; gap: 6px; margin-left: 0; }
+  #btnTranslationToggle, #btnXTranslationToggle { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  #btnTranslationToggle svg, #btnXTranslationToggle svg { flex: none; }
+  #btnTranslationToggle[data-on="1"], #btnXTranslationToggle[data-on="1"] {
+    background: var(--primary);
+    border-color: var(--primary-border);
+    color: var(--btn-fg);
+  }
   .tip { color: var(--tip); font-size: 12px; }
   .delbtn { width: 100%; }
   .cardrow { display: flex; gap: 16px; align-items: stretch; }
@@ -398,7 +453,7 @@
 
   /* ---------- 转发组卡片 ---------- */
   .fgtabs {
-    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end;
     margin-bottom: 10px;
   }
   .fgtab {
@@ -425,11 +480,15 @@
   /* 预留：转发组行内重命名输入框（app.js 阶段使用） */
   .fgtab input.fg-rename { width: 92px; padding: 3px 6px; font-size: 12px; }
   /* 预留：转发组行内 重命名/删除 图标按钮（app.js 阶段使用） */
-  .fgtab .fgctrl {
-    padding: 0; width: 20px; height: 20px; border-radius: 4px;
+  /* 当前组的暂停/编辑/删除操作按钮：比转发组 tab 小一档，并与 tab 底边对齐。 */
+  .fgtabs > button.fg-toggle,
+  .fgtabs > button.fgctrl {
+    width: 24px; height: 24px; padding: 0; border-radius: 5px;
     font-size: 12px; line-height: 1;
     display: inline-flex; align-items: center; justify-content: center;
   }
+  .fgtabs > button.fg-toggle svg { width: 12px; height: 12px; }
+  .fgtabs > button.fgctrl svg { width: 12px; height: 12px; }
   .fgsection { border-top: 1px solid var(--panel-border); padding-top: 12px; }
   /* Discord/X 转发组内部的分隔线：首条横线 2px，后续横线下移 12px 并使用 1px */
   #fgBody .fgsection, #xFgBody .fgsection { border-top: 2px solid var(--panel-border); }
@@ -473,4 +532,14 @@
   }
   @media (max-width: 720px) {
     .fgtab { padding: 5px 10px; font-size: 12px; }
+    body { padding-left: 16px; padding-right: 16px; }
+    .auto-translation-actions { grid-template-columns: 1fr; }
+    .auto-translation-actions > .translation-toggle,
+    .auto-translation-action-buttons { grid-column: 1; justify-self: start; }
+  }
+  @media (max-width: 1000px) {
+    .cardrow { flex-direction: column; }
+    .cardrow .card:nth-child(1),
+    .cardrow .card:nth-child(2),
+    .cardrow .card#xrssCard { min-width: 0; }
   }

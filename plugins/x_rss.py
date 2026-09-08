@@ -40,6 +40,7 @@ from plugins.config import (
     get_x_rss_sources,
     get_x_rss_poll_interval,
     get_x_groups_for_source,
+    get_x_translation_config,
 )
 from plugins.media import fetch_bytes_many, make_text, make_media_link
 from plugins.sender import get_qq_bot
@@ -54,6 +55,7 @@ from plugins.dedup import (
     select_target_groups,
 )
 from plugins.retry import send_and_record
+from plugins.translation import translate_text_parts
 from plugins.json_io import (
     load_json,
     atomic_write_json,
@@ -355,6 +357,12 @@ async def _send_posts(source, posts):
                 failed_count += 1
                 continue
             text_parts, media_items = rendered
+            text_parts = await translate_text_parts(
+                text_parts,
+                ("x_rss", source["key"], post["id"]),
+                skip_leading_parts=1,
+                config=get_x_translation_config(),
+            )
 
             # 组状态可能在渲染期间被面板修改；发送前重新计算目标，避免暂停后仍投递一条。
             active_groups = get_x_groups_for_source(source["key"])

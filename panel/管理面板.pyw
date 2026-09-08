@@ -1412,6 +1412,181 @@ def _write_discord_bots(bots, lines, line_idx, end_idx):
     _write_bots("DISCORD_BOTS", bots, lines, line_idx, end_idx)
 
 
+_TRANSLATION_ENV_KEYS = (
+    "WRELAY_TENCENT_SECRET_ID",
+    "WRELAY_TENCENT_SECRET_KEY",
+)
+
+
+def _env_value_present(raw):
+    """判断 .env 标量值是否非空，不返回实际密钥内容。"""
+    value = str(raw or "").strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        value = value[1:-1].strip()
+    return bool(value)
+
+
+def _read_translation_env_state():
+    """只返回腾讯密钥是否已配置，绝不把密钥返回给浏览器。"""
+    state = {key: False for key in _TRANSLATION_ENV_KEYS}
+    if not os.path.exists(ENV_PROD):
+        return state
+    with open(ENV_PROD, "r", encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, value = stripped.split("=", 1)
+            key = key.strip()
+            if key in state:
+                state[key] = _env_value_present(value)
+    return state
+
+
+def _repair_translation_env_file():
+    """修复密钥被追加到上一行的旧配置，仅处理腾讯翻译变量。"""
+    if not os.path.exists(ENV_PROD):
+        raise RuntimeError(".env.prod 不存在")
+    markers = tuple("%s=" % key for key in _TRANSLATION_ENV_KEYS)
+    with _ENV_WRITE_LOCK:
+        with open(ENV_PROD, "r", encoding="utf-8", newline="") as f:
+            original_lines = f.readlines()
+        ending = "\r\n"
+        for line in original_lines:
+            if line.endswith("\r\n"):
+                break
+            if line.endswith("\n"):
+                ending = "\n"
+                break
+
+        lines = []
+        changed = False
+        for line in original_lines:
+            positions = [line.find(marker) for marker in markers]
+            position = min((item for item in positions if item > 0), default=-1)
+            prefix = line[:position] if position > 0 else ""
+            if position <= 0 or prefix.lstrip().startswith("#") or "=" not in prefix:
+                lines.append(line)
+                continue
+            if not prefix.endswith(("\r\n", "\n", "\r")):
+                prefix += ending
+            lines.extend((prefix, line[position:]))
+            changed = True
+
+        if not changed:
+            return False
+        tmp = "%s.%s.%s.tmp" % (ENV_PROD, os.getpid(), uuid.uuid4().hex)
+        try:
+            with open(tmp, "w", encoding="utf-8", newline="") as f:
+                f.writelines(lines)
+            os.replace(tmp, ENV_PROD)
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+    return True
+
+
+def _write_translation_env(values):
+    """原子写回腾讯密钥；空值表示保持原值，不创建密钥备份。"""
+    if not os.path.exists(ENV_PROD):
+        raise RuntimeError(".env.prod 不存在")
+    updates = {
+        key: str(values.get(key) or "").strip()
+        for key in _TRANSLATION_ENV_KEYS
+        if str(values.get(key) or "").strip()
+    }
+    if not updates:
+        return
+    if any("\r" in value or "\n" in value for value in updates.values()):
+        raise ValueError("密钥不能包含换行")
+
+    with _ENV_WRITE_LOCK:
+        with open(ENV_PROD, "r", encoding="utf-8", newline="") as f:
+            lines = f.readlines()
+        ending = "\r\n"
+        for line in lines:
+            if line.endswith("\r\n"):
+                ending = "\r\n"
+                break
+            if line.endswith("\n"):
+                ending = "\n"
+                break
+        seen = set()
+        for index, line in enumerate(lines):
+            raw = line.lstrip()
+            if raw.startswith("#") or "=" not in raw:
+                continue
+            key = raw.split("=", 1)[0].strip()
+            if key not in updates:
+                continue
+            line_ending = "\r\n" if line.endswith("\r\n") else ("\n" if line.endswith("\n") else "")
+            lines[index] = "%s=%s%s" % (key, json.dumps(updates[key], ensure_ascii=False), line_ending)
+            seen.add(key)
+        for key, value in updates.items():
+            if key not in seen:
+                if lines and not lines[-1].endswith(("\r\n", "\n", "\r")):
+                    lines[-1] += ending
+                lines.append("%s=%s%s" % (key, json.dumps(value, ensure_ascii=False), ending))
+
+        tmp = "%s.%s.%s.tmp" % (ENV_PROD, os.getpid(), uuid.uuid4().hex)
+        try:
+            with open(tmp, "w", encoding="utf-8", newline="") as f:
+                f.writelines(lines)
+            os.replace(tmp, ENV_PROD)
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+
+
+@app.get("/api/translation/env")
+def api_translation_env():
+    """返回腾讯密钥配置状态，不返回密钥内容。"""
+    return {"ok": True, "configured": _read_translation_env_state()}
+
+
+@app.post("/api/translation/env/repair")
+def api_translation_env_repair():
+    """修复旧版本密钥保存造成的末行拼接，不返回密钥。"""
+    try:
+        repaired = _repair_translation_env_file()
+    except Exception:
+        _log("修复腾讯翻译密钥配置失败")
+        return JSONResponse({"ok": False, "msg": "修复翻译密钥配置失败"}, status_code=500)
+    if repaired:
+        _log("已修复腾讯翻译密钥配置的换行")
+    return {"ok": True, "repaired": repaired, "configured": _read_translation_env_state()}
+
+
+@app.post("/api/translation/env")
+async def api_translation_env_save(request: Request):
+    """保存腾讯 SecretId/SecretKey 到 .env.prod，成功后由前端重启 Bot。"""
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
+    if not isinstance(data, dict):
+        return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
+    values = {
+        "WRELAY_TENCENT_SECRET_ID": data.get("secret_id"),
+        "WRELAY_TENCENT_SECRET_KEY": data.get("secret_key"),
+    }
+    try:
+        _write_translation_env(values)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "msg": str(exc)}, status_code=400)
+    except Exception:
+        _log("写入腾讯翻译密钥失败")
+        return JSONResponse({"ok": False, "msg": "保存腾讯 TMT 密钥失败"}, status_code=500)
+    _log("腾讯 TMT 密钥配置已更新")
+    return {"ok": True, "configured": _read_translation_env_state()}
+
+
 @app.get("/api/bot/qq-config")
 def api_bot_qq_config():
     """返回当前 QQ Bot 的 AppID（从 .env.prod 读取真实配置）。

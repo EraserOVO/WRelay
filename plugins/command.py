@@ -28,6 +28,7 @@ from plugins.fetch import (
 )
 from plugins.media import make_text
 from plugins.sender import send_relay_message
+from plugins.translation import translate_text_parts
 from plugins.json_io import (
     load_json,
     update_json,
@@ -498,11 +499,24 @@ async def _consume_next(bot, event, message, entry, user):
             msg,
             source_label="手动转发来自",
         )
+        translation_key = (
+            "discord",
+            str(msg.get("channel_id") or ""),
+            str(msg.get("message_id") or ""),
+        )
 
     else:
 
         text_parts = [make_text(message)]
         media_items = []
+        event_id = str(getattr(event, "id", "") or "")
+        translation_key = ("qq_c2c", event_id) if event_id else None
+
+    text_parts = await translate_text_parts(
+        text_parts,
+        translation_key,
+        skip_leading_parts=1 if is_discord_url(message) else 0,
+    )
 
     ok_map = await send_relay_message(
         text_parts,

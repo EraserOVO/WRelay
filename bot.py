@@ -4,6 +4,7 @@ import os
 import sys
 
 import nonebot
+from dotenv import load_dotenv
 
 from nonebot import get_driver
 from nonebot import logger
@@ -35,6 +36,11 @@ BASE_DIR = str(PROJECT_ROOT)
 # =====================================================
 
 ENV_PROD = os.path.join(BASE_DIR, ".env.prod")
+
+# NoneBot 会用 .env.prod 解析适配器配置，但自定义翻译密钥不会自动注入
+# os.environ；TMT/AI 客户端通过 os.getenv 读取，因此这里在 Bot 初始化前
+# 显式加载一次。已有系统环境变量优先，避免启动参数被配置文件覆盖。
+load_dotenv(ENV_PROD, override=False)
 
 # .env.example 中明确给出的示例占位字符串（精确匹配，不做宽泛中文词判断）
 _QQ_PLACEHOLDER_APPID = "你的AppID"

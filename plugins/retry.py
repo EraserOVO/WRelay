@@ -16,6 +16,7 @@ from plugins.history import (
     update_last_messages,
 )
 from plugins.sender import send_relay_message
+from plugins.translation import translate_text_parts
 from plugins.json_io import atomic_write_json, load_json
 from plugins.paths import data_path
 
@@ -305,6 +306,12 @@ async def _process_due(channel_id):
             _remove_entry(channel_id, message_id)
             _save_pending()
             continue
+
+        text_parts = await translate_text_parts(
+            text_parts,
+            ("discord", channel_id, message_id),
+            skip_leading_parts=1,
+        )
 
         ok_map = await send_and_record(
             channel_id,

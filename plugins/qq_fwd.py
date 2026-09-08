@@ -40,6 +40,7 @@ from plugins.config import (
 )
 from plugins.media import make_text, make_media_link
 from plugins.sender import send_relay_message
+from plugins.translation import translate_text_parts
 
 
 # =====================================================
@@ -401,6 +402,11 @@ async def _try_forward_next(bot, event, text):
         return
 
     text_parts, media_items = await build_forward_content(message)
+    event_id = str(getattr(event, "id", "") or "")
+    text_parts = await translate_text_parts(
+        text_parts,
+        ("qq_group", event_id) if event_id else None,
+    )
     try:
         ok_map = await send_forward_to_group(
             entry["target"]["openid"], text_parts, media_items)

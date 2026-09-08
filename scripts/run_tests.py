@@ -16,6 +16,7 @@ TESTS = (
     "test_send_failure_logs.py",
     "test_x_forwarding_groups.py",
     "test_x_poll_concurrency.py",
+    "test_translation.py",
     "test_panel_safety.py",
     "test_persistence_safety.py",
 )

@@ -572,6 +572,7 @@ function startFgRename(ctx) {
 }
 
 function renderSettings() {
+  renderAIControls();
   renderFgTabs(FG_DISCORD);
   const activeFg = getActiveFg(FG_DISCORD);
   const gb = document.getElementById("groupBody");
@@ -677,6 +678,62 @@ function renderSettings() {
   renderXPage();
 }
 
+function renderAIControls() {
+  if (!settings || !document.getElementById("btnTranslationToggle")) return;
+  const translation = settings.translation || {};
+  renderTranslationToggle(!!translation.enabled);
+  document.getElementById("translationProvider").value = translation.provider || "tencent_tmt";
+  document.getElementById("translationFallback").value = translation.fallback_provider || "";
+  document.getElementById("translationAppendOriginal").checked = translation.append_original !== false;
+}
+
+function renderTranslationToggle(on) {
+  renderTranslationToggleFor("btnTranslationToggle", on);
+}
+
+function renderTranslationToggleFor(buttonId, on) {
+  const btn = document.getElementById(buttonId);
+  if (!btn) return;
+  btn.dataset.on = on ? "1" : "0";
+  const icon = on
+    ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
+    : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+  btn.innerHTML = icon + "<span>启用翻译</span>";
+}
+
+function saveAIControls() {
+  settings.translation = settings.translation || {};
+  settings.translation.provider = document.getElementById("translationProvider").value;
+  settings.translation.fallback_provider = document.getElementById("translationFallback").value;
+  settings.translation.append_original = document.getElementById("translationAppendOriginal").checked;
+}
+
+document.getElementById("btnSaveAISettings").addEventListener("click", async function () {
+  saveAIControls();
+  await saveAndReload();
+});
+
+function renderXTranslationControls() {
+  if (!settings || !document.getElementById("btnXTranslationToggle")) return;
+  const translation = settings.x_translation || {};
+  renderTranslationToggleFor("btnXTranslationToggle", !!translation.enabled);
+  document.getElementById("xTranslationProvider").value = translation.provider || "tencent_tmt";
+  document.getElementById("xTranslationFallback").value = translation.fallback_provider || "";
+  document.getElementById("xTranslationAppendOriginal").checked = translation.append_original !== false;
+}
+
+function saveXTranslationControls() {
+  settings.x_translation = settings.x_translation || {};
+  settings.x_translation.provider = document.getElementById("xTranslationProvider").value;
+  settings.x_translation.fallback_provider = document.getElementById("xTranslationFallback").value;
+  settings.x_translation.append_original = document.getElementById("xTranslationAppendOriginal").checked;
+}
+
+document.getElementById("btnSaveXTranslationSettings").addEventListener("click", async function () {
+  saveXTranslationControls();
+  await saveAndReload();
+});
+
 // ---------------- X → QQ 页面 ----------------
 // 转发组读写 settings.x_forwarding_groups（与 Discord forwarding_groups 完全
 // 独立；组机制函数与 Discord 页共用，见 FG_X 上下文）；私聊白名单与 X RSS
@@ -686,6 +743,7 @@ function renderSettings() {
 function renderXPage() {
   const srcBody = document.getElementById("xSourceBody");
   if (!srcBody || !settings) return;
+  renderXTranslationControls();
   renderFgTabs(FG_X);
   const xfg = getActiveFg(FG_X);
 
@@ -1635,6 +1693,74 @@ async function saveQQConfig() {
   await refreshStatus();
 }
 
+// ---------- 翻译服务配置弹窗 ----------
+function closeTranslationConfigModal() {
+  document.getElementById("translationConfigModal").style.display = "none";
+}
+async function openTranslationConfigModal() {
+  const ai = (settings && settings.ai) || {};
+  document.getElementById("aiBaseUrl").value = ai.base_url || "";
+  document.getElementById("aiModel").value = ai.model || "";
+  document.getElementById("tencentSecretId").value = "";
+  document.getElementById("tencentSecretKey").value = "";
+  document.getElementById("tencentConfigStatus").textContent = "TMT 配置状态读取中……";
+  document.getElementById("translationConfigModal").style.display = "flex";
+  let r;
+  try { r = await jget("/api/translation/env"); } catch (e) { r = null; }
+  const configured = r && r.ok ? (r.configured || {}) : {};
+  const idReady = !!configured.WRELAY_TENCENT_SECRET_ID;
+  const keyReady = !!configured.WRELAY_TENCENT_SECRET_KEY;
+  const status = document.getElementById("tencentConfigStatus");
+  if (!r || !r.ok) {
+    status.textContent = (r && r.msg) || "无法读取 TMT 配置状态";
+  } else if (idReady && keyReady) {
+    status.textContent = "TMT SecretId / SecretKey 已配置；输入框留空表示保持当前密钥。";
+  } else {
+    status.textContent = "TMT 密钥尚未完整配置，请填写 SecretId 和 SecretKey。";
+  }
+}
+async function saveTranslationConfig() {
+  settings.ai = settings.ai || {};
+  settings.tencent_tmt = settings.tencent_tmt || {};
+  // 服务是否可用由地址、模型和密钥决定；不再提供服务级启用开关。
+  settings.ai.base_url = document.getElementById("aiBaseUrl").value.trim();
+  settings.ai.model = document.getElementById("aiModel").value.trim();
+  const saveBtn = document.getElementById("translationConfigSave");
+  const cancelBtn = document.getElementById("translationConfigCancel");
+  saveBtn.disabled = true;
+  cancelBtn.disabled = true;
+  let envResult;
+  try {
+    envResult = await jpost("/api/translation/env", {
+      secret_id: document.getElementById("tencentSecretId").value,
+      secret_key: document.getElementById("tencentSecretKey").value,
+    });
+  } catch (e) { envResult = {ok: false, msg: "保存失败，请重试"}; }
+  if (!envResult || !envResult.ok) {
+    saveBtn.disabled = false;
+    cancelBtn.disabled = false;
+    showAlert("保存失败", (envResult && envResult.msg) || "保存腾讯 TMT 密钥失败");
+    return;
+  }
+  const saved = await saveAndReload();
+  if (!saved) {
+    saveBtn.disabled = false;
+    cancelBtn.disabled = false;
+    return;
+  }
+  // .env.prod 中的密钥需要新 Bot 进程重新加载；失败时不回滚已保存配置。
+  let restartResult;
+  try { restartResult = await jpost("/api/bot/restart"); } catch (e) { restartResult = {ok: false}; }
+  saveBtn.disabled = false;
+  cancelBtn.disabled = false;
+  if (!restartResult || !restartResult.ok) {
+    showAlert("配置已保存", "翻译配置已保存，但机器人重启失败，请稍后手动重启");
+    return;
+  }
+  closeTranslationConfigModal();
+  await refreshStatus();
+}
+
 // ---------- Discord Bot 配置弹窗 ----------
 // 绝不在 localStorage / console 保存或输出 Token；打开时输入框留空，
 // Token 留空提交表示保持当前 Token 不变（后端处理）。
@@ -1698,6 +1824,7 @@ document.addEventListener("click", async function (e) {
       confirmModal: hideConfirm,
       filterModal: closeFilterModal,
       aboutModal: function () { document.getElementById("aboutModal").style.display = "none"; },
+      translationConfigModal: closeTranslationConfigModal,
       qqConfigModal: closeQQConfigModal,
       discordConfigModal: closeDiscordConfigModal,
     };
@@ -1769,6 +1896,22 @@ document.addEventListener("click", async function (e) {
   }
   if (btn.id === "btnQQConfig") {
     openQQConfigModal();
+    return;
+  }
+  if (btn.id === "btnTranslationConfig") {
+    openTranslationConfigModal();
+    return;
+  }
+  if (btn.id === "btnXTranslationConfig") {
+    openTranslationConfigModal();
+    return;
+  }
+  if (btn.id === "translationConfigCancel") {
+    closeTranslationConfigModal();
+    return;
+  }
+  if (btn.id === "translationConfigSave") {
+    saveTranslationConfig();
     return;
   }
   if (btn.id === "qqConfigCancel") {
@@ -1945,6 +2088,14 @@ document.addEventListener("click", async function (e) {
     renderAutostart(btn, !!r.enabled);
   } else if (btn.id === "btnBackfillToggle") {
     settings.backfill_enabled = btn.dataset.on !== "1";
+    await saveAndReload();
+  } else if (btn.id === "btnTranslationToggle") {
+    settings.translation = settings.translation || {};
+    settings.translation.enabled = btn.dataset.on !== "1";
+    await saveAndReload();
+  } else if (btn.id === "btnXTranslationToggle") {
+    settings.x_translation = settings.x_translation || {};
+    settings.x_translation.enabled = btn.dataset.on !== "1";
     await saveAndReload();
   } else if (btn.id === "btnAbout") {
     document.getElementById("aboutModal").style.display = "flex";

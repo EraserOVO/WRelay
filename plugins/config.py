@@ -85,6 +85,29 @@ def _default_settings():
     ).to_dict()
 
 
+def _setting_object(name):
+    """读取一个设置对象的副本，避免调用方修改内存配置缓存。"""
+    value = _load_settings().get(name)
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def get_translation_config():
+    return _setting_object("translation")
+
+
+def get_x_translation_config():
+    """返回 X RSS 专属翻译配置（独立开关与服务路由）。"""
+    return _setting_object("x_translation")
+
+
+def get_ai_config():
+    return _setting_object("ai")
+
+
+def get_tencent_tmt_config():
+    return _setting_object("tencent_tmt")
+
+
 def _ensure_settings_file():
     """settings.json 完全不存在时用默认值初始化（首跑引导）。
 

@@ -62,11 +62,13 @@ def main():
     ).status_code == 200
     print("PASS - 面板 Origin 与 API 令牌边界")
 
-    assert panel._validate_settings({
+    valid_settings = panel.get_default_settings()
+    valid_settings.update({
         "qq_group_openids": [],
         "qq_user_openids": [],
         "discord_channels": [],
-    }) is None
+    })
+    assert panel._validate_settings(valid_settings) is None
     assert panel._validate_settings({"qq_group_openids": {}})
     assert panel._validate_settings({
         "qq_group_openids": [],
