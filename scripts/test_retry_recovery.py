@@ -170,6 +170,17 @@ async def test_cursor_never_regresses():
     print("[OK] 游标只进不退（101 不回退，103 正常推进）")
 
 
+async def test_skipped_message_advances_cursor():
+    cm = {"B": "100"}
+    changed = dedup.apply_skipped(cm, ["B"], "101")
+    assert changed is True
+    assert cm["B"] == "101"
+    changed_again = dedup.apply_skipped(cm, ["B"], "100")
+    assert changed_again is False
+    assert cm["B"] == "101"
+    print("[OK] 无可发送内容的消息推进游标且不回退")
+
+
 async def test_only_failed_groups_retried():
     initial = {"C1": {"A": "100", "B": "100"}}
     results = {("C1", "101"): [{"B": False}, {}]}
@@ -254,6 +265,7 @@ async def main():
     await test_m1_fail_m2_ok_m1_retry_not_lost()
     await test_retry_backfill_concurrent_no_duplicate()
     await test_cursor_never_regresses()
+    await test_skipped_message_advances_cursor()
     await test_only_failed_groups_retried()
     await test_exhaustion_then_backfill_fallback()
     await test_normal_success_no_retry()

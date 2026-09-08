@@ -38,6 +38,7 @@ from plugins.dedup import (
     compute_base_id,
     apply_baseline,
     apply_success,
+    apply_skipped,
 )
 
 
@@ -253,6 +254,13 @@ async def _backfill_channel(channel_id, channel_name, active_groups, limit):
         )
 
         if not has_content:
+            await update_last_messages(
+                lambda last: apply_skipped(
+                    normalize_channel_map(last, channel_id),
+                    target_groups,
+                    message_id,
+                )
+            )
             continue
 
         ok_map = await send_and_record(

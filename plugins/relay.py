@@ -32,6 +32,7 @@ from plugins.dedup import (
     normalize_channel_map,
     select_target_groups,
     apply_success,
+    apply_skipped,
 )
 
 
@@ -156,6 +157,13 @@ async def handle(
 
 
     if not has_content:
+        await update_last_messages(
+            lambda last: apply_skipped(
+                normalize_channel_map(last, channel_id),
+                target_groups,
+                message_id,
+            )
+        )
         return
 
     # 组状态可能在消息处理期间被面板修改；发送前重新计算目标，避免暂停后仍投递一条。

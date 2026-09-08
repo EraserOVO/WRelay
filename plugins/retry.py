@@ -6,6 +6,7 @@ from nonebot import get_driver, logger
 from plugins.config import get_channel_filter
 from plugins.dedup import (
     apply_success,
+    apply_skipped,
     normalize_channel_map,
 )
 from plugins.fetch import build_parts
@@ -293,6 +294,13 @@ async def _process_due(channel_id):
                 "延迟重试无可发送内容，放弃 频道{} 消息{}",
                 channel_id,
                 message_id,
+            )
+            await update_last_messages(
+                lambda last: apply_skipped(
+                    normalize_channel_map(last, channel_id),
+                    list(entry.groups),
+                    message_id,
+                )
             )
             _remove_entry(channel_id, message_id)
             _save_pending()

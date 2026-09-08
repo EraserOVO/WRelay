@@ -140,3 +140,21 @@ def apply_success(
             changed = True
 
     return changed
+
+
+def apply_skipped(
+    channel_map: dict,
+    groups: list[str],
+    message_id: str,
+) -> bool:
+    """记录已明确跳过的消息，推进目标群游标但不表示实际发送成功。
+
+    消息经过当前筛选/消息类型配置后没有可发送内容时，不应反复进入
+    补发和重试流程；其游标语义与“已处理”一致，但单独命名以免把
+    跳过误解为 QQ 已送达。
+    """
+    return apply_success(
+        channel_map,
+        {group: True for group in groups},
+        message_id,
+    )
