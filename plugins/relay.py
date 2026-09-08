@@ -10,20 +10,14 @@ from plugins.config import (
     get_groups_for_channel,
     get_channel_filter,
 )
-from plugins.filter import (
-    check_message_filter,
-    get_enabled_message_types,
-)
+from plugins.filter import check_message_filter
 from plugins.history import (
     load_last_messages,
     update_last_messages,
 )
-from plugins.fetch import (
-    normalize_event,
-    build_parts,
-)
+from plugins.fetch import normalize_event
+from plugins.forward_service import prepare_discord_message
 from plugins.sender import log_partial_failure
-from plugins.translation import translate_text_parts
 from plugins.stats import record
 from plugins.retry import (
     send_and_record,
@@ -149,15 +143,15 @@ async def handle(
 
     # 消息类型筛选：按消息内部各内容组件过滤（由 build_parts 执行），
     # 过滤后无内容时不发送（has_content=False）
-    text_parts, media_items, has_content = await build_parts(
+    rendered = await prepare_discord_message(
         message,
-        enabled_types=get_enabled_message_types(
-            filter_config
-        ),
+        channel_id,
+        message_id,
+        filter_config=filter_config,
     )
 
 
-    if not has_content:
+    if rendered is None:
         await update_last_messages(
             lambda last: apply_skipped(
                 normalize_channel_map(last, channel_id),
@@ -167,11 +161,7 @@ async def handle(
         )
         return
 
-    text_parts = await translate_text_parts(
-        text_parts,
-        ("discord", channel_id, message_id),
-        skip_leading_parts=1,
-    )
+    text_parts, media_items = rendered
 
     # 组状态可能在消息处理期间被面板修改；发送前重新计算目标，避免暂停后仍投递一条。
     active_groups = get_groups_for_channel(channel_id)

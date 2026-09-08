@@ -9,8 +9,7 @@ from plugins.dedup import (
     apply_skipped,
     normalize_channel_map,
 )
-from plugins.fetch import build_parts
-from plugins.filter import get_enabled_message_types
+from plugins.forward_service import prepare_discord_message
 from plugins.history import (
     load_last_messages,
     update_last_messages,
@@ -272,12 +271,12 @@ async def _process_due(channel_id):
         try:
             # 消息类型筛选：与实时转发/补发共用同一渲染逻辑，
             # 按内容组件过滤（重试时读当前配置，改开关立即生效）
-            text_parts, media_items, has_content = await build_parts(
+            rendered = await prepare_discord_message(
                 entry.message,
+                channel_id,
+                message_id,
                 source_label=entry.source_label,
-                enabled_types=get_enabled_message_types(
-                    get_channel_filter(channel_id)
-                ),
+                filter_config=get_channel_filter(channel_id),
             )
         except Exception:
             _last_error = f"频道{channel_id} 消息{message_id} 内容重建失败"
@@ -290,7 +289,7 @@ async def _process_due(channel_id):
             _save_pending()
             continue
 
-        if not has_content:
+        if rendered is None:
             logger.warning(
                 "延迟重试无可发送内容，放弃 频道{} 消息{}",
                 channel_id,
@@ -307,11 +306,7 @@ async def _process_due(channel_id):
             _save_pending()
             continue
 
-        text_parts = await translate_text_parts(
-            text_parts,
-            ("discord", channel_id, message_id),
-            skip_leading_parts=1,
-        )
+        text_parts, media_items = rendered
 
         ok_map = await send_and_record(
             channel_id,

@@ -13,21 +13,14 @@ from plugins.config import (
     get_backfill_enabled,
     get_channel_filter,
 )
-from plugins.filter import (
-    check_message_filter,
-    get_enabled_message_types,
-)
+from plugins.filter import check_message_filter
 from plugins.history import (
     load_last_messages,
     update_last_messages,
 )
-from plugins.fetch import (
-    build_parts,
-    fetch_channel_latest,
-    fetch_channel_messages_after,
-)
+from plugins.fetch import fetch_channel_latest, fetch_channel_messages_after
+from plugins.forward_service import prepare_discord_message
 from plugins.sender import log_partial_failure
-from plugins.translation import translate_text_parts
 from plugins.retry import (
     send_and_record,
     schedule_retry,
@@ -246,15 +239,15 @@ async def _backfill_channel(channel_id, channel_name, active_groups, limit):
 
         # 消息类型筛选：与实时转发共用同一渲染逻辑，按内容组件过滤，
         # 过滤后无内容时不发送
-        text_parts, media_items, has_content = await build_parts(
+        rendered = await prepare_discord_message(
             msg,
+            channel_id,
+            message_id,
             source_label="自动补发来自",
-            enabled_types=get_enabled_message_types(
-                filter_config
-            ),
+            filter_config=filter_config,
         )
 
-        if not has_content:
+        if rendered is None:
             await update_last_messages(
                 lambda last: apply_skipped(
                     normalize_channel_map(last, channel_id),
@@ -264,11 +257,7 @@ async def _backfill_channel(channel_id, channel_name, active_groups, limit):
             )
             continue
 
-        text_parts = await translate_text_parts(
-            text_parts,
-            ("discord", channel_id, message_id),
-            skip_leading_parts=1,
-        )
+        text_parts, media_items = rendered
 
         ok_map = await send_and_record(
             channel_id,

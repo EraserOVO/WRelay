@@ -65,8 +65,14 @@ class FakeSender:
         return {g: True for g in (groups or [])}
 
 
-async def fake_build_parts(message, source_label="自动转发来自", enabled_types=None):
-    return (["占位"], [], True)
+async def fake_prepare_message(
+    message,
+    channel_id,
+    message_id,
+    source_label="自动转发来自",
+    filter_config=None,
+):
+    return (["占位"], [])
 
 
 class Ctx:
@@ -81,7 +87,7 @@ class Ctx:
             load_last_messages=self.store.load,
             update_last_messages=self.store.update,
             send_relay_message=self.sender,
-            build_parts=fake_build_parts,
+            prepare_discord_message=fake_prepare_message,
         )
 
     def __enter__(self):
