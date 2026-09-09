@@ -78,6 +78,22 @@ X_STATE_FILE = data_path("x_rss.json")
 # 进程重启后缓存丢失，此时收到 304 会强制重取一次全量（自愈）。
 _posts_cache = {}
 _state_file_lock = threading.Lock()
+_feed_client = None
+
+
+def _get_feed_client():
+    global _feed_client
+    if _feed_client is None:
+        _feed_client = httpx.AsyncClient(follow_redirects=True)
+    return _feed_client
+
+
+@get_driver().on_shutdown
+async def _close_feed_client():
+    global _feed_client
+    if _feed_client is not None:
+        await _feed_client.aclose()
+        _feed_client = None
 
 
 # =====================================================
@@ -165,11 +181,11 @@ async def _fetch_feed(url, etag=None):
     if etag:
         headers["If-None-Match"] = etag.removeprefix("W/")
     try:
-        async with httpx.AsyncClient(
+        resp = await _get_feed_client().get(
+            url,
+            headers=headers,
             timeout=FEED_TIMEOUT,
-            follow_redirects=True,
-        ) as client:
-            resp = await client.get(url, headers=headers)
+        )
     except Exception as exc:
         return None, None, f"请求异常: {exc}"
 

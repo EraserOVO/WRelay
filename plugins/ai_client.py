@@ -2,12 +2,31 @@
 import os
 
 import httpx
+from nonebot import get_driver
 
 from plugins.config import get_ai_config
 
 
 class AIClientError(RuntimeError):
     """AI 服务未配置、请求失败或响应格式无效。"""
+
+
+_ai_client = None
+
+
+def _get_ai_client():
+    global _ai_client
+    if _ai_client is None:
+        _ai_client = httpx.AsyncClient()
+    return _ai_client
+
+
+@get_driver().on_shutdown
+async def _close_ai_client():
+    global _ai_client
+    if _ai_client is not None:
+        await _ai_client.aclose()
+        _ai_client = None
 
 
 def _endpoint(base_url):
@@ -35,12 +54,12 @@ async def generate_text(messages, max_tokens=None, temperature=0.7):
         "max_tokens": int(max_tokens or config.get("max_output_tokens") or 800),
     }
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(
-                _endpoint(config.get("base_url")),
-                headers={"Authorization": "Bearer " + api_key},
-                json=payload,
-            )
+        response = await _get_ai_client().post(
+            _endpoint(config.get("base_url")),
+            headers={"Authorization": "Bearer " + api_key},
+            json=payload,
+            timeout=timeout,
+        )
         response.raise_for_status()
         data = response.json()
         content = data["choices"][0]["message"]["content"]

@@ -187,6 +187,25 @@ def collect_expired(now_ts):
 _MAX_MEDIA_BYTES = 30 * 1024 * 1024
 _media_timeout = 60
 _media_sema = asyncio.Semaphore(4)
+_qq_media_client = None
+
+
+def _get_qq_media_client():
+    global _qq_media_client
+    if _qq_media_client is None:
+        _qq_media_client = httpx.AsyncClient(
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+    return _qq_media_client
+
+
+@get_driver().on_shutdown
+async def _close_qq_media_client():
+    global _qq_media_client
+    if _qq_media_client is not None:
+        await _qq_media_client.aclose()
+        _qq_media_client = None
 
 
 _CONTENT_KIND = {
@@ -211,21 +230,19 @@ async def _fetch_no_proxy(url):
     """下载附件字节（不走代理）；失败/超限返回 None。"""
     try:
         async with _media_sema:
-            async with httpx.AsyncClient(
-                timeout=_media_timeout, follow_redirects=True,
-                headers={"User-Agent": "Mozilla/5.0"},
-            ) as client:
-                async with client.stream("GET", url) as resp:
-                    if resp.status_code != 200:
-                        logger.warning("QQ转发媒体下载失败: {} {}", resp.status_code, url)
+            async with _get_qq_media_client().stream(
+                "GET", url, timeout=_media_timeout
+            ) as resp:
+                if resp.status_code != 200:
+                    logger.warning("QQ转发媒体下载失败: {} {}", resp.status_code, url)
+                    return None
+                data = bytearray()
+                async for chunk in resp.aiter_bytes():
+                    data.extend(chunk)
+                    if len(data) > _MAX_MEDIA_BYTES:
+                        logger.warning("QQ转发媒体超上限，放弃: {}", url)
                         return None
-                    data = bytearray()
-                    async for chunk in resp.aiter_bytes():
-                        data.extend(chunk)
-                        if len(data) > _MAX_MEDIA_BYTES:
-                            logger.warning("QQ转发媒体超上限，放弃: {}", url)
-                            return None
-                    return bytes(data)
+                return bytes(data)
     except Exception as exc:
         logger.warning("QQ转发媒体下载异常: {} {}", exc, url)
         return None

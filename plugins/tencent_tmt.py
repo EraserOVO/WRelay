@@ -10,6 +10,7 @@ import os
 from datetime import datetime, timezone
 
 import httpx
+from nonebot import get_driver
 
 from plugins.config import get_tencent_tmt_config
 
@@ -22,6 +23,22 @@ _HOST = "tmt.tencentcloudapi.com"
 _SERVICE = "tmt"
 _VERSION = "2018-03-21"
 _ALGORITHM = "TC3-HMAC-SHA256"
+_tmt_client = None
+
+
+def _get_tmt_client():
+    global _tmt_client
+    if _tmt_client is None:
+        _tmt_client = httpx.AsyncClient()
+    return _tmt_client
+
+
+@get_driver().on_shutdown
+async def _close_tmt_client():
+    global _tmt_client
+    if _tmt_client is not None:
+        await _tmt_client.aclose()
+        _tmt_client = None
 
 
 def _sign(key, message):
@@ -77,8 +94,12 @@ async def translate_text(text, source="auto", target="zh"):
         "X-TC-Region": str(config.get("region") or "ap-guangzhou"),
     }
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.post("https://%s/" % _HOST, headers=headers, content=payload.encode("utf-8"))
+        response = await _get_tmt_client().post(
+            "https://%s/" % _HOST,
+            headers=headers,
+            content=payload.encode("utf-8"),
+            timeout=20,
+        )
         response.raise_for_status()
         body = response.json().get("Response") or {}
         if body.get("Error"):
