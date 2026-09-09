@@ -45,6 +45,7 @@ _pending = {}        # channel_id -> {message_id: _RetryEntry}
 _inflight = set()    # {(channel_id, message_id, group_openid)}
 _retry_loops = set()  # 已拉起的频道重试循环（防重复拉起）
 _retry_tasks = set()  # 持有任务引用防 GC
+_retry_wakeups = {}  # channel_id -> asyncio.Event，通知队列变化
 _last_error = ""
 
 
@@ -147,6 +148,9 @@ def _remove_entry(channel_id, message_id):
     entries.pop(message_id, None)
     if not entries:
         _pending.pop(channel_id, None)
+    wakeup = _retry_wakeups.get(channel_id)
+    if wakeup is not None:
+        wakeup.set()
 
 
 def _purge_delivered(channel_id, message_id, success_groups):
@@ -212,12 +216,14 @@ def schedule_retry(
 def _ensure_loop(channel_id):
     if not _LOOP_AUTO_START:
         return
+    wakeup = _retry_wakeups.setdefault(channel_id, asyncio.Event())
     if channel_id in _retry_loops:
+        wakeup.set()
         return
     _retry_loops.add(channel_id)
-    _retry_tasks.add(
-        asyncio.create_task(_loop_wrapper(channel_id))
-    )
+    task = asyncio.create_task(_loop_wrapper(channel_id))
+    _retry_tasks.add(task)
+    task.add_done_callback(_retry_tasks.discard)
 
 
 @get_driver().on_startup
@@ -232,14 +238,29 @@ async def _loop_wrapper(channel_id):
         await _channel_retry_loop(channel_id)
     finally:
         _retry_loops.discard(channel_id)
+        _retry_wakeups.pop(channel_id, None)
 
 
 async def _channel_retry_loop(channel_id):
+    wakeup = _retry_wakeups.setdefault(channel_id, asyncio.Event())
     while _pending.get(channel_id):
         await _process_due(channel_id)
         if not _pending.get(channel_id):
             break
-        await asyncio.sleep(1.0)
+
+        # 只等待最近一条欠账到期，新增欠账或已有欠账被清除时由 Event 提前唤醒。
+        wakeup.clear()
+        entries = _pending.get(channel_id) or {}
+        if not entries:
+            break
+        delay = min(
+            max(0.0, entry.next_try - time.monotonic())
+            for entry in entries.values()
+        )
+        try:
+            await asyncio.wait_for(wakeup.wait(), timeout=delay)
+        except asyncio.TimeoutError:
+            pass
 
 
 async def _process_due(channel_id):

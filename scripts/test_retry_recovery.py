@@ -7,6 +7,7 @@
 4. 多群部分失败只重试失败群
 5. 重试全部失败后，现有 backfill 仍能按游标兜底
 6. 正常成功消息无额外重试
+7. 新欠账可唤醒等待中的重试循环，且完成后清理任务状态
 
 用法：.venv/Scripts/python.exe scripts/test_retry_recovery.py
 """
@@ -267,6 +268,49 @@ async def test_normal_success_no_retry():
         print("[OK] 正常成功无额外重试，仅发送一次")
 
 
+async def test_retry_loop_wakes_on_new_pending():
+    """等待较远到期时间时，新欠账应立即唤醒循环。"""
+    retry_mod._pending.clear()
+    retry_mod._retry_loops.clear()
+    retry_mod._retry_tasks.clear()
+    retry_mod._retry_wakeups.clear()
+    retry_mod._LOOP_AUTO_START = True
+    calls = []
+
+    async def fake_process_due(channel_id):
+        calls.append(channel_id)
+        if len(calls) >= 2:
+            retry_mod._pending.pop(channel_id, None)
+
+    future_entry = retry_mod._RetryEntry(
+        {"channel_id": "C1", "content": "M1"},
+        "自动转发来自",
+        ["B"],
+        asyncio.get_running_loop().time() + 60,
+    )
+    retry_mod._pending["C1"] = {"101": future_entry}
+    with mock.patch.object(retry_mod, "_process_due", side_effect=fake_process_due), \
+            mock.patch.object(retry_mod, "_save_pending"):
+        retry_mod._ensure_loop("C1")
+        await asyncio.sleep(0.02)
+        assert calls == ["C1"], calls
+
+        retry_mod.schedule_retry(
+            "C1", "102", {"channel_id": "C1", "content": "M2"}, ["B"]
+        )
+        await asyncio.wait_for(
+            asyncio.gather(*list(retry_mod._retry_tasks)),
+            timeout=1,
+        )
+
+    assert calls == ["C1", "C1"], calls
+    assert retry_mod._retry_loops == set(), retry_mod._retry_loops
+    assert retry_mod._retry_tasks == set(), retry_mod._retry_tasks
+    assert retry_mod._retry_wakeups == {}, retry_mod._retry_wakeups
+    retry_mod._LOOP_AUTO_START = True
+    print("[OK] 新欠账唤醒重试循环，完成后清理任务状态")
+
+
 async def main():
     await test_m1_fail_m2_ok_m1_retry_not_lost()
     await test_retry_backfill_concurrent_no_duplicate()
@@ -275,6 +319,7 @@ async def main():
     await test_only_failed_groups_retried()
     await test_exhaustion_then_backfill_fallback()
     await test_normal_success_no_retry()
+    await test_retry_loop_wakes_on_new_pending()
     print("\n全部通过")
 
 
