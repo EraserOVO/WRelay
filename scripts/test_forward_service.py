@@ -18,8 +18,8 @@ async def main():
         build_calls.append((message, source_label, enabled_types))
         return ["header", "body"], ["media"], True
 
-    async def fake_translate(parts, cache_key, skip_leading_parts):
-        translate_calls.append((parts, cache_key, skip_leading_parts))
+    async def fake_translate(parts, cache_key, skip_leading_parts, config=None):
+        translate_calls.append((parts, cache_key, skip_leading_parts, config))
         return ["translated"]
 
     with mock.patch.object(forward_service, "build_parts", side_effect=fake_build), \
@@ -34,11 +34,12 @@ async def main():
 
     assert result == (["translated"], ["media"]), result
     assert build_calls[0][1] == "自动补发来自"
-    assert translate_calls == [(
+    assert translate_calls[0][:3] == (
         ["header", "body"],
         ("discord", "C1", "M1"),
         1,
-    )]
+    )
+    assert translate_calls[0][3]["enabled"] is False
     print("PASS - Discord 实时/补发/重试共用消息准备流程")
 
     # 队列按频道串行消费，且处理完成后归还容量。

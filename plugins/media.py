@@ -31,14 +31,18 @@ AUDIO_EXTS = {
     ".m4a"
 }
 
+# Discord 自定义表情通常原图只有 128px 左右，但 QQ 将独立图片段展示得
+# 更大。通过 Discord CDN 的 size 参数请求小图，避免表情在 QQ 中占屏。
+DISCORD_EMOJI_SIZE = 64
+
 
 # =====================================================
 # Discord 文本美化（B2）
 #
 # 把 Discord Markdown 转成 QQ 里可读的纯文本：
 #   - @everyone / @here → 可读文本
-#   - <@用户> <@&角色> <#频道> 提及 ID → 可读文本（不查名字，
-#     避免每提及一次就多一次 API 调用）
+#   - <@用户> <@&角色> <#频道> 提及 → 可读文本；用户提及优先使用
+#     Discord API 返回的真实用户名/显示名
 #   - 粗体/斜体/删除线/行内代码/代码块围栏 → 去掉标记
 #   - [文字](链接) → 文字（链接）
 # =====================================================
@@ -61,14 +65,21 @@ def convert_mentions(text: str):
     return text
 
 
-def convert_mention_ids(text: str):
+def convert_mention_ids(text: str, mention_names=None):
 
     if not text:
         return ""
 
+    mention_names = mention_names or {}
+
+    def replace_user_mention(match):
+        user_id = match.group(1)
+        name = str(mention_names.get(user_id) or "").strip()
+        return "[@{}]".format(name or user_id)
+
     text = re.sub(
         r"<@!?(\d+)>",
-        r"[@\1]",
+        replace_user_mention,
         text
     )
 
@@ -137,47 +148,50 @@ def cleanup_markdown(text: str):
     return text
 
 
-def parse_discord_emoji(text: str):
+_DISCORD_EMOJI_RE = re.compile(
+    r"<(?P<animated>a)?:[^:]+:(?P<id>\d+)>"
+)
 
-    emoji_urls = []
 
+def _discord_emoji_url(match):
+    suffix = "gif" if match.group("animated") else "png"
+    return (
+        f"https://cdn.discordapp.com/emojis/{match.group('id')}.{suffix}"
+        f"?size={DISCORD_EMOJI_SIZE}&quality=lossless"
+    )
+
+
+def parse_discord_emoji_parts(text: str):
+    """返回按原文顺序排列的 ``[(kind, value), ...]``。
+
+    kind 为 ``text`` 或 ``emoji``。保留表情位置后，fetch.build_parts 可以
+    把文字和对应表情放进同一条 QQ 消息，避免每个表情单独发一条消息。
+    """
     if not text:
-        return "", emoji_urls
+        return []
+
+    parts = []
+    cursor = 0
+    for match in _DISCORD_EMOJI_RE.finditer(text):
+        if match.start() > cursor:
+            parts.append(("text", text[cursor:match.start()]))
+        parts.append(("emoji", _discord_emoji_url(match)))
+        cursor = match.end()
+    if cursor < len(text):
+        parts.append(("text", text[cursor:]))
+    return parts
 
 
-    def static_replace(match):
-
-        emoji_urls.append(
-            f"https://cdn.discordapp.com/emojis/{match.group(2)}.png"
-        )
-
-        return ""
-
-
-    def animated_replace(match):
-
-        emoji_urls.append(
-            f"https://cdn.discordapp.com/emojis/{match.group(2)}.gif"
-        )
-
-        return ""
-
-
-    text = re.sub(
-        r"<:([^:]+):(\d+)>",
-        static_replace,
-        text
-    )
-
-
-    text = re.sub(
-        r"<a:([^:]+):(\d+)>",
-        animated_replace,
-        text
-    )
-
-
-    return text.strip(), emoji_urls
+def parse_discord_emoji(text: str):
+    """兼容旧调用：移除表情并返回表情 URL 列表。"""
+    text_parts = []
+    emoji_urls = []
+    for kind, value in parse_discord_emoji_parts(text):
+        if kind == "emoji":
+            emoji_urls.append(value)
+        else:
+            text_parts.append(value)
+    return "".join(text_parts).strip(), emoji_urls
 
 
 def make_text(text):

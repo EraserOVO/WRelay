@@ -16,6 +16,7 @@ dependencies = [
     #              启用 SOCKS extra，以支持 .env.prod 中的 socks5 代理
     "nonebot2[fastapi,httpx]>=2.5.0,<3.0.0",
     "httpx[socks]>=0.28.1,<0.29.0",
+    "Pillow>=12.0,<13.0",
     "nonebot-adapter-qq>=1.7.0,<2.0.0",
     "nonebot-adapter-discord>=1.1.9,<2.0.0",
 ]

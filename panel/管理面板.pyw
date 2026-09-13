@@ -57,7 +57,7 @@ BOT_PORT = 8082
 # ---------------- 转发组 ----------------
 # 与 plugins/config.py（bot 侧）保持一致：
 #   默认组 id=default / name=转发组1；成员 = 当前全局 enabled 的频道/群。
-# 转发组只表达"频道→群"路由关系，不参与 enabled 语义。
+# Discord 转发组只表达“频道→群”路由关系；QQ→QQ 使用独立的 qq_forwarding_groups。
 # 磁盘迁移在 main() 启动时一次性执行，不能放 load_settings()：
 # 测试用临时 settings 文件做"其他字段逐字节不变"断言，load 路径写盘会破坏它。
 FORWARDING_GROUP_DEFAULT_ID = "default"
@@ -191,6 +191,77 @@ def _validate_settings(data):
     )
 
 
+def _sync_legacy_scheduled_message(scheduled, body):
+    """把旧版 timer 字段同步到新版 messages 的第一条消息。"""
+    legacy_keys = {
+        "content", "schedule_mode", "every_days", "every_weeks",
+        "every_months", "weekdays", "send_time", "anchor_date",
+    }
+    if not any(key in body for key in legacy_keys):
+        return
+    if "content" in body and not str(body.get("content") or "").strip():
+        scheduled["messages"] = []
+        return
+    messages = scheduled.get("messages")
+    if not isinstance(messages, list):
+        messages = []
+    if messages and isinstance(messages[0], dict):
+        first = dict(messages[0])
+    else:
+        first = {
+            "id": "manual-1",
+            "content": "",
+            "schedule_type": "interval",
+            "interval_days": 1,
+            "interval_hours": 0,
+            "interval_minutes": 0,
+            "anchor_at": "",
+            "calendar_type": "weekly",
+            "weekdays": [0],
+            "day_of_month": 1,
+            "month": 1,
+            "day": 1,
+            "send_time": "09:00",
+        }
+    def _body_int(key, default=1):
+        try:
+            return int(body.get(key) or default)
+        except (TypeError, ValueError):
+            return default
+    if "content" in body:
+        first["content"] = body["content"]
+    mode = body.get("schedule_mode")
+    if mode == "days":
+        first["schedule_type"] = "interval"
+        first["interval_days"] = _body_int("every_days")
+        first["interval_hours"] = 0
+        first["interval_minutes"] = 0
+    elif mode == "weekly":
+        first["schedule_type"] = "interval"
+        first["interval_days"] = _body_int("every_weeks") * 7
+        first["interval_hours"] = 0
+        first["interval_minutes"] = 0
+    elif mode == "monthly":
+        first["schedule_type"] = "calendar"
+        first["calendar_type"] = "monthly"
+        first["day_of_month"] = 1
+        anchor_date = body.get("anchor_date")
+        if isinstance(anchor_date, str) and len(anchor_date) >= 10:
+            try:
+                first["day_of_month"] = int(anchor_date[8:10])
+            except ValueError:
+                pass
+    if "send_time" in body:
+        first["send_time"] = body["send_time"]
+    if "anchor_date" in body and first.get("schedule_type") == "interval":
+        anchor_date = body.get("anchor_date") or ""
+        send_time = first.get("send_time") or "09:00"
+        first["anchor_at"] = (anchor_date + "T" + send_time) if anchor_date else ""
+    if "weekdays" in body and mode == "weekly":
+        first["weekdays"] = body["weekdays"]
+    scheduled["messages"] = [first] + [item for item in messages[1:] if isinstance(item, dict)]
+
+
 def _normalize_forwarding_groups(data):
     """写盘前归一化转发组（fg 缺失时仅清理 is_test，兼容旧载荷/测试）。
 
@@ -290,11 +361,56 @@ def _normalize_x_forwarding_groups(data):
     data["x_forwarding_groups"] = clean
 
 
+def _normalize_qq_forwarding_groups(data):
+    """写盘前归一化 QQ→QQ 独立转发组，剔除已删除的 QQ 群。"""
+    qfgs = data.get("qq_forwarding_groups")
+    known_groups = {
+        str(g.get("openid"))
+        for g in data.get("qq_group_openids", [])
+        if isinstance(g, dict) and g.get("openid")
+    }
+    # 空列表表示用户明确删除全部 QQ→QQ 转发组，允许保存为空。
+    if isinstance(qfgs, list) and not qfgs:
+        data["qq_forwarding_groups"] = []
+        return
+    if not isinstance(qfgs, list):
+        qfgs = [{
+            "id": "qq_default",
+            "name": "转发组1",
+            "enabled": True,
+            "groups": [
+                str(g.get("openid"))
+                for g in data.get("qq_group_openids", [])
+                if isinstance(g, dict) and g.get("openid") and g.get("enabled")
+            ],
+        }]
+    clean = []
+    seen_ids = set()
+    for qfg in qfgs:
+        if not isinstance(qfg, dict):
+            continue
+        qid = str(qfg.get("id") or "").strip()
+        if not qid or qid in seen_ids:
+            continue
+        seen_ids.add(qid)
+        clean.append({
+            "id": qid,
+            "name": str(qfg.get("name") or "").strip() or qid,
+            "enabled": qfg.get("enabled", True) is not False,
+            "groups": [
+                value for value in dict.fromkeys(str(g) for g in qfg.get("groups") or [])
+                if value and value in known_groups
+            ],
+        })
+    data["qq_forwarding_groups"] = clean
+
+
 def save_settings(data, expected_revision=None):
     # 备份上一版配置（任何误写/损坏都可从 settings.json.bak 恢复），
     # 再走统一原子写（唯一 tmp + os.replace，见 plugins/json_io.py）
     _normalize_forwarding_groups(data)
     _normalize_x_forwarding_groups(data)
+    _normalize_qq_forwarding_groups(data)
     with json_file_lock(SETTINGS_FILE):
         if (
             expected_revision is not None
@@ -895,6 +1011,7 @@ def api_status():
         "backfill_seq": _backfill_seq,
         "backfill_enabled": settings.get("backfill_enabled", True),
         "backfill_limit": settings.get("backfill_limit", 10),
+        "scheduled_message": settings.get("scheduled_message", {}),
     }
 
 
@@ -1005,6 +1122,70 @@ async def api_settings_backfill_toggle(request: Request):
             status_code=409,
         )
     return {"ok": True, "changed": True, "backfill_enabled": enabled}
+
+
+@app.post("/api/settings/scheduled-message")
+async def api_settings_scheduled_message(request: Request):
+    """定时消息字段级更新（QQ 私聊 timer 命令专用）。
+
+    只更新请求中提供的定时消息字段，避免私聊操作用
+    旧配置快照覆盖面板刚保存的其他设置。"""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
+
+    allowed = {
+        "enabled", "content", "interval", "target_groups",
+        "schedule_mode", "every_days", "every_weeks", "every_months",
+        "weekdays", "send_time", "anchor_date", "messages",
+    }
+    if not any(key in body for key in allowed):
+        return JSONResponse(
+            {"ok": False, "msg": "至少提供一个定时消息字段"},
+            status_code=400,
+        )
+
+    data, revision = _load_settings_snapshot()
+    scheduled = data.get("scheduled_message")
+    if not isinstance(scheduled, dict):
+        scheduled = {
+            "enabled": False,
+            "content": "",
+            "interval": 3600,
+            "target_groups": [],
+            "schedule_mode": "days",
+            "every_days": 1,
+            "every_weeks": 1,
+            "every_months": 1,
+            "weekdays": [0],
+            "send_time": "09:00",
+            "anchor_date": "",
+            "messages": [],
+        }
+    else:
+        scheduled = dict(scheduled)
+    for key in allowed:
+        if key in body:
+            scheduled[key] = body[key]
+    _sync_legacy_scheduled_message(scheduled, body)
+    data["scheduled_message"] = scheduled
+
+    err = _validate_settings(data)
+    if err:
+        return JSONResponse(
+            {"ok": False, "msg": "配置校验失败: " + err}, status_code=400
+        )
+    try:
+        save_settings(data, expected_revision=revision)
+    except ConcurrentWriteError:
+        return JSONResponse(
+            {"ok": False, "conflict": True, "msg": "配置已被其他进程修改，请刷新后重试"},
+            status_code=409,
+        )
+    return {"ok": True, "scheduled_message": scheduled}
 
 
 @app.post("/api/settings/sync")

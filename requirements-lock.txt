@@ -23,6 +23,7 @@ multidict==6.7.1
 nonebot-adapter-discord==1.1.9
 nonebot-adapter-qq==1.7.2
 nonebot2==2.5.0
+Pillow==12.3.0
 propcache==0.5.2
 pycparser==3.0
 pydantic==2.13.5

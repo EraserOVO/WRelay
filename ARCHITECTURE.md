@@ -14,6 +14,7 @@ WRelay/
 │   ├── config.py             配置读取 + 内存缓存（settings.json 的消费者）
 │   ├── relay.py              Discord → QQ 实时转发主逻辑
 │   ├── x_rss.py              X/Twitter RSS → QQ 轮询与投递
+│   ├── scheduled_message.py  QQ 定时消息投递
 │   ├── x_rss_parser.py       RSS 内容解析
 │   ├── command.py            QQ 私聊 relay 命令（手动转发）
 │   ├── manage.py             QQ 私聊管理命令（status/restart/mode 等）
@@ -182,7 +183,7 @@ QQ 私聊消息
                                            └── ⑤ 回复执行结果
 ```
 
-`relay-list` 查看启用群，`relay <序号>` 或 `relay all` 选择目标，下一条消息
+`relay-list` 查看启用群，`relay <序号1> <序号2>` 或 `relay all` 选择目标，下一条消息
 转发到 QQ 群。若下一条是 Discord 消息链接，会从 Discord API 抓取并复用正常
 渲染流程；这是授权用户触发的 QQ → QQ 手动操作，不是 QQ → Discord 自动同步。
 
@@ -309,6 +310,7 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | `plugins/sender.py` | QQ 群发送：分片、重试、限流退避、降级 | 低 |
 | `plugins/retry.py` | 发送失败欠账队列、持久化恢复与延迟重试 | 中 |
 | `plugins/x_rss.py` | X RSS 轮询、游标和投递 | 中 |
+| `plugins/scheduled_message.py` | 按显式目标群名单和日历计划进行 QQ 定时消息投递 | 中 |
 | `plugins/x_rss_parser.py` | RSS 条目解析 | 中 |
 | `plugins/media.py` | 文本美化（Markdown → 纯文本）+ Emoji 提取 + 媒体下载 | 低 |
 | `plugins/dedup.py` | 去重纯函数：该不该发、发给谁、成功后怎么记 | 低 |

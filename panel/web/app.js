@@ -1,4 +1,7 @@
 const SVG_FUNNEL = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>';
+const SVG_TRANSLATE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8l6 6"/><path d="M4 14l6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="M14 18h7"/><path d="M17.5 14l3.5 7"/><path d="M14 21l3.5-7"/></svg>';
+const SVG_ORIGINAL_ON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+const SVG_ORIGINAL_OFF = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 const SVG_TRASH = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>';
 const SVG_GRIP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>';
 // 统一笔图标：空心笔、笔尖朝左下角（转发组重命名 / 频道名称编辑共用）
@@ -51,8 +54,8 @@ function toggleTheme() {
 })();
 // Discord 频道真实名称映射 {频道ID: 真实名}，由 /api/channel-names 拉取（仅展示，不写入 settings）
 let channelNames = {};
-// 转发组机制：Discord 与 X 各一套上下文（组列表字段 / 成员字段 / active
-// 状态 / id 前缀等），组相关函数全部按 ctx 参数化复用，两边交互一致。
+// 转发组机制：Discord、X、QQ→QQ 各自一套上下文（组列表字段 / 成员字段 / active
+// 状态 / id 前缀等），组相关函数全部按 ctx 参数化复用，三者交互一致。
 // active 组 id 各自持久化到 localStorage，刷新后恢复且互不影响；
 // 组内成员随 settings 整体保存。
 const MAX_FG = 10;
@@ -78,9 +81,21 @@ const FG_X = {
   addBtnId: "btnAddXFg",
   activeId: null,
 };
-const FG_CTX = {discord: FG_DISCORD, x: FG_X};
+const FG_QQ = {
+  key: "qq",
+  field: "qq_forwarding_groups",
+  memberField: {group: "groups"},
+  emptyMembers: ["groups"],
+  storageKey: "wrelay_active_qqfg",
+  idPrefix: "qqfg_",
+  tabsId: "qqFgTabs",
+  addBtnId: "btnAddQQFg",
+  activeId: null,
+};
+const FG_CTX = {discord: FG_DISCORD, x: FG_X, qq: FG_QQ};
 try { FG_DISCORD.activeId = localStorage.getItem(FG_DISCORD.storageKey); } catch (e) { FG_DISCORD.activeId = null; }
 try { FG_X.activeId = localStorage.getItem(FG_X.storageKey); } catch (e) { FG_X.activeId = null; }
+try { FG_QQ.activeId = localStorage.getItem(FG_QQ.storageKey); } catch (e) { FG_QQ.activeId = null; }
 // X source 字符串 → 去重状态 key（与 bot 侧 config._x_source_key 同规则）：
 // screen_name 去 @；完整 URL 时提取 /twitter/user/{handle}，提取不到用整个 URL
 function xSourceKey(raw) {
@@ -92,25 +107,31 @@ function xSourceKey(raw) {
   return raw.replace(/^@+/, "");
 }
 
-// ---------------- 主要界面切换（Discord → QQ / X → QQ） ----------------
+// ---------------- 主要界面切换（Discord → QQ / X → QQ / QQ → QQ） ----------------
 // 每种转发组合一个独立页面，页面选择持久化到 localStorage（与主题/转发组同方式），
 // 刷新后恢复；默认进入 Discord → QQ（不改变原有使用习惯）。
-// 两个页面共用同一份 settings 对象（整体保存、整体拉取），切换只改可见性，
+// 三个页面共用同一份 settings 对象（整体保存、整体拉取），切换只改可见性，
 // 不会丢失任何已保存/未保存的修改。
 const PAGE_STORAGE_KEY = "wrelay_active_page";
 let activePage = "discord";
-try { if (localStorage.getItem(PAGE_STORAGE_KEY) === "x") activePage = "x"; } catch (e) {}
+try {
+  const savedPage = localStorage.getItem(PAGE_STORAGE_KEY);
+  if (savedPage === "x" || savedPage === "qq") activePage = savedPage;
+} catch (e) {}
 
 function setActivePage(page) {
-  activePage = page === "x" ? "x" : "discord";
+  activePage = page === "x" || page === "qq" ? page : "discord";
   try { localStorage.setItem(PAGE_STORAGE_KEY, activePage); } catch (e) {}
   document.getElementById("pageDiscord").style.display = activePage === "discord" ? "" : "none";
   document.getElementById("pageX").style.display = activePage === "x" ? "" : "none";
-  // 顶部第二张卡按页面切换：Discord → 离线补发；X → X RSS 状态（同一位置）
+  document.getElementById("pageQQ").style.display = activePage === "qq" ? "" : "none";
+  // 顶部第二张卡按页面切换：Discord → 离线补发；X → X RSS 状态；QQ → 不显示
   const backfillCard = document.getElementById("backfillCard");
   if (backfillCard) backfillCard.style.display = activePage === "discord" ? "" : "none";
   const xrssCard = document.getElementById("xrssCard");
   if (xrssCard) xrssCard.style.display = activePage === "x" ? "" : "none";
+  const scheduledCard = document.getElementById("scheduledMessageCard");
+  if (scheduledCard) scheduledCard.style.display = activePage === "qq" ? "" : "none";
   document.querySelectorAll('#pageTabs [data-kind="pageTab"]').forEach(function (btn) {
     btn.classList.toggle("active", btn.dataset.page === activePage);
   });
@@ -163,8 +184,8 @@ function renderStatus(st) {
     document.getElementById("btnStop").disabled = false;
     document.getElementById("btnRestart").disabled = false;
     const h = st.health;
-    if (activePage === "x") {
-      // X → QQ 页面只关心 QQ 连接状态，不显示与当前页面无关的 Discord 状态。
+    if (activePage === "x" || activePage === "qq") {
+      // X → QQ / QQ → QQ 页面只关心 QQ 连接状态，不显示无关的 Discord 状态。
       if (h && h.qq) {
         b.textContent = "运行中";
         b.className = "badge on";
@@ -236,7 +257,310 @@ function renderBackfillToggle(on) {
   btn.innerHTML = icon + "<span>启用补发</span>";
 }
 
-// ---------- 转发组（Discord / X 共用机制，按 ctx 区分） ----------
+let scheduledMessageDraft = null;
+let scheduledMessageId = 0;
+
+function renderScheduledMessageToggle(on) {
+  const btn = document.getElementById("btnScheduledMessageToggle");
+  if (!btn) return;
+  btn.dataset.on = on ? "1" : "0";
+  const icon = on
+    ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
+    : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+  btn.innerHTML = icon + "<span>启用定时发送</span>";
+}
+
+function scheduledLocalDateTimeValue() {
+  const now = new Date();
+  const offset = now.getTimezoneOffset();
+  return new Date(now.getTime() - offset * 60000).toISOString().slice(0, 16);
+}
+
+function newScheduledMessage() {
+  scheduledMessageId += 1;
+  return {
+    id: "message-" + Date.now() + "-" + scheduledMessageId,
+    content: "",
+    schedule_type: "interval",
+    interval_days: 1,
+    interval_hours: 0,
+    interval_minutes: 0,
+    anchor_at: scheduledLocalDateTimeValue(),
+    calendar_type: "weekly",
+    weekdays: [0],
+    day_of_month: 1,
+    month: 1,
+    day: 1,
+    send_time: "09:00",
+  };
+}
+
+function normalizeScheduledMessages(config) {
+  const value = config || {};
+  if (Array.isArray(value.messages)) {
+    return value.messages.map(function (raw, index) {
+      const message = Object.assign(newScheduledMessage(), raw || {});
+      message.id = String(message.id || "message-" + (index + 1));
+      message.content = String(message.content || "");
+      message.schedule_type = message.schedule_type === "calendar" ? "calendar" : "interval";
+      message.interval_days = Math.max(0, Math.min(3650, Number(message.interval_days) || 0));
+      message.interval_hours = Math.max(0, Math.min(23, Number(message.interval_hours) || 0));
+      message.interval_minutes = Math.max(0, Math.min(59, Number(message.interval_minutes) || 0));
+      message.anchor_at = typeof message.anchor_at === "string" ? message.anchor_at : scheduledLocalDateTimeValue();
+      message.calendar_type = ["weekly", "monthly", "yearly"].includes(message.calendar_type)
+        ? message.calendar_type : "weekly";
+      message.weekdays = Array.isArray(message.weekdays)
+        ? message.weekdays.map(Number).filter(function (day) { return day >= 0 && day <= 6; })
+        : [0];
+      if (!message.weekdays.length) message.weekdays = [0];
+      message.day_of_month = Math.max(1, Math.min(31, Number(message.day_of_month) || 1));
+      message.month = Math.max(1, Math.min(12, Number(message.month) || 1));
+      message.day = Math.max(1, Math.min(31, Number(message.day) || 1));
+      message.send_time = /^([01]\d|2[0-3]):[0-5]\d$/.test(message.send_time || "")
+        ? message.send_time : "09:00";
+      return message;
+    });
+  }
+  if (String(value.content || "").trim()) {
+    const legacy = newScheduledMessage();
+    legacy.content = value.content;
+    legacy.send_time = /^([01]\d|2[0-3]):[0-5]\d$/.test(value.send_time || "")
+      ? value.send_time : "09:00";
+    if (value.schedule_mode === "weekly") {
+      legacy.schedule_type = "calendar";
+      legacy.calendar_type = "weekly";
+      legacy.weekdays = Array.isArray(value.weekdays) && value.weekdays.length ? value.weekdays : [0];
+    } else if (value.schedule_mode === "monthly") {
+      legacy.schedule_type = "calendar";
+      legacy.calendar_type = "monthly";
+      legacy.day_of_month = Number(value.anchor_date && value.anchor_date.slice(-2)) || 1;
+    } else {
+      legacy.interval_days = Math.max(1, Number(value.every_days) || 1);
+      legacy.anchor_at = value.anchor_date ? value.anchor_date + "T" + legacy.send_time : legacy.anchor_at;
+    }
+    return [legacy];
+  }
+  return [];
+}
+
+function scheduledOptionMarkup(message, index) {
+  const weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  return '<div class="scheduled-message-entry" data-index="' + index + '">' +
+    '<div class="scheduled-message-entry-header"><strong>消息 ' + (index + 1) + '</strong>' +
+    '<button type="button" class="rowicon sec scheduled-message-remove" title="删除消息" aria-label="删除消息">×</button></div>' +
+    '<label class="scheduled-message-entry-label">消息正文' +
+    '<textarea class="scheduled-message-entry-content" data-field="content" maxlength="20000" placeholder="输入消息正文"></textarea></label>' +
+    '<div class="scheduled-message-entry-row">' +
+    '<label>发送方式<select class="scheduled-message-entry-select" data-field="schedule_type">' +
+    '<option value="interval">按间隔发送</option><option value="calendar">按日历发送</option></select></label>' +
+    '</div>' +
+    '<div class="scheduled-message-interval-fields">' +
+    '<label>基准日期时间<input type="datetime-local" lang="zh-CN" data-field="anchor_at"></label>' +
+    '<div class="scheduled-message-interval-row"><span>每隔</span>' +
+    '<label><input type="number" data-field="interval_days" min="0" max="3650" step="1"> 日</label>' +
+    '<label><input type="number" data-field="interval_hours" min="0" max="23" step="1"> 时</label>' +
+    '<label><input type="number" data-field="interval_minutes" min="0" max="59" step="1"> 分</label></div>' +
+    '</div>' +
+    '<div class="scheduled-message-calendar-fields">' +
+    '<div class="scheduled-message-entry-row"><label>日历周期<select class="scheduled-message-entry-select" data-field="calendar_type">' +
+    '<option value="weekly">每周</option><option value="monthly">每月</option><option value="yearly">每年</option></select></label>' +
+    '<label>发送时间<input type="time" data-field="send_time"></label></div>' +
+    '<div class="scheduled-message-calendar-panel" data-calendar-type="weekly"><span>星期</span><div class="scheduled-message-weekdays">' +
+    weekdays.map(function (label, day) {
+      return '<label><input type="checkbox" data-field="weekday" value="' + day + '">' + label + '</label>';
+    }).join("") + '</div></div>' +
+    '<div class="scheduled-message-calendar-panel" data-calendar-type="monthly">' +
+    '<label>每月 <input type="number" data-field="day_of_month" min="1" max="31" step="1"> 号</label></div>' +
+    '<div class="scheduled-message-calendar-panel" data-calendar-type="yearly">' +
+    '<label>每年 <select data-field="month">' + Array.from({length: 12}, function (_, month) {
+      return '<option value="' + (month + 1) + '">' + (month + 1) + ' 月</option>';
+    }).join("") + '</select></label>' +
+    '<label><input type="number" data-field="day" min="1" max="31" step="1"> 号</label></div>' +
+    '</div></div>';
+}
+
+function updateScheduledMessageEntryVisibility(entry) {
+  const type = entry.querySelector('[data-field="schedule_type"]');
+  const interval = entry.querySelector(".scheduled-message-interval-fields");
+  const calendar = entry.querySelector(".scheduled-message-calendar-fields");
+  const isCalendar = type && type.value === "calendar";
+  if (interval) interval.style.display = isCalendar ? "none" : "flex";
+  if (calendar) calendar.style.display = isCalendar ? "flex" : "none";
+  const calendarType = entry.querySelector('[data-field="calendar_type"]');
+  entry.querySelectorAll(".scheduled-message-calendar-panel").forEach(function (panel) {
+    panel.style.display = isCalendar && calendarType && panel.dataset.calendarType === calendarType.value ? "flex" : "none";
+  });
+}
+
+function renderScheduledMessageEditor() {
+  const container = document.getElementById("scheduledMessageEntries");
+  if (!container) return;
+  const messages = scheduledMessageDraft || [];
+  container.innerHTML = messages.map(scheduledOptionMarkup).join("");
+  container.querySelectorAll(".scheduled-message-entry").forEach(function (entry, index) {
+    const message = messages[index];
+    entry.querySelector('[data-field="content"]').value = message.content || "";
+    entry.querySelector('[data-field="schedule_type"]').value = message.schedule_type;
+    ["anchor_at", "interval_days", "interval_hours", "interval_minutes", "day_of_month", "month", "day", "send_time", "calendar_type"].forEach(function (key) {
+      const field = entry.querySelector('[data-field="' + key + '"]');
+      if (field && message[key] !== undefined && message[key] !== null) field.value = message[key];
+    });
+    entry.querySelectorAll('[data-field="weekday"]').forEach(function (field) {
+      field.checked = message.weekdays.includes(Number(field.value));
+    });
+    updateScheduledMessageEntryVisibility(entry);
+  });
+}
+
+function readScheduledMessageEditor() {
+  const container = document.getElementById("scheduledMessageEntries");
+  if (!container) return [];
+  return Array.from(container.querySelectorAll(".scheduled-message-entry")).map(function (entry, index) {
+    const get = function (key) { return entry.querySelector('[data-field="' + key + '"]'); };
+    const type = get("schedule_type").value;
+    const message = {
+      id: (scheduledMessageDraft[index] && scheduledMessageDraft[index].id) || ("message-" + (index + 1)),
+      content: get("content").value,
+      schedule_type: type,
+      interval_days: Number(get("interval_days").value) || 0,
+      interval_hours: Number(get("interval_hours").value) || 0,
+      interval_minutes: Number(get("interval_minutes").value) || 0,
+      anchor_at: get("anchor_at").value,
+      calendar_type: get("calendar_type").value,
+      weekdays: Array.from(entry.querySelectorAll('[data-field="weekday"]:checked')).map(function (field) { return Number(field.value); }),
+      day_of_month: Number(get("day_of_month").value) || 1,
+      month: Number(get("month").value) || 1,
+      day: Number(get("day").value) || 1,
+      send_time: get("send_time").value || "09:00",
+    };
+    return message;
+  });
+}
+
+function openScheduledMessageEditor() {
+  const modal = document.getElementById("scheduledMessageContentModal");
+  if (!modal) return;
+  scheduledMessageDraft = normalizeScheduledMessages(settings && settings.scheduled_message);
+  renderScheduledMessageEditor();
+  modal.style.display = "flex";
+  const first = document.querySelector(".scheduled-message-entry-content");
+  if (first) first.focus();
+}
+
+async function confirmScheduledMessageEditor() {
+  const messages = readScheduledMessageEditor();
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (!message.content.trim()) {
+      showAlert("定时消息", "消息 " + (index + 1) + " 的正文不能为空");
+      return;
+    }
+    if (message.schedule_type === "interval" && !message.interval_days && !message.interval_hours && !message.interval_minutes) {
+      showAlert("定时消息", "消息 " + (index + 1) + " 的间隔至少需要 1 分钟");
+      return;
+    }
+    if (message.schedule_type === "calendar" && message.calendar_type === "weekly" && !message.weekdays.length) {
+      showAlert("定时消息", "消息 " + (index + 1) + " 至少选择一个星期");
+      return;
+    }
+  }
+  settings.scheduled_message = Object.assign({}, settings.scheduled_message || {}, {
+    enabled: messages.length ? (settings.scheduled_message || {}).enabled === true : false,
+    content: messages.length ? messages[0].content : "",
+    messages: messages,
+  });
+  const saved = await saveAndReload();
+  if (saved) {
+    scheduledMessageDraft = null;
+    document.getElementById("scheduledMessageContentModal").style.display = "none";
+  }
+}
+
+function initScheduledPickers() {
+  const editButton = document.getElementById("btnScheduledMessageEdit");
+  if (editButton) {
+    editButton.innerHTML = SVG_PEN;
+    editButton.addEventListener("click", openScheduledMessageEditor);
+  }
+  document.getElementById("btnAddScheduledMessage").addEventListener("click", function () {
+    scheduledMessageDraft = readScheduledMessageEditor();
+    scheduledMessageDraft.push(newScheduledMessage());
+    renderScheduledMessageEditor();
+  });
+  document.getElementById("scheduledMessageEntries").addEventListener("click", function (event) {
+    const remove = event.target.closest(".scheduled-message-remove");
+    if (!remove) return;
+    const entry = remove.closest(".scheduled-message-entry");
+    if (!entry) return;
+    scheduledMessageDraft = readScheduledMessageEditor();
+    const index = Number(entry.dataset.index);
+    scheduledMessageDraft.splice(index, 1);
+    renderScheduledMessageEditor();
+  });
+  document.getElementById("scheduledMessageEntries").addEventListener("change", function (event) {
+    const entry = event.target.closest(".scheduled-message-entry");
+    if (entry && (event.target.dataset.field === "schedule_type" || event.target.dataset.field === "calendar_type")) {
+      updateScheduledMessageEntryVisibility(entry);
+    }
+  });
+  document.getElementById("scheduledMessageContentConfirm").addEventListener("click", confirmScheduledMessageEditor);
+}
+
+initScheduledPickers();
+
+function scheduledMessageEditorFocused() {
+  const modal = document.getElementById("scheduledMessageContentModal");
+  return !!(modal && modal.style.display !== "none");
+}
+
+function renderScheduledMessage(config) {
+  const value = config || {};
+  const messages = normalizeScheduledMessages(value);
+  const summary = document.getElementById("scheduledMessageSummary");
+  if (summary) {
+    summary.textContent = messages.length
+      ? "已配置 " + messages.length + " 条消息"
+      : "尚未添加消息";
+  }
+  const groupSummary = document.getElementById("scheduledMessageGroupSummary");
+  if (groupSummary) {
+    const selected = (value.target_groups || []).map(function (id) { return String(id); });
+    const groups = settings && Array.isArray(settings.qq_group_openids) ? settings.qq_group_openids : [];
+    const byId = {};
+    groups.forEach(function (group) { byId[String(group.openid || "")] = group; });
+    const rows = selected.map(function (id) { return byId[id]; }).filter(Boolean);
+    if (!rows.length) {
+      groupSummary.textContent = "当前未添加目标群";
+    } else {
+      groupSummary.innerHTML = rows.map(function (group) {
+        const id = String(group.openid || "");
+        const name = group.name || group.remark || identityName("groups", id) || id;
+        const suffix = group.enabled === true ? "" : "（未启用）";
+        return '<span class="scheduled-message-group-summary-item">' + escapeHtml(name + suffix) + '</span>';
+      }).join("、");
+    }
+  }
+  renderScheduledMessageToggle(value.enabled === true);
+}
+
+async function saveScheduledMessageSettings(enabled) {
+  const current = settings.scheduled_message || {};
+  const messages = normalizeScheduledMessages(current);
+  const config = Object.assign({}, current, {messages: messages});
+  if (enabled !== undefined) config.enabled = enabled;
+  if (config.enabled && !messages.length) {
+    showAlert("定时消息", "请先添加至少一条消息");
+    return false;
+  }
+  if (config.enabled && !(config.target_groups || []).length) {
+    showAlert("定时消息", "请至少选择一个已审核群");
+    return false;
+  }
+  settings.scheduled_message = config;
+  return await saveAndReload();
+}
+
+// ---------- 转发组（Discord / X / QQ→QQ 共用机制，按 ctx 区分） ----------
 function getFgList(ctx) {
   return (settings && settings[ctx.field]) || [];
 }
@@ -282,7 +606,7 @@ function removeFgMember(ctx, id, field) {
   saveAndReload();
 }
 function fgCandidate(kind) {
-  // kind → 已注册实体列表 / 条目 id / 展示文案（Discord 频道、X 转发账号、QQ 群共用）
+  // kind → 已注册实体列表 / 条目 id / 展示文案（各转发组共用）
   if (kind === "group") {
     return {
       all: settings.qq_group_openids,
@@ -343,6 +667,39 @@ function openFgAddPicker(ctx, kind) {
       onRowDelete: function (item) {
         deleteRegisteredItem(kind, item, function () { openFgAddPicker(ctx, kind); });
       },
+    }
+  );
+}
+
+function openScheduledGroupPicker() {
+  settings.scheduled_message = settings.scheduled_message || {};
+  const selected = new Set((settings.scheduled_message.target_groups || []).map(String));
+  const groups = (settings.qq_group_openids || []).filter(function (group) {
+    return group && group.openid;
+  });
+  if (!groups.length) {
+    showAlert("管理定时消息目标群", "当前没有已审核的 QQ 群");
+    return;
+  }
+  showConfirmSelect(
+    "管理定时消息目标群",
+    groups,
+    function (group) {
+      const id = String(group.openid);
+      const name = group.name || group.remark || identityName("groups", id) || "";
+      const state = selected.has(id) ? "（已添加）" : "（未添加）";
+      const enabled = group.enabled === true ? "" : "（当前未启用）";
+      return (name + " " + id).trim() + state + enabled;
+    },
+    async function (picked) {
+      settings.scheduled_message.target_groups = picked.map(function (group) {
+        return String(group.openid);
+      });
+      await saveAndReload();
+    },
+    {
+      defaultChecked: function (group) { return selected.has(String(group.openid)); },
+      okText: "保存选择",
     }
   );
 }
@@ -488,7 +845,8 @@ function renderFgTabs(ctx) {
       rename.dataset.ctx = ctx.key;
       rename.innerHTML = SVG_PEN;
       wrap.appendChild(rename);
-      if (list.length > 1) {
+      const canDelete = list.length > 1 || (ctx.key === "qq" && (fg.groups || []).length <= 1);
+      if (canDelete) {
         const del = document.createElement("button");
         del.type = "button";
         del.className = "fgctrl rowicon";
@@ -634,6 +992,7 @@ function renderSettings() {
       '</td>' +
       '<td class="mono">' + escapeHtml(c.id) + '</td>' +
       '<td><div style="display:flex;gap:4px;justify-content:flex-end;">' +
+        '<button class="sec rowicon translation-toggle-icon' + (c.translation_enabled ? ' translation-active' : '') + '" title="翻译设置" aria-label="翻译设置" data-kind="chanTranslation" data-i="' + gi + '">' + SVG_TRANSLATE + '</button>' +
         '<button class="sec rowicon' + (channelFilterActive(c) ? ' filter-active' : '') + '" data-kind="chanFilter" data-i="' + gi + '">' + SVG_FUNNEL + '</button>' +
         '<button class="danger rowicon" data-kind="fgChanRemove" data-id="' + escapeHtml(String(c.id)) + '">' + SVG_TRASH + '</button>' +
       '</div></td>';
@@ -669,22 +1028,27 @@ function renderSettings() {
   renderBackfillToggle(settings.backfill_enabled !== false);
   const bfLimit = document.getElementById("backfillLimit");
   if (bfLimit) bfLimit.value = Number(settings.backfill_limit) > 0 ? settings.backfill_limit : 10;
+  renderScheduledMessage(settings.scheduled_message);
+  renderRelayLinkCard();
   // 表头全选框状态仅反映「当前转发组」实际显示的成员（而非全部全局实体），
   // 避免隐藏的非本组成员导致半选误判：全部→勾选，全不→取消，部分→半选，无成员→两者均 false
   syncHeaderAll("groupAllEnabled", grpRows, "enabled");
   syncHeaderAll("chanAllEnabled", chanRows, "enabled");
   syncHeaderAll("userAllEnabled", settings.qq_user_openids || [], "enabled");
-  // X → QQ 页面与 Discord 页共用同一份 settings，跟随每次保存/轮询同步刷新
+  // X → QQ / QQ → QQ 页面与 Discord 页共用同一份 settings，跟随每次保存/轮询同步刷新
   renderXPage();
+  renderQQPage();
 }
 
 function renderAIControls() {
-  if (!settings || !document.getElementById("btnTranslationToggle")) return;
+  if (!settings) return;
   const translation = settings.translation || {};
-  renderTranslationToggle(!!translation.enabled);
   document.getElementById("translationProvider").value = translation.provider || "tencent_tmt";
   document.getElementById("translationFallback").value = translation.fallback_provider || "";
-  document.getElementById("translationAppendOriginal").checked = translation.append_original !== false;
+  syncTranslationFallback("translationProvider", "translationFallback");
+  renderTranslationToggle((settings.discord_channels || []).length > 0 && (settings.discord_channels || []).every(function (channel) {
+    return channel.translation_enabled === true;
+  }));
 }
 
 function renderTranslationToggle(on) {
@@ -705,34 +1069,89 @@ function saveAIControls() {
   settings.translation = settings.translation || {};
   settings.translation.provider = document.getElementById("translationProvider").value;
   settings.translation.fallback_provider = document.getElementById("translationFallback").value;
-  settings.translation.append_original = document.getElementById("translationAppendOriginal").checked;
 }
 
-document.getElementById("btnSaveAISettings").addEventListener("click", async function () {
-  saveAIControls();
-  await saveAndReload();
-});
-
 function renderXTranslationControls() {
-  if (!settings || !document.getElementById("btnXTranslationToggle")) return;
+  if (!settings) return;
   const translation = settings.x_translation || {};
-  renderTranslationToggleFor("btnXTranslationToggle", !!translation.enabled);
   document.getElementById("xTranslationProvider").value = translation.provider || "tencent_tmt";
   document.getElementById("xTranslationFallback").value = translation.fallback_provider || "";
-  document.getElementById("xTranslationAppendOriginal").checked = translation.append_original !== false;
+  syncTranslationFallback("xTranslationProvider", "xTranslationFallback");
+  renderTranslationToggleFor("btnXTranslationToggle", (settings.x_rss_sources || []).length > 0 && (settings.x_rss_sources || []).every(function (source) {
+    return source.translation_enabled === true;
+  }));
 }
 
 function saveXTranslationControls() {
   settings.x_translation = settings.x_translation || {};
   settings.x_translation.provider = document.getElementById("xTranslationProvider").value;
   settings.x_translation.fallback_provider = document.getElementById("xTranslationFallback").value;
-  settings.x_translation.append_original = document.getElementById("xTranslationAppendOriginal").checked;
 }
 
-document.getElementById("btnSaveXTranslationSettings").addEventListener("click", async function () {
-  saveXTranslationControls();
-  await saveAndReload();
-});
+// 次选方式不允许与首选方式重复；如果切换首选后原次选被排除，
+// 自动回退到“仅原文”（或第一个仍可用的选项）。
+function syncTranslationFallback(primaryId, fallbackId) {
+  const primary = document.getElementById(primaryId);
+  const fallback = document.getElementById(fallbackId);
+  if (!primary || !fallback) return;
+  if (!fallback._allOptions) {
+    fallback._allOptions = Array.from(fallback.options).map(function (option) {
+      return option.cloneNode(true);
+    });
+  }
+  const current = fallback.value;
+  fallback.innerHTML = "";
+  fallback._allOptions.forEach(function (option) {
+    if (option.value !== primary.value) fallback.appendChild(option.cloneNode(true));
+  });
+  const available = Array.from(fallback.options);
+  if (available.some(function (option) { return option.value === current; })) {
+    fallback.value = current;
+  } else if (available.some(function (option) { return option.value === ""; })) {
+    fallback.value = "";
+  } else if (available.length) {
+    fallback.value = available[0].value;
+  }
+}
+
+
+// ---------------- QQ → QQ 页面 ----------------
+// QQ→QQ 使用独立的 qq_forwarding_groups；组内成员渲染沿用 Discord/X 页的
+// 转发组交互，但不与它们共享组数组或路由关系。
+function renderQQPage() {
+  const groupBody = document.getElementById("qqFgGroupBody");
+  if (!groupBody || !settings) return;
+  renderFgTabs(FG_QQ);
+  const qfg = getActiveFg(FG_QQ);
+  const allGroups = settings.qq_group_openids || [];
+  const memberGroups = {};
+  if (qfg) {
+    (qfg.groups || []).forEach(function (openid) { memberGroups[String(openid)] = true; });
+  }
+  const groupRows = allGroups.filter(function (group) {
+    return memberGroups[String(group.openid)];
+  });
+  groupBody.innerHTML = "";
+  if (!groupRows.length) {
+    groupBody.innerHTML = '<tr class="fgempty-row"><td colspan="6" class="fgempty-msg">还未新增群，点击下方「＋ 新增」来新增第一个群吧！</td></tr>';
+  }
+  groupRows.forEach(function (group) {
+    const index = allGroups.indexOf(group);
+    const name = group.name || identityName("groups", group.openid) || "";
+    const account = group.qq_id || "";
+    const tr = document.createElement("tr");
+    tr.setAttribute("data-id", String(group.openid));
+    tr.innerHTML =
+      '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
+      '<td style="text-align:center"><input type="checkbox" data-kind="group" data-i="' + index + '"' + (group.enabled ? " checked" : "") + '></td>' +
+      '<td>' + (name ? '<div style="color:var(--fg);font-size:12px;word-break:break-all;">' + escapeHtml(name) + '</div>' : '') + '</td>' +
+      '<td style="font-size:12px;">' + escapeHtml(account) + '</td>' +
+      '<td class="mono">' + escapeHtml(group.openid) + '</td>' +
+      '<td style="text-align:right"><button class="danger rowicon" data-kind="qqFgGroupRemove" data-id="' + escapeHtml(String(group.openid)) + '" title="移出当前转发组">' + SVG_TRASH + '</button></td>';
+    groupBody.appendChild(tr);
+  });
+  syncHeaderAll("qqGroupAllEnabled", groupRows, "enabled");
+}
 
 // ---------------- X → QQ 页面 ----------------
 // 转发组读写 settings.x_forwarding_groups（与 Discord forwarding_groups 完全
@@ -743,6 +1162,7 @@ document.getElementById("btnSaveXTranslationSettings").addEventListener("click",
 function renderXPage() {
   const srcBody = document.getElementById("xSourceBody");
   if (!srcBody || !settings) return;
+  renderXRelayLinkCard();
   renderXTranslationControls();
   renderFgTabs(FG_X);
   const xfg = getActiveFg(FG_X);
@@ -767,9 +1187,17 @@ function renderXPage() {
     tr.innerHTML =
       '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
       '<td style="text-align:center"><input type="checkbox" data-kind="xSource" data-i="' + i + '"' + (s.enabled ? " checked" : "") + '></td>' +
-      '<td style="color:var(--fg);font-size:12px;word-break:break-all;">' + escapeHtml(name) + '</td>' +
+      '<td>' +
+        '<span class="chan-name" data-kind="xSourceNameDisplay" data-i="' + i + '">' +
+          '<span class="chan-name-text">' + escapeHtml(name) + '</span>' +
+          '<span class="chan-name-edit" data-kind="xSourceNameEdit" data-i="' + i + '" title="编辑账号名称">' + SVG_PEN + '</span>' +
+        '</span>' +
+      '</td>' +
       '<td class="mono">@' + escapeHtml(handle) + '</td>' +
-      '<td style="text-align:right"><button class="danger rowicon" data-kind="xFgSourceRemove" data-id="' + escapeHtml(handle) + '" title="移出当前转发组">' + SVG_TRASH + '</button></td>';
+      '<td style="text-align:right"><div style="display:flex;gap:4px;justify-content:flex-end;">' +
+        '<button class="sec rowicon translation-toggle-icon' + (s.translation_enabled ? ' translation-active' : '') + '" title="翻译设置" aria-label="翻译设置" data-kind="xSourceTranslation" data-i="' + i + '">' + SVG_TRANSLATE + '</button>' +
+        '<button class="sec rowicon' + (channelFilterActive(s) ? ' filter-active' : '') + '" data-kind="xSourceFilter" data-i="' + i + '">' + SVG_FUNNEL + '</button>' +
+        '<button class="danger rowicon" data-kind="xFgSourceRemove" data-id="' + escapeHtml(handle) + '" title="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
     srcBody.appendChild(tr);
   });
   // 表头全选框状态反映当前组成员，勾选/取消只作用于当前 X 转发组来源
@@ -1001,9 +1429,9 @@ function escapeHtml(s) {
 }
 
 // ---------------- 表格行拖拽排序（鼠标事件实现 + 数据数组持久化） ----------------
-// 作用区域：转发组卡片的「Discord 转发频道 / QQ 接收群」与「私聊权限」三个表格。
-// 拖拽真正重排 settings 数据数组（qq_group_openids / discord_channels / qq_user_openids），
-// 并通过 saveAndReload() 走现有保存流程持久化（刷新后保持）；行只能在同一表格内排序。
+// 作用区域：转发组卡片的「Discord 转发频道 / QQ 接收群」
+// 与「私聊权限」表格。拖拽真正重排 settings 数据并通过 saveAndReload()
+// 走现有保存流程持久化（刷新后保持）；行只能在同一表格内排序。
 let dndState = null;   // {body, tr, id, startX, startY} —— 正在拖拽的源行
 
 document.addEventListener("mousedown", function (e) {
@@ -1133,12 +1561,15 @@ function memberIdSet(arr) {
 }
 
 // ---------------- 转发组 tab 左右拖拽排序（鼠标事件实现 + 数组持久化） ----------------
-// 作用区域：Discord 页 #fgTabs 与 X 页 #xFgTabs 两个转发组条（.fgtabs）。
+// 作用区域：Discord、X、QQ→QQ 页各自的转发组条（.fgtabs）。
 // 按住转发组按钮（.fgtab）左右拖动调整顺序；松手后重排 settings 的
-// forwarding_groups / x_forwarding_groups 数组并 saveAndReload() 持久化（刷新后保持）。
+// forwarding_groups / x_forwarding_groups / qq_forwarding_groups 数组并
+// saveAndReload() 持久化（刷新后保持）。
 let fgDnd = null;   // {wrap, btn, startX, startY} —— 正在拖拽的源转发组按钮
 function fgCtxByWrap(wrap) {
-  return (wrap && wrap.id === "xFgTabs") ? FG_X : FG_DISCORD;
+  if (wrap && wrap.id === "xFgTabs") return FG_X;
+  if (wrap && wrap.id === "qqFgTabs") return FG_QQ;
+  return FG_DISCORD;
 }
 document.addEventListener("mousedown", function (e) {
   const btn = e.target.closest(".fgtab");
@@ -1205,6 +1636,7 @@ document.addEventListener("mouseup", function (e) {
   ids.forEach(function (id) { if (byId[id]) ordered.push(byId[id]); });
   if (ordered.length !== list.length) return;
   if (ctx.field === "x_forwarding_groups") settings.x_forwarding_groups = ordered;
+  else if (ctx.field === "qq_forwarding_groups") settings.qq_forwarding_groups = ordered;
   else settings.forwarding_groups = ordered;
   saveAndReload();                                         // 现有保存：POST settings + 重渲染
 });
@@ -1313,7 +1745,7 @@ function showConfirmDlg(title, message, onOk, okText) {
 
 function showConfirmSelect(title, items, labelFn, onOkSelected, opts) {
   opts = opts || {};
-  const defaultChecked = opts.defaultChecked !== false;
+  const defaultChecked = opts.defaultChecked;
   const groupBy = opts.groupBy || null;
   document.getElementById("confirmTitle").textContent = title;
   const body = document.getElementById("confirmBody");
@@ -1328,7 +1760,7 @@ function showConfirmSelect(title, items, labelFn, onOkSelected, opts) {
     row.style.padding = "2px 0";
     const cb = document.createElement("input");
     cb.type = "checkbox";
-    cb.checked = defaultChecked;
+    cb.checked = typeof defaultChecked === "function" ? !!defaultChecked(it) : defaultChecked !== false;
     cb.style.width = "16px";
     cb.style.height = "16px";
     const span = document.createElement("span");
@@ -1378,7 +1810,7 @@ function showConfirmSelect(title, items, labelFn, onOkSelected, opts) {
   } else {
     items.forEach(renderRow);
   }
-  setConfirmButtons("确认添加", true);
+  setConfirmButtons(opts.okText || "确认添加", true);
   confirmAction = function () {
     const selected = rows.filter(function (b) { return b.cb.checked; }).map(function (b) { return b.it; });
     return onOkSelected(selected);
@@ -1474,11 +1906,16 @@ async function reviewRegistration(openid, action) {
 // 消息类型按钮（与 plugins/filter.py 的类型名一一对应，前后端保持同名单；
 // Discord 视频附件当前按「文件」转发，因此没有独立的「视频」类型）
 const FILTER_MESSAGE_TYPES = ["文字", "图片", "语音", "文件", "链接", "表情"];
+const FILTER_X_POST_TYPES = ["原创", "转发", "引用"];
 
 let filterEditIndex = -1;
+let filterEditScope = "channel";
 let filterUsernames = [];
 let filterKeywords = [];
 let filterMessageTypes = [];
+let filterXPostTypes = [];
+let translationSourceEditScope = "";
+let translationSourceEditIndex = -1;
 
 function filterItemsOf(kind) {
   return kind === "usernames" ? filterUsernames : filterKeywords;
@@ -1567,19 +2004,154 @@ function renderFilterTypeBtn(btn) {
   btn.innerHTML = icon + "<span>" + btn.dataset.type + "</span>";
 }
 
-// 频道是否配置了筛选（漏斗图标高亮）：用户名/关键词任一非空，
-// 或消息类型显式保存过且不是"全部启用"（缺省/全选 = 未筛选）
-function channelFilterActive(c) {
-  if ((c.filter_usernames || []).length) return true;
-  if ((c.filter_keywords || []).length) return true;
-  const t = c.filter_message_types;
-  return Array.isArray(t) && t.length < FILTER_MESSAGE_TYPES.length;
+function renderFilterXPostTypes() {
+  const wrap = document.getElementById("filterXPostTypeList");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  FILTER_X_POST_TYPES.forEach(function (t) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "sec flt-type-btn";
+    btn.dataset.type = t;
+    btn.title = t;
+    btn.addEventListener("click", function () {
+      const idx = filterXPostTypes.indexOf(t);
+      if (idx >= 0) filterXPostTypes.splice(idx, 1);
+      else filterXPostTypes.push(t);
+      renderFilterTypeBtnState(btn, filterXPostTypes);
+    });
+    wrap.appendChild(btn);
+    renderFilterTypeBtnState(btn, filterXPostTypes);
+  });
 }
 
-function openFilterModal(index) {
-  filterEditIndex = index;
-  const c = settings.discord_channels[index];
-  document.getElementById("filterChanName").textContent = "# " + (c.name || c.id);
+function renderFilterTypeBtnState(btn, selected) {
+  const on = selected.indexOf(btn.dataset.type) >= 0;
+  btn.dataset.on = on ? "1" : "0";
+  const icon = on
+    ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
+    : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+  btn.innerHTML = icon + "<span>" + btn.dataset.type + "</span>";
+}
+
+// 筛选配置是否生效（漏斗图标高亮）：用户名/关键词任一非空，
+// 或 Discord 消息类型 / X 推文类型显式保存过且不是"全部启用"
+// （缺省/全选 = 未筛选）
+function filterConfigActive(c, includeAudience) {
+  c = c || {};
+  if (includeAudience !== false) {
+    if ((c.filter_usernames || []).length) return true;
+    if ((c.filter_keywords || []).length) return true;
+  }
+  const t = c.filter_message_types;
+  if (Array.isArray(t) && t.length < FILTER_MESSAGE_TYPES.length) return true;
+  const x = c.filter_post_types;
+  return Array.isArray(x) && x.length > 0 && x.length < FILTER_X_POST_TYPES.length;
+}
+
+function renderManualRelayCard(cardId, filterButtonId, filterKey) {
+  const btn = document.getElementById(filterButtonId);
+  if (!btn) return;
+  btn.innerHTML = SVG_FUNNEL;
+  btn.classList.toggle("filter-active", filterConfigActive(settings && settings[filterKey], false));
+}
+
+function renderRelayLinkCard() {
+  renderManualRelayCard("relayLinkCard", "btnRelayFilter", "qq_c2c_relay_filter");
+}
+
+function renderXRelayLinkCard() {
+  renderManualRelayCard("xRelayLinkCard", "btnXRelayFilter", "x_c2c_relay_filter");
+}
+
+let relayChannelsEditScope = "discord";
+
+function openRelayChannelsModal(scope) {
+  relayChannelsEditScope = scope === "x" ? "x" : "discord";
+  const list = document.getElementById("relayChannelsList");
+  if (!list) return;
+  list.innerHTML = "";
+  const channels = Array.isArray(settings && (relayChannelsEditScope === "x"
+    ? settings.x_rss_sources
+    : settings.discord_channels))
+    ? (relayChannelsEditScope === "x" ? settings.x_rss_sources : settings.discord_channels)
+    : [];
+  document.getElementById("relayChannelsTitle").textContent = relayChannelsEditScope === "x" ? "已注册账号" : "已注册频道";
+  document.querySelector("#relayChannelsModal .relay-channels-desc").textContent = relayChannelsEditScope === "x"
+    ? "这里显示全部已登记、可用于 X 手动转发链接的账号。修改备注后点击保存即可。"
+    : "这里显示全部已登记、可用于 Discord 手动转发链接的频道。修改备注后点击保存即可。";
+  if (!channels.length) {
+    list.innerHTML = '<div class="relay-channels-empty">当前没有已注册' + (relayChannelsEditScope === "x" ? "账号" : "频道") + "</div>";
+  } else {
+    channels.forEach(function (channel, index) {
+      const id = relayChannelsEditScope === "x"
+        ? xSourceKey(channel.source)
+        : String(channel.id || "");
+      const row = document.createElement("div");
+      row.className = "relay-channel-row";
+      const info = document.createElement("div");
+      info.className = "relay-channel-row-info";
+      const name = document.createElement("div");
+      name.className = "relay-channel-row-name";
+      name.textContent = relayChannelsEditScope === "x"
+        ? "@" + id
+        : (channelNames[id] ? "# " + channelNames[id] : "# " + (channel.name || id));
+      name.title = name.textContent;
+      const channelId = document.createElement("div");
+      channelId.className = "relay-channel-row-id";
+      channelId.textContent = id;
+      channelId.title = id;
+      info.appendChild(name);
+      info.appendChild(channelId);
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = channel.name || "";
+      input.placeholder = relayChannelsEditScope === "x" ? "账号中文备注" : "频道中文备注";
+      input.dataset.index = String(index);
+      input.setAttribute("aria-label", relayChannelsEditScope === "x" ? "账号中文备注" : "频道中文备注");
+      row.appendChild(info);
+      row.appendChild(input);
+      list.appendChild(row);
+    });
+  }
+  document.getElementById("relayChannelsModal").style.display = "flex";
+}
+
+function closeRelayChannelsModal() {
+  document.getElementById("relayChannelsModal").style.display = "none";
+}
+
+async function saveRelayChannels() {
+  const list = document.getElementById("relayChannelsList");
+  if (!list) return;
+  list.querySelectorAll("input[data-index]").forEach(function (input) {
+    const index = Number(input.dataset.index);
+    const channel = relayChannelsEditScope === "x"
+      ? settings.x_rss_sources[index]
+      : settings.discord_channels[index];
+    if (channel) channel.name = input.value.trim();
+  });
+  closeRelayChannelsModal();
+  await saveAndReload();
+}
+
+function prepareFilterModal(config, label) {
+  const c = config || {};
+  document.getElementById("filterChanName").textContent = label;
+  const audienceFields = document.getElementById("filterAudienceFields");
+  if (audienceFields) audienceFields.style.display = filterEditScope === "channel" || filterEditScope === "xsource" ? "flex" : "none";
+  const usernameField = document.getElementById("filterUsernameField");
+  if (usernameField) usernameField.style.display = filterEditScope === "channel" ? "flex" : "none";
+  const keywordField = document.getElementById("filterKeywordField");
+  if (keywordField) keywordField.style.display = filterEditScope === "channel" || filterEditScope === "xsource" ? "flex" : "none";
+  const keywordTitle = document.getElementById("filterKeywordTitle");
+  if (keywordTitle) keywordTitle.firstChild.textContent = filterEditScope === "xsource" ? "关键词/话题 " : "关键词筛选 ";
+  const keywordInput = document.getElementById("filterKeywordInput");
+  if (keywordInput) keywordInput.placeholder = filterEditScope === "xsource" ? "关键词或 #话题" : "关键词";
+  const messageTypeFields = document.getElementById("filterMessageTypeFields");
+  if (messageTypeFields) messageTypeFields.style.display = filterEditScope === "xsource" ? "none" : "block";
+  const xPostTypeFields = document.getElementById("filterXPostTypeFields");
+  if (xPostTypeFields) xPostTypeFields.style.display = filterEditScope === "xsource" ? "block" : "none";
   // 兼容现有已保存的筛选配置（数组）；类型字段缺省 = 全部启用
   filterUsernames = (c.filter_usernames || []).slice();
   filterKeywords = (c.filter_keywords || []).slice();
@@ -1587,15 +2159,113 @@ function openFilterModal(index) {
   filterMessageTypes = Array.isArray(storedTypes)
     ? storedTypes.slice()
     : FILTER_MESSAGE_TYPES.slice();
+  const storedXPostTypes = c.filter_post_types;
+  filterXPostTypes = Array.isArray(storedXPostTypes)
+    ? storedXPostTypes.slice()
+    : FILTER_X_POST_TYPES.slice();
   renderFilterList("usernames");
   renderFilterList("keywords");
   renderFilterTypes();
+  renderFilterXPostTypes();
   document.getElementById("filterModal").style.display = "flex";
+}
+
+function channelFilterActive(c) {
+  return filterConfigActive(c);
+}
+
+function openFilterModal(index) {
+  const c = settings.discord_channels[index];
+  if (!c) return;
+  filterEditScope = "channel";
+  filterEditIndex = index;
+  prepareFilterModal(c, "# " + (c.name || c.id));
+}
+
+function openXSourceFilterModal(index) {
+  const source = (settings.x_rss_sources || [])[index];
+  if (!source) return;
+  filterEditScope = "xsource";
+  filterEditIndex = index;
+  prepareFilterModal(source, "@" + xSourceKey(source.source));
+}
+
+function openRelayFilterModal() {
+  filterEditScope = "relay";
+  filterEditIndex = -1;
+  prepareFilterModal(
+    settings.qq_c2c_relay_filter || {},
+    "# Discord 手动转发（全部频道）"
+  );
+}
+
+function openXRelayFilterModal() {
+  filterEditScope = "xrelay";
+  filterEditIndex = -1;
+  prepareFilterModal(
+    settings.x_c2c_relay_filter || {},
+    "# X 手动转发（全部账号）"
+  );
 }
 
 function closeFilterModal() {
   document.getElementById("filterModal").style.display = "none";
   filterEditIndex = -1;
+  filterEditScope = "channel";
+}
+
+function openTranslationSourceModal(scope, index) {
+  const isX = scope === "xsource";
+  const item = isX
+    ? (settings.x_rss_sources || [])[index]
+    : (settings.discord_channels || [])[index];
+  if (!item) return;
+  translationSourceEditScope = isX ? "xsource" : "channel";
+  translationSourceEditIndex = index;
+  const label = isX
+    ? "@" + xSourceKey(item.source)
+    : "# " + (item.name || item.id);
+  document.getElementById("translationSourceName").textContent = label;
+  renderTranslationSettingButton("translationSourceEnabled", item.translation_enabled === true, "启用翻译");
+  renderTranslationSettingButton("translationSourceAppendOriginal", item.translation_append_original !== false, "保留原文");
+  syncTranslationSourceModalButtons();
+  document.getElementById("translationSourceModal").style.display = "flex";
+}
+
+function renderTranslationSettingButton(id, on, label) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  btn.dataset.on = on ? "1" : "0";
+  const icon = id === "translationSourceAppendOriginal"
+    ? (on ? SVG_ORIGINAL_ON : SVG_ORIGINAL_OFF)
+    : (on
+      ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
+      : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>');
+  btn.innerHTML = icon + "<span>" + label + "</span>";
+}
+
+function syncTranslationSourceModalButtons() {
+  const enabled = document.getElementById("translationSourceEnabled");
+  const append = document.getElementById("translationSourceAppendOriginal");
+  if (!enabled || !append) return;
+  append.disabled = enabled.dataset.on !== "1";
+}
+
+function closeTranslationSourceModal() {
+  document.getElementById("translationSourceModal").style.display = "none";
+  translationSourceEditScope = "";
+  translationSourceEditIndex = -1;
+}
+
+async function saveTranslationSourceModal() {
+  const item = translationSourceEditScope === "xsource"
+    ? (settings.x_rss_sources || [])[translationSourceEditIndex]
+    : (settings.discord_channels || [])[translationSourceEditIndex];
+  if (!item) return;
+  item.translation_enabled = document.getElementById("translationSourceEnabled").dataset.on === "1";
+  item.translation_append_original = document.getElementById("translationSourceAppendOriginal").dataset.on === "1";
+  const saved = await saveAndReload();
+  if (saved) closeTranslationSourceModal();
 }
 
 document.getElementById("filterUsernameAdd").addEventListener("click", function () { addFilterItem("usernames"); });
@@ -1608,16 +2278,38 @@ document.getElementById("filterKeywordInput").addEventListener("keydown", functi
 });
 
 document.getElementById("filterSave").addEventListener("click", async function () {
-  if (filterEditIndex < 0) return;
-  const c = settings.discord_channels[filterEditIndex];
-  c.filter_usernames = filterUsernames.slice();
-  c.filter_keywords = filterKeywords.slice();
-  // 全部启用 = 默认状态：不写字段（后端对缺省字段按全部启用处理），
-  // 与老配置保持兼容；未全选时才落盘类型列表
-  if (filterMessageTypes.length < FILTER_MESSAGE_TYPES.length) {
-    c.filter_message_types = filterMessageTypes.slice();
+  if (filterEditScope === "relay" || filterEditScope === "xrelay") {
+    const key = filterEditScope === "xrelay" ? "x_c2c_relay_filter" : "qq_c2c_relay_filter";
+    settings[key] = {
+      filter_message_types: filterMessageTypes.slice(),
+    };
   } else {
-    delete c.filter_message_types;
+    if (filterEditIndex < 0) return;
+    const c = filterEditScope === "xsource"
+      ? settings.x_rss_sources[filterEditIndex]
+      : settings.discord_channels[filterEditIndex];
+    if (!c) return;
+    if (filterEditScope === "xsource") {
+      c.filter_keywords = filterKeywords.slice();
+      if (filterXPostTypes.length > 0 && filterXPostTypes.length < FILTER_X_POST_TYPES.length) {
+        c.filter_post_types = filterXPostTypes.slice();
+      } else {
+        delete c.filter_post_types;
+      }
+    } else {
+      c.filter_usernames = filterUsernames.slice();
+      c.filter_keywords = filterKeywords.slice();
+      // 全部启用 = 默认状态：不写字段（后端对缺省字段按全部启用处理），
+      // 与老配置保持兼容；未全选时才落盘类型列表
+      if (filterMessageTypes.length < FILTER_MESSAGE_TYPES.length) {
+        c.filter_message_types = filterMessageTypes.slice();
+      } else {
+        delete c.filter_message_types;
+      }
+    }
+    closeFilterModal();
+    await saveAndReload();
+    return;
   }
   closeFilterModal();
   await saveAndReload();
@@ -1819,14 +2511,20 @@ document.addEventListener("click", async function (e) {
     if (fn) await fn();
     return;
   }
-  if (btn.classList.contains("modal-x")) {
+  if (btn.classList.contains("modal-x") || btn.dataset.close) {
     const closeMap = {
       confirmModal: hideConfirm,
       filterModal: closeFilterModal,
+      translationSourceModal: closeTranslationSourceModal,
+      relayChannelsModal: closeRelayChannelsModal,
       aboutModal: function () { document.getElementById("aboutModal").style.display = "none"; },
       translationConfigModal: closeTranslationConfigModal,
       qqConfigModal: closeQQConfigModal,
       discordConfigModal: closeDiscordConfigModal,
+      scheduledMessageContentModal: function () {
+        scheduledMessageDraft = null;
+        document.getElementById("scheduledMessageContentModal").style.display = "none";
+      },
     };
     const closer = closeMap[btn.dataset.close];
     if (closer) closer();
@@ -1835,6 +2533,41 @@ document.addEventListener("click", async function (e) {
   if (btn.dataset.hint) {
     const tip = document.getElementById(btn.dataset.hint);
     showAlert(btn.dataset.title, (tip && tip.textContent) || "当前无附加说明。");
+    return;
+  }
+  if (btn.id === "translationSourceEnabled") {
+    const on = btn.dataset.on !== "1";
+    renderTranslationSettingButton("translationSourceEnabled", on, "启用翻译");
+    syncTranslationSourceModalButtons();
+    return;
+  }
+  if (btn.id === "translationSourceAppendOriginal") {
+    if (btn.disabled) return;
+    renderTranslationSettingButton("translationSourceAppendOriginal", btn.dataset.on !== "1", "保留原文");
+    return;
+  }
+  if (btn.id === "btnRelayRegisteredChannels") {
+    openRelayChannelsModal("discord");
+    return;
+  }
+  if (btn.id === "btnRelayFilter") {
+    openRelayFilterModal();
+    return;
+  }
+  if (btn.id === "btnXRelayRegisteredChannels") {
+    openRelayChannelsModal("x");
+    return;
+  }
+  if (btn.id === "btnXRelayFilter") {
+    openXRelayFilterModal();
+    return;
+  }
+  if (btn.id === "translationSourceSave") {
+    await saveTranslationSourceModal();
+    return;
+  }
+  if (btn.id === "relayChannelsSave") {
+    await saveRelayChannels();
     return;
   }
   if (btn.dataset.fold) {
@@ -1869,9 +2602,9 @@ document.addEventListener("click", async function (e) {
   if (k === "fgDel") {
     const ctx = FG_CTX[btn.dataset.ctx] || FG_DISCORD;
     const fg = getActiveFg(ctx);
-    // 普通转发组可删除（每套组至少保留 1 个）
+    // Discord/X 至少保留 1 个转发组；QQ→QQ 允许删除仅含一个群的最后一组。
     if (!fg) return;
-    showConfirmDlg("删除转发组", "确定删除转发组「" + fg.name + "」？成员关系会移除，但" + (ctx.key === "x" ? "来源和群" : "频道和群") + "本身不会删除。", async function () {
+    showConfirmDlg("删除转发组", "确定删除转发组「" + fg.name + "」？成员关系会移除，但" + (ctx.key === "x" ? "来源和群" : ctx.key === "qq" ? "群" : "频道和群") + "本身不会删除。", async function () {
       // 确认时基于最新 settings 解析，避免弹窗期间对象被替换
       const curList = getFgList(ctx);
       const target = curList.find(function (x) { return x.id === fg.id; });
@@ -1892,6 +2625,10 @@ document.addEventListener("click", async function (e) {
   }
   if (btn.id === "btnAddXFg") {
     addForwardingGroup(FG_X);
+    return;
+  }
+  if (btn.id === "btnAddQQFg") {
+    addForwardingGroup(FG_QQ);
     return;
   }
   if (btn.id === "btnQQConfig") {
@@ -1949,12 +2686,25 @@ document.addEventListener("click", async function (e) {
     openFgAddPicker(FG_X, "group");
     return;
   }
+  if (btn.id === "btnAddQQFgGroup") {
+    // 「＋ 新增」（QQ 转发群）：从已注册群中选择加入当前 QQ→QQ 转发组
+    openFgAddPicker(FG_QQ, "group");
+    return;
+  }
   if (btn.id === "btnSyncXGroups") {
     // 与 Discord → QQ 页共用的注册审核流程（/api/registrations）
     await openRegistrationReview("groups");
     return;
   }
+  if (btn.id === "btnSyncQQGroups") {
+    await openRegistrationReview("groups");
+    return;
+  }
   if (btn.id === "btnQQPlatformX") {
+    window.open("https://q.qq.com/qqbot/dashboard/", "_blank");
+    return;
+  }
+  if (btn.id === "btnQQPlatformQQ") {
     window.open("https://q.qq.com/qqbot/dashboard/", "_blank");
     return;
   }
@@ -1980,6 +2730,10 @@ document.addEventListener("click", async function (e) {
     openFgAddPicker(FG_DISCORD, "group");
     return;
   }
+  if (btn.id === "btnAddScheduledGroup") {
+    openScheduledGroupPicker();
+    return;
+  }
   if (btn.id === "btnScanChannels") {
     scanReadableChannels(btn);
     return;
@@ -1992,6 +2746,11 @@ document.addEventListener("click", async function (e) {
   if (k === "xFgGroupRemove") {
     // 仅把群移出当前 X 转发组（不删全局群、不影响其他组）
     removeFgMember(FG_X, btn.dataset.id, "groups");
+    return;
+  }
+  if (k === "qqFgGroupRemove") {
+    // 仅把群移出当前 QQ→QQ 转发组（不删全局群、不影响其他组）
+    removeFgMember(FG_QQ, btn.dataset.id, "groups");
     return;
   }
   if (k === "fgGroupRemove") {
@@ -2015,8 +2774,14 @@ document.addEventListener("click", async function (e) {
       settings.qq_user_openids.splice(idx, 1);
       await saveAndReload();
     }, "删除");
+  } else if (k === "chanTranslation") {
+    openTranslationSourceModal("channel", Number(btn.dataset.i));
+  } else if (k === "xSourceTranslation") {
+    openTranslationSourceModal("xsource", Number(btn.dataset.i));
   } else if (k === "chanFilter") {
     openFilterModal(Number(btn.dataset.i));
+  } else if (k === "xSourceFilter") {
+    openXSourceFilterModal(Number(btn.dataset.i));
   } else if (k === "fgChanRemove") {
     removeFgMember(FG_DISCORD, btn.dataset.id, "channels");
   } else if (btn.id === "btnAddUser") {
@@ -2089,13 +2854,19 @@ document.addEventListener("click", async function (e) {
   } else if (btn.id === "btnBackfillToggle") {
     settings.backfill_enabled = btn.dataset.on !== "1";
     await saveAndReload();
+  } else if (btn.id === "btnScheduledMessageToggle") {
+    await saveScheduledMessageSettings(btn.dataset.on !== "1");
   } else if (btn.id === "btnTranslationToggle") {
-    settings.translation = settings.translation || {};
-    settings.translation.enabled = btn.dataset.on !== "1";
+    const enabled = btn.dataset.on !== "1";
+    (settings.discord_channels || []).forEach(function (channel) {
+      channel.translation_enabled = enabled;
+    });
     await saveAndReload();
   } else if (btn.id === "btnXTranslationToggle") {
-    settings.x_translation = settings.x_translation || {};
-    settings.x_translation.enabled = btn.dataset.on !== "1";
+    const enabled = btn.dataset.on !== "1";
+    (settings.x_rss_sources || []).forEach(function (source) {
+      source.translation_enabled = enabled;
+    });
     await saveAndReload();
   } else if (btn.id === "btnAbout") {
     document.getElementById("aboutModal").style.display = "flex";
@@ -2127,6 +2898,18 @@ document.addEventListener("click", async function (e) {
 
 document.addEventListener("change", async function (e) {
   const el = e.target;
+  if (el.id === "translationProvider" || el.id === "translationFallback") {
+    if (el.id === "translationProvider") syncTranslationFallback("translationProvider", "translationFallback");
+    saveAIControls();
+    await saveAndReload();
+    return;
+  }
+  if (el.id === "xTranslationProvider" || el.id === "xTranslationFallback") {
+    if (el.id === "xTranslationProvider") syncTranslationFallback("xTranslationProvider", "xTranslationFallback");
+    saveXTranslationControls();
+    await saveAndReload();
+    return;
+  }
   if (el.id === "backfillLimit") {
     let v = parseInt(el.value, 10);
     if (!(v > 0)) v = 10;
@@ -2171,8 +2954,8 @@ document.addEventListener("change", async function (e) {
     await saveAndReload();
     return;
   }
-  if (el.id === "groupAllEnabled" || el.id === "xGroupAllEnabled") {
-    const ctx = el.id === "xGroupAllEnabled" ? FG_X : FG_DISCORD;
+  if (el.id === "groupAllEnabled" || el.id === "xGroupAllEnabled" || el.id === "qqGroupAllEnabled") {
+    const ctx = el.id === "xGroupAllEnabled" ? FG_X : el.id === "qqGroupAllEnabled" ? FG_QQ : FG_DISCORD;
     const fg = getActiveFg(ctx);
     const groupSet = memberIdSet(fg && fg.groups);
     settings.qq_group_openids.forEach(function (g) {
@@ -2229,6 +3012,12 @@ document.addEventListener("blur", async function (e) {
   if (el.dataset.kind === "chanName") {
     settings.discord_channels[Number(el.dataset.i)].name = el.value;
     await saveAndReload();
+  } else if (el.dataset.kind === "xSourceName") {
+    const source = (settings.x_rss_sources || [])[Number(el.dataset.i)];
+    if (source) {
+      source.name = el.value;
+      await saveAndReload();
+    }
   }
 }, true);
 
@@ -2248,10 +3037,29 @@ function startChanNameEdit(i) {
   input.focus();
   input.select();
 }
+function startXSourceNameEdit(i) {
+  const source = (settings.x_rss_sources || [])[Number(i)];
+  if (!source) return;
+  const holder = document.querySelector('.chan-name[data-kind="xSourceNameDisplay"][data-i="' + i + '"]');
+  if (!holder) return;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = source.name || "";
+  input.dataset.kind = "xSourceName";
+  input.dataset.i = String(i);
+  holder.replaceWith(input);
+  input.focus();
+  input.select();
+}
 document.addEventListener("click", function (e) {
   const edit = e.target.closest('[data-kind="chanNameEdit"]');
   if (edit) {
     startChanNameEdit(edit.dataset.i);
+    return;
+  }
+  const xEdit = e.target.closest('[data-kind="xSourceNameEdit"]');
+  if (xEdit) {
+    startXSourceNameEdit(xEdit.dataset.i);
   }
 });
 
@@ -2275,6 +3083,10 @@ async function refreshStatus() {
       && document.activeElement !== bfLimit
     ) {
       bfLimit.value = Number(st.backfill_limit) > 0 ? st.backfill_limit : 10;
+    }
+    if (st.scheduled_message !== undefined && settings && !scheduledMessageEditorFocused()) {
+      settings.scheduled_message = st.scheduled_message || {};
+      renderScheduledMessage(settings.scheduled_message);
     }
     // 补发/清除成功（含 QQ 私聊触发）后立即刷新待补发数量
     if (st.backfill_seq !== lastBackfillSeq) {

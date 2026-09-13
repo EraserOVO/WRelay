@@ -24,6 +24,7 @@ from plugins.media import (
     convert_mention_ids,
     cleanup_markdown,
     parse_discord_emoji,
+    parse_discord_emoji_parts,
     make_text,
     make_file_link,
     make_media_link,
@@ -137,6 +138,31 @@ def _discord_id(value):
     return str(value)
 
 
+def _mention_name_map(mentions):
+    """从 Discord mentions 列表提取用户 ID → 显示名映射。"""
+    result = {}
+    for mention in mentions or []:
+        if isinstance(mention, dict):
+            user_id = mention.get("id")
+            name = (
+                mention.get("global_name")
+                or mention.get("username")
+                or mention.get("display_name")
+            )
+        else:
+            user_id = getattr(mention, "id", None)
+            name = (
+                getattr(mention, "global_name", None)
+                or getattr(mention, "username", None)
+                or getattr(mention, "display_name", None)
+            )
+        user_id = _discord_id(user_id)
+        name = str(name or "").strip()
+        if user_id and name:
+            result[user_id] = name
+    return result
+
+
 def _extract_reference(ref_obj, referenced=None):
     """从 API 消息对象提取回复引用 → 可选 reference dict
 
@@ -166,6 +192,7 @@ def _extract_reference(ref_obj, referenced=None):
             or ""
         ),
         "content": referenced.get("content") or "",
+        "mention_names": _mention_name_map(referenced.get("mentions")),
     }
 
 
@@ -223,6 +250,7 @@ def normalize_api_message(msg):
         "content": msg.get("content", ""),
         "embeds": embeds,
         "attachments": attachments,
+        "mention_names": _mention_name_map(msg.get("mentions")),
         "reference": _extract_reference(
             msg.get("message_reference"),
             msg.get("referenced_message"),
@@ -649,6 +677,7 @@ def normalize_event(event, channel_name):
         "content": getattr(event, "content", "") or "",
         "embeds": embeds,
         "attachments": attachments,
+        "mention_names": _mention_name_map(getattr(event, "mentions", [])),
         "reference": reference,
     }
 
@@ -757,6 +786,7 @@ async def _resolve_reference(reference, fallback_channel_id):
         or ""
     )
     reference["content"] = raw.get("content") or ""
+    reference["mention_names"] = _mention_name_map(raw.get("mentions"))
 
     if not (reference.get("content") or "").strip():
         return None
@@ -775,7 +805,7 @@ def _render_reference(reference):
 
     content = convert_mentions(content)
     content, _ = parse_discord_emoji(content)
-    content = convert_mention_ids(content)
+    content = convert_mention_ids(content, reference.get("mention_names"))
     content = cleanup_markdown(content)
     content = re.sub(r"\s+", " ", content).strip()
 
@@ -857,37 +887,53 @@ async def build_parts(message, source_label="自动转发来自", enabled_types=
     type_text = _type_enabled(MESSAGE_TYPE_TEXT)
     type_emoji = _type_enabled(MESSAGE_TYPE_EMOJI)
 
-    # Emoji 从正文中解析，因此文字/表情任一启用时都需要解析正文
+    # Emoji 从正文中解析，因此文字/表情任一启用时都需要解析正文。
+    # 保留原文顺序，把 emoji 直接放进 text_parts；sender 会将含图片段的
+    # 整组内容作为一条 QQ 消息发送，避免每个表情单独发一条消息。
     if raw_content and (type_text or type_emoji):
         content = convert_mentions(raw_content)
-        content, emojis = parse_discord_emoji(content)
-        content = convert_mention_ids(content)
-        content = cleanup_markdown(content)
+        content_parts = parse_discord_emoji_parts(content)
+        mention_names = message.get("mention_names")
+        emoji_urls = [
+            value for kind, value in content_parts
+            if kind == "emoji" and type_emoji
+        ]
+        emoji_bytes_map = (
+            await fetch_bytes_many(list(dict.fromkeys(emoji_urls)))
+            if emoji_urls else {}
+        )
+        content_started = False
 
-        if content and type_text:
-            text_parts.append(
-                make_text("\n" + content)
-            )
-            has_content = True
-
-        if emojis and type_emoji:
-            emoji_bytes_map = await fetch_bytes_many(emojis)
-            for emoji in emojis:
-                emoji_bytes = emoji_bytes_map.get(emoji)
-                if emoji_bytes:
-                    media_items.append({
-                        "kind": "表情",
-                        "url": emoji,
-                        "segment": QQMessageSegment.file_image(
-                            emoji_bytes,
-                            "emoji.gif" if emoji.endswith(".gif") else "emoji.png"
-                        ),
-                    })
-                else:
-                    text_parts.append(
-                        make_media_link("表情", emoji)
-                    )
+        for kind, value in content_parts:
+            if kind == "text":
+                if not type_text:
+                    continue
+                fragment = convert_mention_ids(value, mention_names)
+                fragment = cleanup_markdown(fragment)
+                if not fragment.strip():
+                    continue
+                prefix = "\n" if not content_started else ""
+                text_parts.append(make_text(prefix + fragment))
+                content_started = True
                 has_content = True
+                continue
+
+            if not type_emoji:
+                continue
+            emoji_bytes = emoji_bytes_map.get(value)
+            if not content_started:
+                text_parts.append(make_text("\n"))
+                content_started = True
+            if emoji_bytes:
+                text_parts.append(
+                    QQMessageSegment.file_image(
+                        emoji_bytes,
+                        "emoji.gif" if value.endswith(".gif") else "emoji.png"
+                    )
+                )
+            else:
+                text_parts.append(make_media_link("表情", value))
+            has_content = True
 
     # ======================
     # Embed

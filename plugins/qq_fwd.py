@@ -6,18 +6,18 @@
   relay-list                  列出当前可作为转发目标的、已注册且 enabled 的 QQ 群（带序号）
   relay {序号}                将用户接下来发送的下一条普通消息，转发到序号对应的目标群
 
-发送前会再次校验目标群（仍注册 / enabled / 与当前群仍属同一转发组 / 排除当前群），
+发送前会再次校验目标群（仍注册 / enabled / 与当前群仍属同一已启用 QQ 转发组 / 排除当前群），
 配置变化导致失效时回复「转发失败」并结束本次交互。等待下一条消息期间绑定
 (当前群, 发送者 member_openid)，防止多人串台；超过 qq_fwd_select_timeout 秒仍未收到
 下一条可转发消息时静默清除 pending（不发送任何提示）。
 
 实现要点：
   - 不再依赖“上一条消息”缓存：转发的就是 relay {序号} 之后收到的下一条普通用户消息。
-  - 候选目标群 = 与当前群至少共同属于一个转发组（forwarding_groups）的其他已注册(enabled)群，
+  - 候选目标群 = 与当前群至少共同属于一个 QQ→QQ 转发组（qq_forwarding_groups）的其他已注册(enabled)群，
     跨多个转发组合并去重；当前群不属于任何转发组时候选为空。与测试组无关。
   - 过滤 Bot 消息（author.bot == True），relay / relay-list 等指令本身不会进入转发内容。
   - 发送复用 plugins/sender（分片/重试/限流退避/媒体降级）与 plugins/media（图片/音视频字节上传+链接降级）。
-  - 不依赖白名单；转发组（forwarding_groups）在此仅复用其群成员关系做候选筛选。
+  - 不依赖白名单；QQ→QQ 转发组只在本功能内使用，不读取 Discord/X 转发组。
 """
 import asyncio
 import time

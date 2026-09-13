@@ -17,6 +17,7 @@
       <div class="pagetabs" id="pageTabs" style="margin-bottom:0;">
         <button type="button" class="fgtab active" data-kind="pageTab" data-page="discord">Discord → QQ</button>
         <button type="button" class="fgtab" data-kind="pageTab" data-page="x">X → QQ</button>
+        <button type="button" class="fgtab" data-kind="pageTab" data-page="qq">QQ → QQ</button>
       </div>
     </div>
     <div style="display:flex;gap:6px;margin-right:12px;">
@@ -77,12 +78,22 @@
       </div>
       <div class="row" style="margin-top:10px;">
         <span class="bf-limit-label">RSSHub 地址</span>
-        <input type="text" id="xRsshubBase" style="flex:none;width:240px;">
+        <input type="text" id="xRsshubBase" style="flex:none;width:168px;">
         <span class="bf-limit-label">轮询间隔</span>
         <input type="number" id="xPollInterval" min="30" step="1" class="bf-limit-input" style="width:70px;">
         <span class="bf-limit-label">秒</span>
       </div>
       <div class="hint" id="hint-xrss" style="display:none">轮询间隔至少 30 秒，保存后下一轮生效，无需重启机器人。</div>
+    </div>
+
+    <div class="card" id="scheduledMessageCard" style="display:none">
+      <h2 style="display:flex;align-items:center;gap:6px;">定时消息 <button class="hintbtn" data-hint="hint-scheduled-message" data-title="定时消息">?</button></h2>
+      <div class="hint" id="hint-scheduled-message" style="display:none">点击笔图标可添加多条消息，并分别设置间隔或日历发送计划；仅当前启用的目标群会接收消息。</div>
+      <div id="scheduledMessageSummary" class="scheduled-message-summary">尚未添加消息</div>
+      <div class="row scheduled-message-actions">
+        <button id="btnScheduledMessageEdit" class="rowicon sec" type="button" title="管理定时消息" aria-label="管理定时消息"></button>
+        <button id="btnScheduledMessageToggle" class="sec" type="button"><span>启用定时发送</span></button>
+      </div>
     </div>
   </div>
 
@@ -104,7 +115,7 @@
             <thead><tr>
               <th style="width:1.6%"></th>
               <th style="width:2.3%;text-align:center" class="col-muted" title="启用 = 是否允许该频道转发"><input type="checkbox" id="chanAllEnabled"></th>
-              <th style="width:29.2%">名称</th><th style="width:13%">频道 ID</th><th style="width:3.5%"></th>
+              <th style="width:22.7%">名称</th><th style="width:13%">频道 ID</th><th style="width:10%"></th>
             </tr></thead>
             <tbody id="chanBody"></tbody>
           </table>
@@ -155,24 +166,56 @@
     </div>
   </div>
 
-  <div class="card">
+  <div class="relay-translation-row">
+  <div class="card" id="relayLinkCard">
+    <h2 style="display:flex;align-items:center;gap:6px;">手动转发 <button class="hintbtn" data-hint="hint-relay-link" data-title="手动转发">?</button></h2>
+    <div class="hint" id="hint-relay-link" style="display:none">白名单账户可通过 relay 序号选择目标 QQ 群，再发送下一条 Discord 消息链接；筛选设置对所有手动转发链接生效。</div>
+    <div class="relay-link-description">私聊发送 relay 序号后，下一条 Discord 链接将转发到选定的目标群。</div>
+    <div class="row relay-link-actions">
+      <button id="btnRelayRegisteredChannels" class="sec" type="button">已注册频道</button>
+      <button id="btnRelayFilter" class="sec iconbtn" type="button" title="消息筛选" aria-label="消息筛选"></button>
+    </div>
+  </div>
+  <div class="card" id="autoTranslationCard">
     <h2 style="display:flex;align-items:center;gap:6px;">自动翻译 <button class="hintbtn" data-hint="hint-auto-translation" data-title="自动翻译">?</button></h2>
     <div class="auto-translation-section">
       <div class="row auto-translation-fields">
-        <label class="auto-translation-field"><span>主服务</span><select id="translationProvider"><option value="tencent_tmt">腾讯 TMT</option><option value="ai">AI API</option></select></label>
-        <label class="auto-translation-field"><span>失败后</span><select id="translationFallback"><option value="ai">AI API</option><option value="tencent_tmt">腾讯 TMT</option><option value="">仅原文</option></select></label>
-        <label class="auto-translation-check"><input type="checkbox" id="translationAppendOriginal"> 保留原文</label>
+        <label class="auto-translation-field"><span>首选方式</span><select id="translationProvider"><option value="tencent_tmt">腾讯 TMT</option><option value="ai">AI API</option></select></label>
+        <label class="auto-translation-field"><span>次选方式</span><select id="translationFallback"><option value="ai">AI API</option><option value="tencent_tmt">腾讯 TMT</option><option value="">仅原文</option></select></label>
       </div>
     </div>
     <div class="row auto-translation-actions">
-      <div class="hint" id="hint-auto-translation" style="display:none">翻译失败时会按“失败后”选择降级；所有翻译服务不可用时仍会发送原文。</div>
+      <div class="hint" id="hint-auto-translation" style="display:none">左侧开关可一次启用或关闭全部 Discord 转发频道的翻译；每个频道可通过表格中的翻译图标单独设置，保留原文在其漏斗按钮内配置。</div>
       <button id="btnTranslationToggle" class="sec translation-toggle" type="button"><span>启用翻译</span></button>
       <span class="auto-translation-action-buttons">
-        <button id="btnSaveAISettings" type="button">保存设置</button>
         <button id="btnTranslationConfig" class="sec iconbtn" title="翻译服务配置" aria-label="翻译服务配置"><svg width="20" height="20" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10.5" cy="17.5" r="7" stroke="currentColor" stroke-width="2.1"/><line x1="15.9834" y1="11.9145" x2="24.398" y2="3.49992" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="23.5054" y1="5.83398" x2="26.1453" y2="8.47385" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="20.5894" y1="8.75" x2="22.5693" y2="10.7299" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg></button>
       </span>
     </div>
   </div>
+  </div>
+  </div>
+
+  <div id="scheduledMessageContentModal" class="scheduled-picker-modal" style="display:none;">
+    <div class="scheduled-picker-dialog scheduled-message-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="scheduledMessageContentTitle">
+      <button type="button" class="modal-x" data-close="scheduledMessageContentModal" aria-label="关闭">×</button>
+      <h3 id="scheduledMessageContentTitle">编辑定时消息</h3>
+      <div class="scheduled-message-group scheduled-message-editor-groups">
+        <div class="scheduled-message-group-title">发送目标群</div>
+        <div id="scheduledMessageGroupContent" class="scheduled-message-group-content">
+          <div id="scheduledMessageGroupSummary" class="scheduled-message-group-summary"></div>
+          <button id="btnAddScheduledGroup" type="button">管理</button>
+        </div>
+      </div>
+      <div class="scheduled-message-list-header">
+        <div class="scheduled-message-group-title">消息列表</div>
+        <button id="btnAddScheduledMessage" class="sec" type="button">＋ 添加消息</button>
+      </div>
+      <div id="scheduledMessageEntries" class="scheduled-message-entries"></div>
+      <div class="scheduled-picker-actions">
+        <button type="button" class="sec" data-close="scheduledMessageContentModal">取消</button>
+        <button type="button" id="scheduledMessageContentConfirm">确定</button>
+      </div>
+    </div>
   </div>
 
   <div id="pageX" class="page-content" style="display:none">
@@ -194,7 +237,7 @@
                 <thead><tr>
                   <th style="width:1.6%"></th>
                   <th style="width:2.3%;text-align:center" class="col-muted" title="启用 = 是否允许该源参与轮询与发送"><input type="checkbox" id="xSourceAllEnabled"></th>
-                  <th style="width:11.2%">名称</th><th style="width:31%">X 账号</th><th style="width:3.5%"></th>
+                  <th style="width:8.2%">名称</th><th style="width:31%">X 账号</th><th style="width:10%"></th>
                 </tr></thead>
                 <tbody id="xSourceBody"></tbody>
               </table>
@@ -246,23 +289,68 @@
       </div>
     </div>
 
+    <div class="relay-translation-row">
+    <div class="card" id="xRelayLinkCard">
+      <h2 style="display:flex;align-items:center;gap:6px;">手动转发 <button class="hintbtn" data-hint="hint-x-relay-link" data-title="手动转发">?</button></h2>
+      <div class="hint" id="hint-x-relay-link" style="display:none">白名单账户可通过 relay 序号选择目标 QQ 群，再发送下一条 X 消息链接；筛选设置对所有 X 手动转发链接生效。</div>
+      <div class="relay-link-description">私聊发送 relay 序号后，下一条 X 链接将转发到选定的目标群。</div>
+      <div class="row relay-link-actions">
+        <button id="btnXRelayRegisteredChannels" class="sec" type="button">已注册账号</button>
+        <button id="btnXRelayFilter" class="sec iconbtn" type="button" title="消息筛选" aria-label="消息筛选"></button>
+      </div>
+    </div>
     <div class="card">
       <h2 style="display:flex;align-items:center;gap:6px;">X 自动翻译 <button class="hintbtn" data-hint="hint-x-auto-translation" data-title="X 自动翻译">?</button></h2>
       <div class="auto-translation-section">
         <div class="row auto-translation-fields">
-          <label class="auto-translation-field"><span>主服务</span><select id="xTranslationProvider"><option value="tencent_tmt">腾讯 TMT</option><option value="ai">AI API</option></select></label>
-          <label class="auto-translation-field"><span>失败后</span><select id="xTranslationFallback"><option value="ai">AI API</option><option value="tencent_tmt">腾讯 TMT</option><option value="">仅原文</option></select></label>
-          <label class="auto-translation-check"><input type="checkbox" id="xTranslationAppendOriginal"> 保留原文</label>
+          <label class="auto-translation-field"><span>首选方式</span><select id="xTranslationProvider"><option value="tencent_tmt">腾讯 TMT</option><option value="ai">AI API</option></select></label>
+          <label class="auto-translation-field"><span>次选方式</span><select id="xTranslationFallback"><option value="ai">AI API</option><option value="tencent_tmt">腾讯 TMT</option><option value="">仅原文</option></select></label>
         </div>
       </div>
       <div class="row auto-translation-actions">
-        <div class="hint" id="hint-x-auto-translation" style="display:none">X 翻译开关和服务选择独立于 Discord/QQ；服务密钥与 API 地址仍共用下方服务配置。</div>
+        <div class="hint" id="hint-x-auto-translation" style="display:none">左侧开关可一次启用或关闭全部 X 转发账号的翻译；每个账号可通过表格中的翻译图标单独设置，保留原文在其漏斗按钮内配置。</div>
         <button id="btnXTranslationToggle" class="sec translation-toggle" type="button"><span>启用翻译</span></button>
         <span class="auto-translation-action-buttons">
-          <button id="btnSaveXTranslationSettings" type="button">保存设置</button>
           <button id="btnXTranslationConfig" class="sec iconbtn" title="翻译服务配置（共享）" aria-label="翻译服务配置（共享）"><svg width="20" height="20" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10.5" cy="17.5" r="7" stroke="currentColor" stroke-width="2.1"/><line x1="15.9834" y1="11.9145" x2="24.398" y2="3.49992" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="23.5054" y1="5.83398" x2="26.1453" y2="8.47385" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="20.5894" y1="8.75" x2="22.5693" y2="10.7299" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg></button>
         </span>
       </div>
+    </div>
+    </div>
+  </div>
+
+  <div id="pageQQ" class="page-content" style="display:none">
+    <div class="card">
+      <h2 style="display:flex;align-items:center;gap:6px;">转发组 <button class="hintbtn" data-hint="hint-qqfg" data-title="转发组">?</button></h2>
+      <div id="qqFgBody">
+        <div class="fgtabs" id="qqFgTabs">
+          <!-- QQ→QQ 转发组 tab 由 app.js 动态渲染；每组只保存 QQ 群成员。 -->
+          <button type="button" class="fgtab active" data-kind="fgTab" data-ctx="qq" data-id="qq_default">转发组1</button>
+          <button type="button" class="fgtab-add" id="btnAddQQFg">＋ 添加转发组</button>
+        </div>
+        <div class="hint" id="hint-qqfg" style="display:none">QQ→QQ 使用独立的转发组，只决定哪些 QQ 群可以进行手动 relay。群与群加入同一个已启用转发组后，群成员可发送 relay-list 查看目标，再发送 relay 序号转发下一条消息。此配置不读取 Discord→QQ 或 X→QQ 的转发组，也不会启用自动 QQ 双向同步。</div>
+
+        <div class="fgsection">
+          <h3 class="fgh3" style="display:flex;justify-content:space-between;align-items:center;"><span>QQ 转发群</span> <button class="foldbtn" data-fold="qqFgGroupContent" aria-label="展开/折叠"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 5l8 14H4z"/></svg></button></h3>
+          <div id="qqFgGroupContent">
+            <div class="tablewrap">
+              <table id="qqFgGroupList" style="table-layout:fixed">
+                <thead><tr>
+                  <th style="width:1.6%"></th>
+                  <th style="width:2.3%;text-align:center" class="col-muted" title="启用 = 是否允许该群作为 QQ→QQ 手动转发目标"><input type="checkbox" id="qqGroupAllEnabled"></th>
+                  <th style="width:11.2%">名称</th><th style="width:18%">账号</th><th style="width:13%">Group OpenID</th><th style="width:3.5%"></th>
+                </tr></thead>
+                <tbody id="qqFgGroupBody"></tbody>
+              </table>
+            </div>
+            <div class="row addrow">
+              <button id="btnAddQQFgGroup">＋ 新增</button>
+              <button id="btnSyncQQGroups" class="sec">注册审核</button>
+              <button id="btnQQPlatformQQ" class="sec linkbtn" style="margin-left:auto">QQ机器人</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
     </div>
   </div>
 
@@ -296,8 +384,8 @@
   <div style="position:relative;background:var(--modal-bg);border:1px solid var(--modal-border);border-radius:10px;padding:18px;max-width:560px;width:92%;display:flex;flex-direction:column;">
     <button type="button" class="modal-x" data-close="filterModal" aria-label="关闭">×</button>
     <h3 style="margin:0 0 12px;">消息筛选 <span id="filterChanName" style="font-size:13px;color:var(--muted);font-weight:normal;"></span></h3>
-    <div style="display:flex;gap:14px;">
-      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">
+    <div id="filterAudienceFields" style="display:flex;gap:14px;">
+      <div id="filterUsernameField" style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">
         <span class="flt-col-title">用户名筛选 <span class="flt-col-hint">（不区分大小写）</span></span>
         <div id="filterUsernameList" class="flt-list"></div>
         <div style="display:flex;gap:6px;">
@@ -305,8 +393,8 @@
           <button type="button" id="filterUsernameAdd" class="sec" style="flex:none;padding:6px 14px;">确认</button>
         </div>
       </div>
-      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">
-        <span class="flt-col-title">关键词筛选 <span class="flt-col-hint">（不区分大小写）</span></span>
+      <div id="filterKeywordField" style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">
+        <span id="filterKeywordTitle" class="flt-col-title">关键词筛选 <span class="flt-col-hint">（不区分大小写）</span></span>
         <div id="filterKeywordList" class="flt-list"></div>
         <div style="display:flex;gap:6px;">
           <input type="text" id="filterKeywordInput" placeholder="关键词" style="flex:1;min-width:0;">
@@ -314,12 +402,41 @@
         </div>
       </div>
     </div>
-    <div style="margin-top:14px;">
+    <div id="filterMessageTypeFields" style="margin-top:14px;">
       <span class="flt-col-title">消息类型 <span class="flt-col-hint">（过滤后无内容则不转发）</span></span>
       <div id="filterTypeList" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;"></div>
     </div>
+    <div id="filterXPostTypeFields" style="display:none;margin-top:14px;">
+      <span class="flt-col-title">推文类型 <span class="flt-col-hint">（未选择时转发全部类型）</span></span>
+      <div id="filterXPostTypeList" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;"></div>
+    </div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
       <button id="filterSave">保存</button>
+    </div>
+  </div>
+</div>
+<div id="translationSourceModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;align-items:center;justify-content:center;">
+  <div style="position:relative;background:var(--modal-bg);border:1px solid var(--modal-border);border-radius:10px;padding:18px;max-width:420px;width:92%;display:flex;flex-direction:column;gap:14px;">
+    <button type="button" class="modal-x" data-close="translationSourceModal" aria-label="关闭">×</button>
+    <h3 style="margin:0;">翻译设置 <span id="translationSourceName" style="font-size:13px;color:var(--muted);font-weight:normal;"></span></h3>
+    <button type="button" class="sec translation-setting-toggle" id="translationSourceEnabled"></button>
+    <button type="button" class="sec translation-setting-toggle" id="translationSourceAppendOriginal"></button>
+    <span class="flt-col-hint">翻译开启时，译文会附在原文后</span>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button type="button" class="sec" data-close="translationSourceModal">取消</button>
+      <button type="button" id="translationSourceSave">保存</button>
+    </div>
+  </div>
+</div>
+<div id="relayChannelsModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;align-items:center;justify-content:center;">
+  <div class="relay-channels-dialog" role="dialog" aria-modal="true" aria-labelledby="relayChannelsTitle">
+    <button type="button" class="modal-x" data-close="relayChannelsModal" aria-label="关闭">×</button>
+    <h3 id="relayChannelsTitle">已注册频道</h3>
+    <p class="relay-channels-desc">这里显示全部已登记、可用于手动转发链接的频道。修改备注后点击保存即可。</p>
+    <div id="relayChannelsList" class="relay-channels-list"></div>
+    <div class="relay-channels-actions">
+      <button type="button" class="sec" data-close="relayChannelsModal">取消</button>
+      <button type="button" id="relayChannelsSave">保存</button>
     </div>
   </div>
 </div>
@@ -349,16 +466,16 @@
     <h3 style="margin:0 0 14px;">翻译服务配置</h3>
     <h4 style="margin:0 0 10px;font-size:14px;">AI API</h4>
     <label for="aiBaseUrl" style="font-size:13px;color:var(--muted);margin-bottom:4px;">AI API 地址</label>
-    <input type="text" id="aiBaseUrl" placeholder="https://.../v1" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
+    <input type="text" id="aiBaseUrl" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
     <label for="aiModel" style="font-size:13px;color:var(--muted);margin:14px 0 4px;">AI 模型</label>
-    <input type="text" id="aiModel" placeholder="qwen-flash" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
+    <input type="text" id="aiModel" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
     <h4 style="margin:18px 0 10px;font-size:14px;">腾讯 TMT</h4>
     <label for="tencentSecretId" style="font-size:13px;color:var(--muted);margin-bottom:4px;">SecretId</label>
-    <input type="text" id="tencentSecretId" placeholder="留空表示保持当前配置" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
+    <input type="text" id="tencentSecretId" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
     <label for="tencentSecretKey" style="font-size:13px;color:var(--muted);margin:14px 0 4px;">SecretKey</label>
-    <input type="password" id="tencentSecretKey" placeholder="留空表示保持当前配置" autocomplete="new-password" spellcheck="false" style="width:100%;box-sizing:border-box;">
+    <input type="password" id="tencentSecretKey" autocomplete="new-password" spellcheck="false" style="width:100%;box-sizing:border-box;">
     <p id="tencentConfigStatus" style="font-size:12px;color:var(--muted);margin:10px 0 0;line-height:1.6;">TMT 配置状态读取中……</p>
-    <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.6;">翻译服务不再单独启用；左下角总开关打开后，主服务和失败后服务会按配置自动尝试。保存密钥后机器人会自动重启。</p>
+    <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.6;">翻译服务不再单独启用；左下角总开关打开后，首选方式和次选方式会按配置自动尝试。保存密钥后机器人会自动重启。</p>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
       <button id="translationConfigCancel" class="sec">取消</button>
       <button id="translationConfigSave">保存</button>

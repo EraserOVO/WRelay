@@ -76,6 +76,7 @@ SETTINGS_FILE = data_path("settings.json")
 # 旧配置缺省时内存归一化为默认转发组（channels/groups = 当前全局启用项），
 # 路由结果与旧的"全局启用即全量转发"完全一致；面板保存后固化落盘。
 FORWARDING_GROUP_DEFAULT_ID = "default"
+QQ_FORWARDING_GROUP_DEFAULT_ID = "qq_default"
 
 
 def _default_settings():
@@ -96,8 +97,53 @@ def get_translation_config():
 
 
 def get_x_translation_config():
-    """返回 X RSS 专属翻译配置（独立开关与服务路由）。"""
+    """返回 X RSS 专属翻译服务路由。"""
     return _setting_object("x_translation")
+
+
+def _translation_config_for_item(config_name, items_name, item_id):
+    """将服务路由与单个来源的翻译开关合并为调用配置。"""
+    data = _load_settings()
+    config = dict(data.get(config_name) or {})
+    for item in data.get(items_name) or []:
+        if not isinstance(item, dict):
+            continue
+        candidate = item.get("source") if items_name == "x_rss_sources" else item.get("id")
+        candidate_id = _x_source_key(str(candidate or "")) if items_name == "x_rss_sources" else str(candidate or "")
+        if candidate_id == str(item_id):
+            config["enabled"] = item.get("translation_enabled") is True
+            config["append_original"] = item.get("translation_append_original") is not False
+            return config
+    config["enabled"] = False
+    config["append_original"] = True
+    return config
+
+
+def get_channel_translation_config(channel_id):
+    return _translation_config_for_item("translation", "discord_channels", channel_id)
+
+
+def get_x_source_translation_config(source_key):
+    return _translation_config_for_item("x_translation", "x_rss_sources", source_key)
+
+
+def get_x_source_filter(source_key):
+    """返回指定 X RSS 账号的消息筛选配置。"""
+    data = _load_settings()
+    for item in data.get("x_rss_sources") or []:
+        if not isinstance(item, dict):
+            continue
+        if _x_source_key(str(item.get("source") or "")) != str(source_key):
+            continue
+        return {
+            "filter_keywords": [
+                str(keyword).strip()
+                for keyword in (item.get("filter_keywords") or [])
+                if str(keyword).strip()
+            ],
+            "filter_post_types": item.get("filter_post_types"),
+        }
+    return {"filter_keywords": [], "filter_post_types": None}
 
 
 def get_ai_config():
@@ -198,6 +244,7 @@ def _load_settings():
     # 保证路由函数始终拿到合法结构；与下方 qq_user_openids 的内存
     # 补齐同理，绝不把归一化结果当作面板配置写回文件
     _ensure_forwarding_groups(_settings_cache)
+    _ensure_qq_forwarding_groups(_settings_cache)
     _settings_cache_mtime = mtime
     _settings_cache_size = size
     _settings_cache_revision = revision
@@ -327,6 +374,61 @@ def _ensure_forwarding_groups(data):
     return normalized
 
 
+def _ensure_qq_forwarding_groups(data):
+    """QQ→QQ 独立转发组归一化（只改内存 data，不写盘）。"""
+    raw_groups = data.get("qq_forwarding_groups")
+    # 空列表是用户明确删除全部 QQ→QQ 转发组后的有效配置，不能再回退到旧版迁移。
+    if isinstance(raw_groups, list) and not raw_groups:
+        data["qq_forwarding_groups"] = []
+        return []
+    groups = raw_groups
+    if not isinstance(groups, list):
+        groups = []
+    known_groups = {
+        str(item.get("openid"))
+        for item in data.get("qq_group_openids", [])
+        if isinstance(item, dict) and item.get("openid")
+    }
+    normalized = []
+    seen_ids = set()
+    for item in groups:
+        if not isinstance(item, dict):
+            continue
+        group_id = str(item.get("id") or "").strip()
+        if not group_id or group_id in seen_ids:
+            continue
+        seen_ids.add(group_id)
+        members = []
+        for value in item.get("groups") or []:
+            value = str(value)
+            if value and value in known_groups and value not in members:
+                members.append(value)
+        normalized.append({
+            "id": group_id,
+            "name": str(item.get("name") or "").strip() or group_id,
+            "enabled": item.get("enabled", True) is not False,
+            "groups": members,
+        })
+    if not normalized:
+        normalized = [{
+            "id": QQ_FORWARDING_GROUP_DEFAULT_ID,
+            "name": "转发组1",
+            "enabled": True,
+            "groups": [
+                str(item.get("openid"))
+                for item in data.get("qq_group_openids", [])
+                if isinstance(item, dict) and item.get("openid") and item.get("enabled")
+            ],
+        }]
+    data["qq_forwarding_groups"] = normalized
+    return normalized
+
+
+def get_qq_forwarding_groups():
+    """返回 QQ→QQ 独立转发组。"""
+    return _ensure_qq_forwarding_groups(_load_settings())
+
+
 def get_forwarding_groups():
     """返回归一化后的转发组列表（[{id, name, channels[], groups[]}]）"""
     return _ensure_forwarding_groups(
@@ -391,6 +493,36 @@ def get_all_channels():
     return dict(DISCORD_CHANNELS)
 
 
+def get_qq_c2c_relay_filter():
+    """返回私聊 Discord 链接 relay 的全局筛选配置。"""
+    data = _load_settings()
+    value = data.get("qq_c2c_relay_filter")
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    for key in ("filter_message_types",):
+        item = value.get(key)
+        if isinstance(item, list):
+            result[key] = [str(entry).strip() for entry in item if str(entry).strip()]
+    return result
+
+
+def get_x_c2c_relay_filter():
+    """返回私聊 X 链接手动转发的全局消息类型筛选配置。"""
+    data = _load_settings()
+    value = data.get("x_c2c_relay_filter")
+    if not isinstance(value, dict):
+        return {}
+    types = value.get("filter_message_types")
+    if not isinstance(types, list):
+        return {}
+    return {
+        "filter_message_types": [
+            str(entry).strip() for entry in types if str(entry).strip()
+        ],
+    }
+
+
 def get_active_user_openids():
     """返回当前启用（允许私聊 relay）的 QQ 用户 openid 列表
 
@@ -410,14 +542,24 @@ def get_active_user_openids():
 def get_related_group_openids(group_openid):
     """返回与指定 QQ 群至少共同属于一个转发组的其他 QQ 群 openid 集合。
 
-    转发组（forwarding_groups）只表达 Discord频道→QQ群 路由，但 QQ→QQ
-    手动转发（qq_fwd）复用其成员关系：候选目标 = 与当前群同属至少一个
-    转发组的群（跨多个转发组合并去重）。与测试组无关。
+    QQ→QQ 手动转发只读取独立的 qq_forwarding_groups；候选目标 = 与当前群
+    同属至少一个已启用 QQ 转发组的群（跨多个组并去重）。
     当前群不属于任何转发组时返回空集合；不包含当前群自身。"""
     data = _load_settings()
     gid = str(group_openid)
+    registered = data.get("qq_group_openids")
+    if isinstance(registered, list):
+        source = next(
+            (item for item in registered
+             if isinstance(item, dict) and str(item.get("openid")) == gid),
+            None,
+        )
+        if source is None or source.get("enabled") is not True:
+            return set()
     result = set()
-    for fg in _ensure_forwarding_groups(data):
+    for fg in _ensure_qq_forwarding_groups(data):
+        if fg.get("enabled", True) is False:
+            continue
         members = [str(o) for o in fg["groups"]]
         if gid in members:
             result.update(members)
@@ -426,10 +568,7 @@ def get_related_group_openids(group_openid):
 
 
 # =====================================================
-# QQ→QQ 手动转发配置
-#
-# 复用 forwarding_groups 的成员关系：QQ→QQ 转发目标候选 = 与当前群
-# 共同属于至少一个转发组的已注册(enabled)群（见 get_related_group_openids）。
+# QQ→QQ 手动转发配置：独立于 Discord / X 转发组。
 # =====================================================
 
 def get_qq_group_entries():
@@ -597,6 +736,83 @@ def get_x_rss_poll_interval():
     except (TypeError, ValueError):
         return 300
     return value if value >= 30 else 300
+
+
+def get_scheduled_message_config():
+    """返回多条定时消息计划；读取时仍做安全兜底。"""
+    data = _load_settings()
+    value = data.get("scheduled_message")
+    if not isinstance(value, dict):
+        return {
+            "enabled": False,
+            "target_groups": [],
+            "messages": [],
+        }
+    messages = []
+    for index, raw in enumerate(value.get("messages") or []):
+        if not isinstance(raw, dict):
+            continue
+        content = str(raw.get("content") or "").strip()
+        if not content:
+            continue
+        item = {
+            "id": str(raw.get("id") or "message-" + str(index + 1)),
+            "content": content,
+            "schedule_type": raw.get("schedule_type"),
+        }
+        if item["schedule_type"] == "interval":
+            def _int_value(key, default, maximum):
+                try:
+                    parsed = int(raw.get(key, default))
+                except (TypeError, ValueError):
+                    parsed = default
+                return max(0, min(maximum, parsed))
+
+            item.update({
+                "interval_days": _int_value("interval_days", 0, 3650),
+                "interval_hours": _int_value("interval_hours", 0, 23),
+                "interval_minutes": _int_value("interval_minutes", 1, 59),
+                "anchor_at": str(raw.get("anchor_at") or ""),
+            })
+            if not (item["interval_days"] or item["interval_hours"] or item["interval_minutes"]):
+                item["interval_minutes"] = 1
+        elif item["schedule_type"] == "calendar":
+            calendar_type = raw.get("calendar_type")
+            item["calendar_type"] = calendar_type
+            item["send_time"] = raw.get("send_time") if isinstance(raw.get("send_time"), str) else "09:00"
+            if calendar_type == "weekly":
+                item["weekdays"] = sorted({
+                    value for value in raw.get("weekdays") or []
+                    if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 6
+                })
+            elif calendar_type == "monthly":
+                try:
+                    item["day_of_month"] = max(1, min(31, int(raw.get("day_of_month") or 1)))
+                except (TypeError, ValueError):
+                    item["day_of_month"] = 1
+            elif calendar_type == "yearly":
+                try:
+                    item["month"] = max(1, min(12, int(raw.get("month") or 1)))
+                except (TypeError, ValueError):
+                    item["month"] = 1
+                try:
+                    item["day"] = max(1, min(31, int(raw.get("day") or 1)))
+                except (TypeError, ValueError):
+                    item["day"] = 1
+            else:
+                continue
+        else:
+            continue
+        messages.append(item)
+    return {
+        "enabled": value.get("enabled") is True,
+        "target_groups": [
+            str(openid).strip()
+            for openid in value.get("target_groups") or []
+            if str(openid).strip()
+        ],
+        "messages": messages,
+    }
 
 
 def get_x_rsshub_base():

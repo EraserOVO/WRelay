@@ -112,6 +112,10 @@ async def translate_text_parts(
     # 否则接收者无法判断消息来自哪个频道或账号。QQ 手动纯文本没有
     # 来源头（skip_leading_parts=0），保持仅发送译文的原有行为。
     prefix = text_parts[:skip_leading_parts]
+    body_media = [
+        part for part in text_parts[skip_leading_parts:]
+        if getattr(part, "type", "") != "text"
+    ]
     if prefix:
-        return [*prefix, make_text("\n" + translated)]
-    return [make_text(translated)]
+        return [*prefix, make_text("\n" + translated), *body_media]
+    return [make_text(translated), *body_media]

@@ -5,6 +5,133 @@ Bot 与管理面板都使用同一套默认字段和顶层结构。路由迁移�
 """
 
 from copy import deepcopy
+from datetime import date, datetime
+import re
+
+
+def _legacy_scheduled_entry(scheduled):
+    """把旧版单条定时消息转换为新版 messages 条目。"""
+    content = scheduled.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return None
+    send_time = scheduled.get("send_time")
+    if not isinstance(send_time, str) or re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", send_time) is None:
+        send_time = "09:00"
+    anchor_date = scheduled.get("anchor_date")
+    if not isinstance(anchor_date, str) or not anchor_date:
+        anchor_date = ""
+    schedule_mode = scheduled.get("schedule_mode")
+    if schedule_mode == "weekly":
+        weekdays = scheduled.get("weekdays")
+        if not isinstance(weekdays, list):
+            weekdays = [0]
+        weekdays = [
+            value for value in weekdays
+            if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 6
+        ] or [0]
+        return {
+            "id": "legacy-1",
+            "content": content,
+            "schedule_type": "calendar",
+            "calendar_type": "weekly",
+            "weekdays": weekdays,
+            "day_of_month": 1,
+            "month": 1,
+            "day": 1,
+            "send_time": send_time,
+        }
+    if schedule_mode == "monthly":
+        day = 1
+        try:
+            if anchor_date:
+                day = date.fromisoformat(anchor_date).day
+        except ValueError:
+            pass
+        return {
+            "id": "legacy-1",
+            "content": content,
+            "schedule_type": "calendar",
+            "calendar_type": "monthly",
+            "weekdays": [0],
+            "day_of_month": day,
+            "month": 1,
+            "day": 1,
+            "send_time": send_time,
+        }
+    if scheduled.get("every_days") is not None:
+        try:
+            total_minutes = max(1, int(scheduled.get("every_days") or 1)) * 24 * 60
+        except (TypeError, ValueError):
+            total_minutes = 24 * 60
+    else:
+        try:
+            total_minutes = max(1, int(scheduled.get("interval") or 3600) + 59) // 60
+        except (TypeError, ValueError):
+            total_minutes = 60
+    every_days, remainder = divmod(total_minutes, 24 * 60)
+    every_hours, every_minutes = divmod(remainder, 60)
+    return {
+        "id": "legacy-1",
+        "content": content,
+        "schedule_type": "interval",
+        "interval_days": every_days,
+        "interval_hours": every_hours,
+        "interval_minutes": every_minutes,
+        "anchor_at": (anchor_date + "T" + send_time) if anchor_date else "",
+        "calendar_type": "weekly",
+        "weekdays": [0],
+        "day_of_month": 1,
+        "month": 1,
+        "day": 1,
+        "send_time": send_time,
+    }
+
+
+def _legacy_qq_forwarding_groups(data, default_groups=None):
+    """为旧配置生成独立的 QQ→QQ 转发组。
+
+    旧版 QQ→QQ 复用 Discord 转发组；首次读取没有
+    ``qq_forwarding_groups`` 的配置时，分别复制 Discord/X 转发组中的群成员
+    关系，保留“同组可互转”的既有关系。生成后 QQ→QQ 运行时不再读取这两套组。
+    """
+    result = []
+    seen_ids = set()
+    for source_key, prefix in (
+        ("forwarding_groups", "discord"),
+        ("x_forwarding_groups", "x"),
+    ):
+        groups = data.get(source_key)
+        if not isinstance(groups, list):
+            continue
+        for index, item in enumerate(groups, start=1):
+            if not isinstance(item, dict):
+                continue
+            members = []
+            for value in item.get("groups") or []:
+                value = str(value).strip()
+                if value and value not in members:
+                    members.append(value)
+            if not members:
+                continue
+            old_id = str(item.get("id") or index).strip()
+            group_id = "qqfg_legacy_%s_%s" % (prefix, old_id)
+            if group_id in seen_ids:
+                continue
+            seen_ids.add(group_id)
+            result.append({
+                "id": group_id,
+                "name": str(item.get("name") or "转发组%d" % index).strip(),
+                "enabled": item.get("enabled", True) is not False,
+                "groups": members,
+            })
+    if result:
+        return result
+    return [{
+        "id": "qq_default",
+        "name": "转发组1",
+        "enabled": True,
+        "groups": [str(value) for value in (default_groups or []) if str(value).strip()],
+    }]
 
 
 class SettingsModel(dict):
@@ -23,7 +150,19 @@ class SettingsModel(dict):
         return cls({
             "qq_group_openids": groups,
             "qq_user_openids": [],
+            "qq_forwarding_groups": [{
+                "id": "qq_default",
+                "name": "转发组1",
+                "enabled": True,
+                "groups": [str(group.get("openid")) for group in groups if group.get("openid")],
+            }],
             "discord_channels": channels,
+            "qq_c2c_relay_filter": {
+                "filter_message_types": ["文字", "图片", "语音", "文件", "链接", "表情"],
+            },
+            "x_c2c_relay_filter": {
+                "filter_message_types": ["文字", "图片", "语音", "文件", "链接", "表情"],
+            },
             "backfill_enabled": True,
             "backfill_limit": 10,
             "qq_appid": "",
@@ -32,8 +171,21 @@ class SettingsModel(dict):
             "x_rss_sources": [],
             "x_rss_poll_interval": 300,
             "x_rsshub_base": "http://localhost:1200",
-            # 翻译链路开关：Discord/QQ 与 X RSS 各自独立。
-            # 服务本身是否可调用由地址、模型和密钥是否完整决定。
+            "scheduled_message": {
+                "enabled": False,
+                "content": "",
+                "interval": 3600,
+                "target_groups": [],
+                "schedule_mode": "days",
+                "every_days": 1,
+                "every_weeks": 1,
+                "every_months": 1,
+                "weekdays": [0],
+                "send_time": "09:00",
+                "anchor_date": "",
+                "messages": [],
+            },
+            # 翻译服务路由：是否翻译及是否保留原文由每个来源条目决定。
             "translation": {
                 "enabled": False,
                 "provider": "tencent_tmt",
@@ -42,7 +194,7 @@ class SettingsModel(dict):
                 "append_original": True,
                 "only_non_chinese": True,
             },
-            # X RSS 使用独立开关和服务路由；服务凭据与 AI/TMT 配置共享。
+            # X RSS 使用独立服务路由；服务凭据与 AI/TMT 配置共享。
             "x_translation": {
                 "enabled": False,
                 "provider": "tencent_tmt",
@@ -77,6 +229,7 @@ class SettingsModel(dict):
         if not isinstance(data, dict):
             return cls(deepcopy(defaults))
         result = cls(deepcopy(dict(data)))
+        qq_forwarding_groups_missing = "qq_forwarding_groups" not in result
         # AI 对话不属于 WRelay 的功能范围。兼容曾保存过该字段的配置：
         # 读取时忽略，后续由管理面板保存时自然从磁盘配置移除。
         result.pop("ai_chat", None)
@@ -90,6 +243,37 @@ class SettingsModel(dict):
         for key, value in defaults.items():
             if key not in result:
                 result[key] = deepcopy(value)
+        # 自动翻译原为 Discord/X 各一组全局开关。迁移到来源条目时，
+        # 未单独设置过的频道/账号继承旧值，避免升级后转发内容突变。
+        for item_key, config_key in (("discord_channels", "translation"), ("x_rss_sources", "x_translation")):
+            translation = result.get(config_key)
+            if not isinstance(translation, dict):
+                continue
+            legacy_enabled = translation.get("enabled") is True
+            legacy_append_original = translation.get("append_original") is not False
+            for item in result.get(item_key, []):
+                if isinstance(item, dict):
+                    item.setdefault("translation_enabled", legacy_enabled)
+                    item.setdefault("translation_append_original", legacy_append_original)
+        if qq_forwarding_groups_missing:
+            result["qq_forwarding_groups"] = _legacy_qq_forwarding_groups(
+                result,
+                [
+                    item.get("openid")
+                    for item in result.get("qq_group_openids", [])
+                    if isinstance(item, dict) and item.get("openid") and item.get("enabled")
+                ],
+            )
+        # 定时消息配置曾只有 enabled/content/interval 三个字段；新增
+        # 周期字段时只补缺失的嵌套字段，旧配置安全迁移为每日计划。
+        scheduled = result.get("scheduled_message")
+        if isinstance(scheduled, dict):
+            if "messages" not in scheduled:
+                legacy = _legacy_scheduled_entry(scheduled)
+                scheduled["messages"] = [legacy] if legacy else []
+            for key, value in defaults["scheduled_message"].items():
+                if key not in scheduled:
+                    scheduled[key] = deepcopy(value)
         return result
 
     def to_dict(self):
@@ -114,6 +298,50 @@ def validate_settings(
         for item in items:
             if not isinstance(item, dict):
                 return "%s 的每一项必须是对象" % key
+            for translation_key in ("translation_enabled", "translation_append_original"):
+                if translation_key in item and not isinstance(item[translation_key], bool):
+                    return "%s.%s 必须是布尔值" % (key, translation_key)
+
+    x_sources = data.get("x_rss_sources")
+    if not isinstance(x_sources, list):
+        return "x_rss_sources 必须是列表"
+    for item in x_sources:
+        if not isinstance(item, dict):
+            return "x_rss_sources 的每一项必须是对象"
+        for translation_key in ("translation_enabled", "translation_append_original"):
+            if translation_key in item and not isinstance(item[translation_key], bool):
+                return "x_rss_sources.%s 必须是布尔值" % translation_key
+        if "filter_keywords" in item:
+            keywords = item["filter_keywords"]
+            if not isinstance(keywords, list) or any(not isinstance(keyword, str) for keyword in keywords):
+                return "x_rss_sources.filter_keywords 必须是字符串列表"
+        if "filter_post_types" in item:
+            post_types = item["filter_post_types"]
+            allowed_post_types = {"原创", "转发", "引用"}
+            if not isinstance(post_types, list) or any(
+                not isinstance(post_type, str) or post_type not in allowed_post_types
+                for post_type in post_types
+            ):
+                return "x_rss_sources.filter_post_types 包含不支持的类型"
+
+    relay_filter = data.get("qq_c2c_relay_filter")
+    if not isinstance(relay_filter, dict):
+        return "qq_c2c_relay_filter 必须是对象"
+    values = relay_filter.get("filter_message_types")
+    if not isinstance(values, list):
+        return "qq_c2c_relay_filter.filter_message_types 必须是列表"
+    allowed_types = {"文字", "图片", "语音", "文件", "链接", "表情"}
+    if any(not isinstance(value, str) or value not in allowed_types for value in values):
+        return "qq_c2c_relay_filter.filter_message_types 包含不支持的类型"
+
+    x_relay_filter = data.get("x_c2c_relay_filter")
+    if not isinstance(x_relay_filter, dict):
+        return "x_c2c_relay_filter 必须是对象"
+    x_values = x_relay_filter.get("filter_message_types")
+    if not isinstance(x_values, list):
+        return "x_c2c_relay_filter.filter_message_types 必须是列表"
+    if any(not isinstance(value, str) or value not in allowed_types for value in x_values):
+        return "x_c2c_relay_filter.filter_message_types 包含不支持的类型"
 
     if "backfill_enabled" in data and not isinstance(data["backfill_enabled"], bool):
         return "backfill_enabled 必须是布尔值"
@@ -122,6 +350,91 @@ def validate_settings(
         if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
             return "backfill_limit 必须是正整数"
 
+    scheduled = data.get("scheduled_message")
+    if not isinstance(scheduled, dict):
+        return "scheduled_message 必须是对象"
+    if not isinstance(scheduled.get("enabled"), bool):
+        return "scheduled_message.enabled 必须是布尔值"
+    if not isinstance(scheduled.get("content"), str):
+        return "scheduled_message.content 必须是字符串"
+    if len(scheduled["content"]) > 20000:
+        return "scheduled_message.content 不能超过 20000 个字符"
+    target_groups = scheduled.get("target_groups")
+    if not isinstance(target_groups, list):
+        return "scheduled_message.target_groups 必须是列表"
+    for group_openid in target_groups:
+        if not isinstance(group_openid, str) or not group_openid.strip():
+            return "scheduled_message.target_groups 的每一项必须是非空字符串"
+    messages = scheduled.get("messages")
+    if not isinstance(messages, list):
+        return "scheduled_message.messages 必须是列表"
+    for index, message in enumerate(messages, start=1):
+        prefix = "scheduled_message.messages[%d]" % index
+        if not isinstance(message, dict):
+            return prefix + " 必须是对象"
+        if "id" in message and (
+            not isinstance(message["id"], str) or not message["id"].strip()
+        ):
+            return prefix + ".id 必须是非空字符串"
+        content = message.get("content")
+        if not isinstance(content, str):
+            return prefix + ".content 必须是字符串"
+        if not content.strip():
+            return prefix + ".content 不能为空"
+        if len(content) > 20000:
+            return prefix + ".content 不能超过 20000 个字符"
+        schedule_type = message.get("schedule_type")
+        if schedule_type not in ("interval", "calendar"):
+            return prefix + ".schedule_type 必须是 interval 或 calendar"
+        if schedule_type == "interval":
+            for key, maximum in (("interval_days", 3650), ("interval_hours", 23), ("interval_minutes", 59)):
+                value = message.get(key)
+                if not isinstance(value, int) or isinstance(value, bool) or value < 0 or value > maximum:
+                    return "%s.%s 数值无效" % (prefix, key)
+            if (
+                message.get("interval_days", 0) == 0
+                and message.get("interval_hours", 0) == 0
+                and message.get("interval_minutes", 0) == 0
+            ):
+                return prefix + " 的间隔至少需要 1 分钟"
+            anchor_at = message.get("anchor_at", "")
+            if not isinstance(anchor_at, str):
+                return prefix + ".anchor_at 必须是日期时间字符串"
+            if anchor_at:
+                try:
+                    datetime.strptime(anchor_at, "%Y-%m-%dT%H:%M")
+                except ValueError:
+                    return prefix + ".anchor_at 必须是 YYYY-MM-DD HH:MM 格式"
+        else:
+            calendar_type = message.get("calendar_type")
+            if calendar_type not in ("weekly", "monthly", "yearly"):
+                return prefix + ".calendar_type 必须是 weekly、monthly 或 yearly"
+            send_time = message.get("send_time")
+            if (
+                not isinstance(send_time, str)
+                or re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", send_time) is None
+            ):
+                return prefix + ".send_time 必须是 HH:MM 格式"
+            if calendar_type == "weekly":
+                weekdays = message.get("weekdays")
+                if not isinstance(weekdays, list) or not weekdays:
+                    return prefix + ".weekdays 必须至少选择一天"
+                for weekday in weekdays:
+                    if not isinstance(weekday, int) or isinstance(weekday, bool) or weekday < 0 or weekday > 6:
+                        return prefix + ".weekdays 必须是 0 到 6 之间的整数"
+                if len(set(weekdays)) != len(weekdays):
+                    return prefix + ".weekdays 不能有重复值"
+            elif calendar_type == "monthly":
+                day_of_month = message.get("day_of_month")
+                if not isinstance(day_of_month, int) or isinstance(day_of_month, bool) or not 1 <= day_of_month <= 31:
+                    return prefix + ".day_of_month 必须是 1 到 31 之间的整数"
+            else:
+                month = message.get("month")
+                day = message.get("day")
+                if not isinstance(month, int) or isinstance(month, bool) or not 1 <= month <= 12:
+                    return prefix + ".month 必须是 1 到 12 之间的整数"
+                if not isinstance(day, int) or isinstance(day, bool) or not 1 <= day <= 31:
+                    return prefix + ".day 必须是 1 到 31 之间的整数"
     for name in ("translation", "x_translation"):
         translation = data.get(name)
         if not isinstance(translation, dict):
@@ -160,6 +473,7 @@ def validate_settings(
     for key, fields in (
         ("forwarding_groups", ("channels", "groups")),
         ("x_forwarding_groups", ("sources", "groups")),
+        ("qq_forwarding_groups", ("groups",)),
     ):
         if not validate_forwarding_groups:
             continue
@@ -169,7 +483,7 @@ def validate_settings(
         if not isinstance(groups, list):
             return "%s 必须是列表" % key
         if key == "forwarding_groups" and not groups and require_nonempty_forwarding_groups:
-            return "forwarding_groups 至少保留 1 个转发组"
+            return "%s 至少保留 1 个转发组" % key
         if len(groups) > max_forwarding_groups:
             return "%s 最多 %d 个" % (key, max_forwarding_groups)
         ids = set()

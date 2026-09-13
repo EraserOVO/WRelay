@@ -27,6 +27,7 @@ import asyncio
 import re
 import threading
 import time
+from urllib.parse import quote
 
 import httpx
 
@@ -39,9 +40,12 @@ from nonebot.adapters.qq import MessageSegment as QQMessageSegment
 from plugins.config import (
     get_x_rss_sources,
     get_x_rss_poll_interval,
+    get_x_rsshub_base,
     get_x_groups_for_source,
-    get_x_translation_config,
+    get_x_source_translation_config,
+    get_x_source_filter,
 )
+from plugins.filter import check_x_post_filter
 from plugins.media import fetch_bytes_many, make_text, make_media_link
 from plugins.sender import get_qq_bot
 from plugins.stats import record
@@ -51,6 +55,7 @@ from plugins.history import (
 )
 from plugins.dedup import (
     apply_baseline,
+    apply_success,
     normalize_channel_map,
     select_target_groups,
 )
@@ -196,6 +201,50 @@ async def _fetch_feed(url, etag=None):
     return resp.content, resp.headers.get("etag"), None
 
 
+def is_x_status_url(text):
+    """判断文本是否以 X/Twitter 单条推文链接开头。"""
+    return re.match(
+        r"https?://(?:www\.)?(?:x|twitter)\.com/([A-Za-z0-9_]+)/status/(\d+)",
+        str(text or "").strip(),
+    )
+
+
+async def fetch_x_post(url):
+    """通过 RSSHub Tweet Details 路由抓取单条 X 推文。
+
+    返回 ``(post, source_name, error)``；post 使用 x_rss_parser 的统一结构。
+    """
+    match = is_x_status_url(url)
+    if not match:
+        return None, None, "链接格式无法解析"
+
+    handle, status_id = match.group(1), match.group(2)
+    api_url = (
+        f"{get_x_rsshub_base()}/twitter/tweet/"
+        f"{quote(handle, safe='')}/status/{status_id}"
+    )
+    try:
+        response = await _get_feed_client().get(api_url, timeout=FEED_TIMEOUT)
+    except Exception as exc:
+        logger.warning("X 单条推文抓取异常: {}", exc)
+        return None, None, "请求异常"
+
+    if response.status_code != 200:
+        logger.warning("X 单条推文抓取错误: {} {}", response.status_code, response.text)
+        return None, None, f"HTTP {response.status_code}"
+
+    try:
+        posts = parse_feed(response.content)
+    except Exception as exc:
+        logger.warning("X 单条推文解析失败: {}", exc)
+        return None, None, "内容解析失败"
+
+    post = next((item for item in posts if str(item.get("id")) == status_id), None)
+    if post is None:
+        return None, None, "RSSHub 未返回该推文"
+    return post, post.get("author") or handle, None
+
+
 # =====================================================
 # 渲染：推文 dict → (text_parts, media_items)
 # =====================================================
@@ -210,7 +259,7 @@ def _image_filename(url):
     return f"image.{ext}"
 
 
-async def _render_post(post, source_name):
+async def _render_post(post, source_name, source_label="自动转发来自", enabled_types=None):
     """推文 dict → (text_parts, media_items) 或 None（无可发送内容）
 
     文字层级与 RSS 顺序一致：header → RT 行 → 主推文字 → 引用行；
@@ -218,26 +267,29 @@ async def _render_post(post, source_name):
     text_parts = []
     media_items = []
 
+    def type_enabled(kind):
+        return enabled_types is None or kind in enabled_types
+
     text_parts.append(
-        make_text(f"自动转发来自 X 中 [{source_name}] 的消息：")
+        make_text(f"{source_label} X 中 [{source_name}] 的消息：")
     )
 
     has_body = False
 
-    if post["is_retweet"] and post["rt_author"]:
+    if post["is_retweet"] and post["rt_author"] and type_enabled("文字"):
         text_parts.append(
             make_text(f"\n↻ RT {post['rt_author']}：")
         )
         has_body = True
 
-    if post["text"]:
+    if post["text"] and type_enabled("文字"):
         text_parts.append(
             make_text("\n" + post["text"])
         )
         has_body = True
 
     quote = post.get("quote")
-    if quote:
+    if quote and type_enabled("文字") and quote.get("text"):
         quote_text = quote.get("text") or ""
         if len(quote_text) > QUOTE_TEXT_LIMIT:
             quote_text = quote_text[:QUOTE_TEXT_LIMIT] + "…"
@@ -251,6 +303,11 @@ async def _render_post(post, source_name):
     all_media = list(post["media"])
     if quote:
         all_media.extend(quote.get("media") or [])
+
+    all_media = [
+        media for media in all_media
+        if type_enabled("图片" if media.get("kind") == "图片" else "文件")
+    ]
 
     if all_media:
         has_body = True
@@ -288,6 +345,16 @@ async def _render_post(post, source_name):
         return None
 
     return text_parts, media_items
+
+
+async def render_x_post(post, source_name, enabled_types=None):
+    """渲染私聊手动转发的 X 推文，沿用自动 RSS 的内容格式。"""
+    return await _render_post(
+        post,
+        source_name,
+        source_label="手动转发来自",
+        enabled_types=enabled_types,
+    )
 
 
 # =====================================================
@@ -367,6 +434,22 @@ async def _send_posts(source, posts):
             if not targets:
                 continue
 
+            filter_config = get_x_source_filter(source["key"])
+            if not check_x_post_filter(filter_config, post):
+                logger.debug(
+                    "X 推文被筛选跳过: {} {}",
+                    name,
+                    post["id"],
+                )
+                await update_last_messages(
+                    lambda last: apply_success(
+                        normalize_channel_map(last, channel_key),
+                        {g: True for g in targets},
+                        post["id"],
+                    )
+                )
+                continue
+
             rendered = await _render_post(post, name)
             if rendered is None:
                 # 空 item（正文与媒体全为空）本轮无法投递，计失败
@@ -377,7 +460,7 @@ async def _send_posts(source, posts):
                 text_parts,
                 ("x_rss", source["key"], post["id"]),
                 skip_leading_parts=1,
-                config=get_x_translation_config(),
+                config=get_x_source_translation_config(source["key"]),
             )
 
             # 组状态可能在渲染期间被面板修改；发送前重新计算目标，避免暂停后仍投递一条。

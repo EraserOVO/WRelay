@@ -184,13 +184,224 @@
     background: var(--field-bg); border: 1px solid var(--field-border); color: var(--field-fg);
     border-radius: 5px; padding: 6px 8px; font-size: 14px; width: 100%;
   }
+  .scheduled-message-label { display: block; color: var(--muted); font-size: 13px; margin-bottom: 5px; }
+  .scheduled-message-content {
+    display: block; width: 100%; min-height: 76px; resize: vertical;
+    background: var(--field-bg); border: 1px solid var(--field-border); color: var(--field-fg);
+    border-radius: 5px; padding: 7px 8px; font: inherit; font-size: 14px; line-height: 1.5;
+  }
+  .scheduled-message-group { margin-top: 12px; }
+  .scheduled-message-group-summary {
+    min-height: 34px; padding: 7px 8px;
+    background: var(--field-bg); border: 1px solid var(--field-border); border-radius: 5px;
+    color: var(--muted); font-size: 13px; line-height: 1.5;
+  }
+  .scheduled-message-group-content {
+    display: flex; align-items: stretch; gap: 8px;
+  }
+  .scheduled-message-group-content .scheduled-message-group-summary {
+    flex: 1 1 auto; min-width: 0;
+  }
+  .scheduled-message-group-summary-item { color: var(--fg); }
+  .scheduled-message-summary {
+    color: var(--muted); font-size: 13px; line-height: 1.5;
+  }
+  #scheduledMessageCard { display: flex; flex-direction: column; }
+  .scheduled-message-options {
+    display: flex; align-items: center; justify-content: flex-start;
+    flex-wrap: wrap; gap: 10px 16px; margin-top: 0;
+  }
+  .scheduled-message-option {
+    display: flex; align-items: center; justify-content: flex-start;
+    min-width: 0; gap: 6px;
+  }
+  .scheduled-message-option > label {
+    flex: 0 0 auto; color: var(--muted); font-size: 13px; line-height: 1.25;
+  }
+  .scheduled-message-option .scheduled-message-time {
+    width: 78px; max-width: none;
+  }
+  .scheduled-message-repeat .scheduled-message-inline-field {
+    flex-wrap: nowrap;
+  }
+  .scheduled-message-count {
+    width: 36px; box-sizing: border-box;
+  }
+  .scheduled-message-mode { min-width: 48px; width: 48px; }
+  .scheduled-message-option .scheduled-message-time { width: 78px; }
+  .scheduled-message-picker-input { cursor: pointer; caret-color: transparent; }
+  .scheduled-message-mode:focus,
+  .scheduled-message-count:focus,
+  .scheduled-message-time:focus {
+    outline: none; border-color: var(--primary-border);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-border) 25%, transparent);
+  }
+  body.theme-light .scheduled-message-time { color-scheme: light; }
+  body:not(.theme-light) .scheduled-message-time { color-scheme: dark; }
+  .scheduled-message-inline-field,
+  .scheduled-message-actions {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .scheduled-message-actions { margin-top: auto; padding-top: 12px; justify-content: flex-start; }
+  #btnScheduledMessageToggle { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  #btnScheduledMessageEdit {
+    width: 34px; height: 34px; padding: 0; margin-left: 0;
+    border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  #btnScheduledMessageEdit svg { width: 18px; height: 18px; }
+  #btnScheduledMessageToggle[data-on="1"] {
+    background: var(--primary); border-color: var(--primary-border); color: var(--btn-fg);
+  }
+  .scheduled-picker-modal {
+    position: fixed; inset: 0; z-index: 1001;
+    background: rgba(0, 0, 0, .55);
+    align-items: center; justify-content: center;
+  }
+  .scheduled-picker-dialog {
+    position: relative; width: min(390px, calc(100vw - 32px));
+    box-sizing: border-box; padding: 20px;
+    background: var(--modal-bg); border: 1px solid var(--modal-border);
+    border-radius: 14px; box-shadow: 0 18px 48px rgba(0, 0, 0, .28);
+  }
+  .scheduled-picker-dialog h3 {
+    margin: 0; color: var(--card-heading); font-size: 16px;
+  }
+  .scheduled-picker-desc {
+    margin: 7px 0 18px; color: var(--muted); font-size: 12px; line-height: 1.5;
+  }
+  .scheduled-picker-time-row {
+    display: flex; align-items: flex-end; gap: 10px;
+  }
+  .scheduled-picker-time-row label {
+    display: flex; flex: 1; flex-direction: column; gap: 6px;
+    color: var(--muted); font-size: 12px;
+  }
+  .scheduled-picker-select {
+    width: 100%; height: 40px; box-sizing: border-box;
+    padding: 8px 10px; border: 1px solid var(--field-border);
+    border-radius: 8px; background: var(--field-bg); color: var(--field-fg);
+    font-size: 14px; color-scheme: dark;
+  }
+  body.theme-light .scheduled-picker-select { color-scheme: light; }
+  .scheduled-picker-select:focus {
+    outline: none; border-color: var(--primary-border);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-border) 25%, transparent);
+  }
+  .scheduled-picker-colon {
+    padding-bottom: 9px; color: var(--muted); font-size: 20px; line-height: 1;
+  }
+  .scheduled-picker-actions {
+    display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;
+  }
+  .scheduled-message-editor-dialog { width: min(560px, calc(100vw - 32px)); }
+  .scheduled-message-editor-groups { margin-top: 14px; margin-bottom: 12px; }
+  .scheduled-message-list-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; margin-bottom: 8px;
+  }
+  .scheduled-message-list-header .scheduled-message-group-title { margin-bottom: 0; }
+  .scheduled-message-entries {
+    display: flex; flex-direction: column; gap: 10px;
+    max-height: 52vh; overflow-y: auto; padding: 1px 2px 2px 0;
+  }
+  .scheduled-message-entry {
+    padding: 12px; border: 1px solid var(--field-border);
+    border-radius: 8px; background: color-mix(in srgb, var(--field-bg) 55%, transparent);
+  }
+  .scheduled-message-entry-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin-bottom: 10px; color: var(--card-heading); font-size: 13px;
+  }
+  .scheduled-message-entry-header .scheduled-message-remove {
+    width: 26px; height: 26px; font-size: 17px; font-weight: normal;
+  }
+  .scheduled-message-entry-label,
+  .scheduled-message-entry-row > label,
+  .scheduled-message-interval-fields > label,
+  .scheduled-message-calendar-panel > label {
+    display: flex; flex-direction: column; gap: 5px;
+    color: var(--muted); font-size: 12px;
+  }
+  .scheduled-message-entry-content,
+  .scheduled-message-entry input[type=datetime-local],
+  .scheduled-message-entry input[type=time],
+  .scheduled-message-entry input[type=number],
+  .scheduled-message-entry select {
+    box-sizing: border-box; width: 100%;
+    background: var(--field-bg); border: 1px solid var(--field-border);
+    border-radius: 5px; color: var(--field-fg); padding: 6px 8px;
+    font: inherit; font-size: 13px;
+  }
+  .scheduled-message-entry-content {
+    min-height: 84px; resize: vertical; line-height: 1.5;
+  }
+  .scheduled-message-entry input[type=datetime-local],
+  .scheduled-message-entry input[type=time] { height: 30px; }
+  .scheduled-message-entry input[type=number] { width: 62px; height: 30px; }
+  .scheduled-message-entry select { height: 30px; }
+  .scheduled-message-entry-content:focus,
+  .scheduled-message-entry input:focus,
+  .scheduled-message-entry select:focus {
+    outline: none; border-color: var(--primary-border);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-border) 25%, transparent);
+  }
+  .scheduled-message-entry-row,
+  .scheduled-message-interval-fields,
+  .scheduled-message-calendar-fields,
+  .scheduled-message-interval-row,
+  .scheduled-message-calendar-panel,
+  .scheduled-message-weekdays {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .scheduled-message-entry-row { margin-top: 10px; align-items: flex-end; }
+  .scheduled-message-entry-row > label { min-width: 130px; }
+  .scheduled-message-interval-fields,
+  .scheduled-message-calendar-fields {
+    flex-direction: column; align-items: stretch; gap: 9px; margin-top: 10px;
+  }
+  .scheduled-message-interval-fields > label { max-width: 210px; }
+  .scheduled-message-interval-row { flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+  .scheduled-message-interval-row label,
+  .scheduled-message-calendar-panel label {
+    display: inline-flex; align-items: center; gap: 4px;
+    color: var(--muted); font-size: 12px;
+  }
+  .scheduled-message-calendar-panel { min-height: 30px; align-items: center; }
+  .scheduled-message-calendar-panel > label { flex-direction: row; align-items: center; }
+  .scheduled-message-calendar-panel[data-calendar-type="monthly"] input[type=number],
+  .scheduled-message-calendar-panel[data-calendar-type="yearly"] select,
+  .scheduled-message-calendar-panel[data-calendar-type="yearly"] input[type=number] {
+    width: 76px;
+  }
+  .scheduled-message-weekdays { flex-wrap: wrap; }
+  .scheduled-message-weekdays label { white-space: nowrap; }
+  .scheduled-message-weekdays input[type=checkbox] {
+    width: 16px; height: 16px; margin: 0;
+  }
+  .scheduled-message-group-title {
+    margin-bottom: 6px; color: var(--muted); font-size: 13px; line-height: 1.25;
+  }
+  .scheduled-message-content-editor {
+    display: block; width: 100%; min-height: 180px; resize: vertical;
+    box-sizing: border-box; padding: 8px 10px;
+    background: var(--field-bg); border: 1px solid var(--field-border);
+    border-radius: 8px; color: var(--field-fg);
+    font: inherit; font-size: 14px; line-height: 1.55;
+  }
+  .scheduled-message-content-editor:focus {
+    outline: none; border-color: var(--primary-border);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-border) 25%, transparent);
+  }
   /* Bot 配置弹窗的密钥框：统一输入样式，并让浏览器原生眼睛图标在夜间模式可见 */
-  #qqConfigModal input[type=password], #discordConfigModal input[type=password] {
+  #qqConfigModal input[type=password], #discordConfigModal input[type=password],
+  #translationConfigModal input[type=password] {
     background: var(--field-bg); border: 1px solid var(--field-border); color: var(--field-fg);
     border-radius: 5px; padding: 6px 8px; font-size: 14px; width: 100%; color-scheme: dark;
   }
   body.theme-light #qqConfigModal input[type=password],
-  body.theme-light #discordConfigModal input[type=password] {
+  body.theme-light #discordConfigModal input[type=password],
+  body.theme-light #translationConfigModal input[type=password] {
     color-scheme: light;
   }
   /* 数字输入框：隐藏自带的手动增减箭头（上下三角），保留直接输入 */
@@ -246,6 +457,82 @@
   .addrow input { flex: 1; }
   .addrow button { flex: none; }
   .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .translation-scheduled-row {
+    display: flex; align-items: stretch; gap: 16px;
+  }
+  .relay-translation-row {
+    display: flex; align-items: stretch; gap: 16px;
+  }
+  .relay-translation-row > .card {
+    flex: 1 1 0; min-width: 0;
+  }
+  #relayLinkCard, #xRelayLinkCard { display: flex; flex-direction: column; }
+  .relay-link-description {
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .relay-link-actions {
+    margin-top: auto; padding-top: 12px;
+    justify-content: space-between;
+  }
+  #btnRelayFilter.filter-active, #btnXRelayFilter.filter-active {
+    background: var(--filter-active-bg);
+    border: 1px solid var(--filter-active-border);
+    color: var(--btn-fg);
+  }
+  #btnRelayFilter.filter-active:hover, #btnXRelayFilter.filter-active:hover { background: var(--filter-active-border); }
+  .relay-channels-dialog {
+    position: relative; width: min(620px, calc(100vw - 32px));
+    box-sizing: border-box; padding: 20px;
+    background: var(--modal-bg); border: 1px solid var(--modal-border);
+    border-radius: 14px; box-shadow: 0 18px 48px rgba(0, 0, 0, .28);
+  }
+  .relay-channels-dialog h3 {
+    margin: 0; color: var(--card-heading); font-size: 16px;
+  }
+  .relay-channels-desc {
+    margin: 7px 0 16px; color: var(--muted); font-size: 12px; line-height: 1.5;
+  }
+  .relay-channels-list {
+    display: flex; flex-direction: column; gap: 8px;
+    max-height: min(55vh, 460px); overflow-y: auto;
+  }
+  .relay-channel-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px;
+    background: var(--field-bg); border: 1px solid var(--field-border);
+    border-radius: 8px;
+  }
+  .relay-channel-row-info { flex: 0 0 42%; min-width: 0; }
+  .relay-channel-row-name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--fg); font-size: 13px;
+  }
+  .relay-channel-row-id {
+    margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--muted); font: 12px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+  .relay-channel-row input {
+    flex: 1; min-width: 0; box-sizing: border-box;
+    background: var(--modal-bg); border: 1px solid var(--field-border); color: var(--field-fg);
+    border-radius: 6px; padding: 7px 9px; font-size: 13px;
+  }
+  .relay-channel-row input:focus {
+    outline: none; border-color: var(--primary-border);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-border) 25%, transparent);
+  }
+  .relay-channels-empty {
+    padding: 24px 12px; color: var(--muted); text-align: center; font-size: 13px;
+    background: var(--field-bg); border: 1px solid var(--field-border); border-radius: 8px;
+  }
+  .relay-channels-actions {
+    display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px;
+  }
+  .translation-scheduled-row > .card {
+    flex: 1 1 0; min-width: 0;
+  }
   /* 自动翻译卡：沿用转发组的“标题—分区—操作—说明”层次，
      避免把所有开关和输入框挤在一行。 */
   .auto-translation-section {
@@ -269,8 +556,10 @@
   }
   .auto-translation-check { color: var(--fg); }
   .auto-translation-field select,
-  .auto-translation-field input[type=text] {
-    width: 150px;
+  .auto-translation-field input[type=text],
+  .scheduled-message-mode,
+  input.scheduled-message-time,
+  .scheduled-message-count {
     box-sizing: border-box;
     background: var(--field-bg);
     border: 1px solid var(--field-border);
@@ -278,6 +567,11 @@
     color: var(--field-fg);
     padding: 6px 8px;
     font-size: 13px;
+    height: 29.6px;
+  }
+  .auto-translation-field select,
+  .auto-translation-field input[type=text] {
+    width: 150px;
   }
   .auto-translation-actions {
     display: grid;
@@ -289,6 +583,15 @@
   .auto-translation-actions .hint { grid-column: 1 / -1; }
   .auto-translation-actions > .translation-toggle { grid-column: 1; justify-self: start; }
   .auto-translation-action-buttons { grid-column: 2; display: inline-flex; align-items: center; gap: 6px; margin-left: 0; }
+  #autoTranslationCard { display: flex; flex-direction: column; }
+  #autoTranslationCard .auto-translation-actions {
+    display: flex; align-items: flex-end; gap: 10px; margin-top: auto;
+  }
+  #autoTranslationCard .auto-translation-actions .hint {
+    flex: 0 0 100%; width: 100%;
+  }
+  #autoTranslationCard .auto-translation-actions > .translation-toggle { margin-right: auto; }
+  #autoTranslationCard .auto-translation-action-buttons { margin-left: auto; }
   #btnTranslationToggle, #btnXTranslationToggle { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
   #btnTranslationToggle svg, #btnXTranslationToggle svg { flex: none; }
   #btnTranslationToggle[data-on="1"], #btnXTranslationToggle[data-on="1"] {
@@ -306,6 +609,8 @@
   .cardrow .card:nth-child(2) { flex: 4 1 0; min-width: 380px; }
   /* X RSS 状态卡与「离线补发」同位替换（X 页第二张卡），保持相同列宽 */
   .cardrow .card#xrssCard { flex: 4 1 0; min-width: 380px; }
+  /* QQ → QQ 页的定时消息与机器人状态同排，宽度比例沿用顶部 6:4。 */
+  .cardrow .card#scheduledMessageCard { flex: 4 1 0; min-width: 380px; }
   /* 机器人状态卡控制按钮行：间距收紧以在一行容纳四按钮 */
   .cardrow .card:nth-child(1) .row { gap: 6px; }
   /* 开机自启按钮：与三个机器人控制按钮同排右侧，样式一致（sec），图标+文字居中 */
@@ -358,11 +663,12 @@
   .modal-x:hover { color: var(--hover-fg); border-color: var(--muted); }
   /* aboutModal 的 #aboutModal button 规则优先级更高，需重申圆角/去 padding 覆盖 */
   #aboutModal button.modal-x { padding: 0; border-radius: 50%; }
-  /* 确认/提示弹窗永远在最上层（各弹窗内联 z-index:999，同层时靠后的弹窗会盖住它） */
-  #confirmModal { z-index: 1000 !important; }
+  /* 确认/提示弹窗永远在最上层，目标群管理可从定时消息编辑弹窗内继续打开 */
+  #confirmModal { z-index: 1100 !important; }
   #chanBody input[data-kind="chanName"] { width: 25%; }
   button.rowicon {
     width: 28px; height: 28px; padding: 0;
+    flex: 0 0 28px;
     border-radius: 5px; font-size: 14px; line-height: 1;
     display: inline-flex; align-items: center; justify-content: center;
   }
@@ -376,6 +682,22 @@
   button.rowicon.filter-active:hover {
     background: var(--filter-active-border);
   }
+  button.rowicon.translation-active {
+    background: var(--primary);
+    border-color: var(--primary-border);
+    color: var(--btn-fg);
+  }
+  button.rowicon.translation-active:hover { background: var(--primary-border); }
+  .translation-setting-toggle {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    min-height: 30px; align-self: flex-start;
+  }
+  .translation-setting-toggle svg { flex: none; }
+  .translation-setting-toggle[data-on="1"] {
+    background: var(--primary); border-color: var(--primary-border); color: var(--btn-fg);
+  }
+  .translation-setting-toggle[data-on="1"]:hover { background: var(--primary-border); }
+  .translation-setting-toggle:disabled { opacity: .45; cursor: not-allowed; }
 
   /* ---------- 频道筛选弹窗（用户名/关键词列表 + 消息类型按钮） ---------- */
   .flt-col-title { font-size: 13px; color: var(--muted); }
@@ -438,7 +760,7 @@
   .fgtabs .fgtab.drop-before { box-shadow: inset 2px 0 0 0 var(--primary-border); }
   .fgtabs .fgtab.drop-after { box-shadow: inset -2px 0 0 0 var(--primary-border); }
 
-  /* ---------- 主要界面切换（Discord → QQ / X → QQ） ---------- */
+  /* ---------- 主要界面切换（Discord → QQ / X → QQ / QQ → QQ） ---------- */
   /* 复用 .fgtab 视觉，字号/内边距略大以体现一级层级 */
   .pagetabs {
     display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
@@ -453,7 +775,7 @@
 
   /* ---------- 转发组卡片 ---------- */
   .fgtabs {
-    display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end;
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
     margin-bottom: 10px;
   }
   .fgtab {
@@ -537,9 +859,18 @@
     .auto-translation-actions > .translation-toggle,
     .auto-translation-action-buttons { grid-column: 1; justify-self: start; }
   }
+  @media (max-width: 900px) {
+    .translation-scheduled-row { flex-direction: column; }
+    .relay-translation-row { flex-direction: column; }
+  }
+  @media (max-width: 560px) {
+    .scheduled-message-options { flex-direction: column; align-items: stretch; gap: 9px; }
+    .scheduled-message-option { justify-content: flex-start; gap: 8px; }
+  }
   @media (max-width: 1000px) {
     .cardrow { flex-direction: column; }
     .cardrow .card:nth-child(1),
     .cardrow .card:nth-child(2),
     .cardrow .card#xrssCard { min-width: 0; }
+    .cardrow .card#scheduledMessageCard { min-width: 0; }
   }

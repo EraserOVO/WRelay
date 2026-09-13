@@ -5,7 +5,7 @@
 游标、统计与重试仍由各自调用方负责。
 """
 
-from plugins.config import get_channel_filter
+from plugins.config import get_channel_filter, get_channel_translation_config
 from plugins.fetch import build_parts
 from plugins.filter import get_enabled_message_types
 from plugins.translation import translate_text_parts
@@ -39,5 +39,6 @@ async def prepare_discord_message(
         text_parts,
         ("discord", str(channel_id), str(message_id)),
         skip_leading_parts=1,
+        config=get_channel_translation_config(channel_id),
     )
     return text_parts, media_items

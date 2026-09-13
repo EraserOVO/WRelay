@@ -37,6 +37,15 @@ ALL_MESSAGE_TYPES = (
     MESSAGE_TYPE_EMOJI,
 )
 
+X_POST_TYPE_ORIGINAL = "原创"
+X_POST_TYPE_RETWEET = "转发"
+X_POST_TYPE_QUOTE = "引用"
+ALL_X_POST_TYPES = (
+    X_POST_TYPE_ORIGINAL,
+    X_POST_TYPE_RETWEET,
+    X_POST_TYPE_QUOTE,
+)
+
 
 def get_enabled_message_types(filter_config):
     """返回当前启用的消息类型集合（build_parts 按此逐组件过滤）。
@@ -99,5 +108,46 @@ def check_message_filter(
         search_text = " ".join(parts).lower()
         if not any(kw.lower() in search_text for kw in keywords if kw):
             return False
+
+    return True
+
+
+def check_x_post_filter(filter_config: dict, post: dict) -> bool:
+    """判断 X RSS 推文是否通过关键词与推文类型筛选。
+
+    关键词匹配正文、话题标签、转发作者及引用内容；多个关键词为 OR。
+    ``filter_post_types`` 缺省或包含全部类型时不过滤，支持原创、转发、引用。
+    """
+    filter_config = filter_config or {}
+    post = post or {}
+    keywords = [str(k).strip().lower() for k in (filter_config.get("filter_keywords") or []) if str(k).strip()]
+    if keywords:
+        parts = [post.get("text") or "", post.get("rt_author") or ""]
+        hashtags = [str(tag).strip() for tag in (post.get("hashtags") or []) if str(tag).strip()]
+        parts.extend(hashtags)
+        parts.extend("#" + tag.lstrip("#") for tag in hashtags)
+        quote = post.get("quote") or {}
+        parts.extend([quote.get("author") or "", quote.get("text") or ""])
+        search_text = " ".join(str(part) for part in parts).lower()
+        if not any(keyword in search_text for keyword in keywords):
+            return False
+
+    post_types = filter_config.get("filter_post_types")
+    if isinstance(post_types, (list, tuple)):
+        enabled = {
+            str(item).strip()
+            for item in post_types
+            if str(item).strip() in ALL_X_POST_TYPES
+        }
+        if enabled and len(enabled) < len(ALL_X_POST_TYPES):
+            matched = set()
+            if post.get("is_retweet"):
+                matched.add(X_POST_TYPE_RETWEET)
+            elif post.get("quote"):
+                matched.add(X_POST_TYPE_QUOTE)
+            else:
+                matched.add(X_POST_TYPE_ORIGINAL)
+            if not matched & enabled:
+                return False
 
     return True

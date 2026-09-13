@@ -33,6 +33,7 @@ WRelay 是一个基于 NoneBot2 的 Windows 消息转发服务。当前代码包
 - 使用独立的来源游标去重
 - QQ 未连接、发送失败或媒体处理失败时保留游标并在后续轮询中补投
 - 管理面板提供 RSS 运行状态、最近轮询结果和失败原因
+- 支持向选定的 QQ 接收群定期发送固定消息，可在面板或白名单私聊中控制
 
 ### QQ 私聊手动转发
 
@@ -41,7 +42,15 @@ WRelay 是一个基于 NoneBot2 的 Windows 消息转发服务。当前代码包
 ```text
 relay-list       查看可用的 QQ 接收群
 relay 1          选择第 1 个 QQ 群
+relay 1 2        同时选择第 1、2 个 QQ 群
 relay all        选择全部已启用的 QQ 群
+timer            查看定时消息状态
+timer on/off     开启或关闭定时消息
+timer text 内容  设置定时消息内容
+timer days 天数 [HH:MM]      每隔几天发送
+timer weekly 周几... [HH:MM] 每周指定星期发送（1=周一）
+timer time HH:MM              设置发送时间
+timer clear      关闭并清空定时消息
 ```
 
 选择目标后发送下一条文字即可转发。下一条消息如果是 Discord 消息链接，WRelay 会从 Discord API 抓取原消息，并复用正常的内容解析、媒体下载和发送逻辑。

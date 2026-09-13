@@ -20,6 +20,9 @@ from plugins.config import (
     get_active_user_openids,
     get_qq_group_entries,
     get_qq_fwd_select_timeout,
+    get_qq_c2c_relay_filter,
+    get_x_c2c_relay_filter,
+    get_x_translation_config,
 )
 from plugins.fetch import (
     is_discord_url,
@@ -29,6 +32,12 @@ from plugins.fetch import (
 from plugins.media import make_text
 from plugins.sender import send_relay_message
 from plugins.translation import translate_text_parts
+from plugins.filter import get_enabled_message_types
+from plugins.x_rss import (
+    is_x_status_url,
+    fetch_x_post,
+    render_x_post,
+)
 from plugins.json_io import (
     load_json,
     update_json,
@@ -220,13 +229,13 @@ async def log_group_add_openid(
 # 私聊 relay 命令（两步式：先指定目标，再发送下一条内容）
 #
 #   relay-list            列出可转发目标群（全部已注册且 enabled，私聊不做测试/正式隔离）
-#   relay {序号}          选择第 N 个群，静默等待下一条普通消息转发
+#   relay {序号1} {序号2}  选择多个群，静默等待下一条普通消息转发
 #   relay all             选择全部可用群，静默等待下一条普通消息转发
 #   relay / relay abc / relay 999 → 无法找到对应的转发群
 #
 # 下一条普通消息才执行转发；成功/失败回复结果；超时（qq_fwd_select_timeout）
 # 只清 pending 不回复。交互状态绑定 user_openid，避免多人串台。
-# 私聊专属：下一条消息若是 Discord 链接，走现有 fetch_message + build_parts 拉取机制。
+# 私聊专属：下一条消息若是 Discord / X 链接，分别走对应平台的单条消息抓取与渲染机制。
 #
 # 与 manage.py（priority=20）的关系：本 matcher priority=15 先执行；凡是被本段
 # 消费的消息（relay 指令、待转发的下一条内容）都 stop_propagation，避免 manage
@@ -318,10 +327,11 @@ async def handle(
 
         return
 
+    qq_message = event.get_message()
     message = event.get_plaintext()
 
-    if not message:
-        # 空文本（如纯图片/表情）不打扰
+    if not message and not qq_message["emoji"]:
+        # 空文本（如纯图片）不打扰；纯表情需要交给 pending relay 处理
         return
 
     user = event.author.user_openid
@@ -342,7 +352,7 @@ async def handle(
     # ---- 下一条消息消费（有 pending 时）----
     entry = get_c2c_pending(user)
     if entry is not None:
-        await _consume_next(bot, event, message, entry, user)
+        await _consume_next(bot, event, message, entry, user, qq_message)
         return
 
     # 无 pending、非 relay：交给 manage.py 正常处理
@@ -408,13 +418,32 @@ async def _handle_relay_cmd(bot, event, stripped, user):
         _stop_propagation()
         return
 
-    if arg.isdigit():
+    # relay {序号1} {序号2} ...：一次选择多个目标群。
+    # 序号必须全部有效；重复序号去重，避免同一群重复发送。
+    indexes = arg.split()
+    if indexes and all(index.isdigit() for index in indexes):
 
         groups = _c2c_enabled_groups()
-        idx = int(arg)
+        selected = []
+        selected_openids = set()
 
-        if idx < 1 or idx > len(groups):
+        for index in indexes:
+            idx = int(index)
+            if idx < 1 or idx > len(groups):
+                await bot.send(
+                    event,
+                    "无法找到对应的转发群"
+                )
 
+                _stop_propagation()
+                return
+
+            openid = str(groups[idx - 1]["openid"])
+            if openid not in selected_openids:
+                selected.append(openid)
+                selected_openids.add(openid)
+
+        if not selected:
             await bot.send(
                 event,
                 "无法找到对应的转发群"
@@ -423,7 +452,7 @@ async def _handle_relay_cmd(bot, event, stripped, user):
             _stop_propagation()
             return
 
-        set_c2c_pending(user, [str(groups[idx - 1]["openid"])])
+        set_c2c_pending(user, selected)
         _stop_propagation()
         return
 
@@ -436,7 +465,7 @@ async def _handle_relay_cmd(bot, event, stripped, user):
     _stop_propagation()
 
 
-async def _consume_next(bot, event, message, entry, user):
+async def _consume_next(bot, event, message, entry, user, qq_message=None):
 
     # 超时：只清 pending，不回复、不转发
     timeout = get_qq_fwd_select_timeout()
@@ -464,7 +493,9 @@ async def _consume_next(bot, event, message, entry, user):
         _stop_propagation()
         return
 
-    # 内容：DC 链接走现有 Discord 消息拉取机制（仅私聊生效）
+    translation_config = None
+
+    # 内容：Discord 链接走现有消息拉取机制（仅私聊生效）
     if is_discord_url(message):
 
         logger.info(
@@ -495,19 +526,70 @@ async def _consume_next(bot, event, message, entry, user):
             msg["channel_id"]
         )
 
-        text_parts, media_items, _ = await build_parts(
+        relay_filter = get_qq_c2c_relay_filter()
+        text_parts, media_items, has_content = await build_parts(
             msg,
             source_label="手动转发来自",
+            enabled_types=get_enabled_message_types(relay_filter),
         )
+        if not has_content:
+            await bot.send(
+                event,
+                "消息被筛选，未转发"
+            )
+
+            _stop_propagation()
+            return
         translation_key = (
             "discord",
             str(msg.get("channel_id") or ""),
             str(msg.get("message_id") or ""),
         )
 
+    elif is_x_status_url(message):
+
+        logger.info("检测到 X 消息链接")
+
+        post, source_name, fetch_err = await fetch_x_post(message)
+        if post is None:
+            await bot.send(
+                event,
+                "获取X消息失败"
+                + (f"（{fetch_err}）" if fetch_err else "")
+            )
+            _stop_propagation()
+            return
+
+        x_filter = get_x_c2c_relay_filter()
+        rendered = await render_x_post(
+            post,
+            source_name,
+            enabled_types=get_enabled_message_types(x_filter),
+        )
+        if rendered is None:
+            await bot.send(event, "消息被筛选，未转发")
+            _stop_propagation()
+            return
+
+        text_parts, media_items = rendered
+        translation_key = (
+            "x_manual",
+            str(post.get("id") or ""),
+        )
+        translation_config = get_x_translation_config()
+
     else:
 
-        text_parts = [make_text(message)]
+        if qq_message is not None and qq_message["emoji"]:
+            # QQ 适配器把表情解析成 emoji 段，不能依赖 get_plaintext()；
+            # 只保留文本和表情，其他附件仍沿用原有私聊 relay 行为。
+            text_parts = [
+                segment.copy()
+                for segment in qq_message
+                if segment.type in ("text", "emoji")
+            ]
+        else:
+            text_parts = [make_text(message)]
         media_items = []
         event_id = str(getattr(event, "id", "") or "")
         translation_key = ("qq_c2c", event_id) if event_id else None
@@ -515,7 +597,8 @@ async def _consume_next(bot, event, message, entry, user):
     text_parts = await translate_text_parts(
         text_parts,
         translation_key,
-        skip_leading_parts=1 if is_discord_url(message) else 0,
+        skip_leading_parts=1 if (is_discord_url(message) or is_x_status_url(message)) else 0,
+        config=translation_config,
     )
 
     ok_map = await send_relay_message(

@@ -1,10 +1,12 @@
 import asyncio
+from io import BytesIO
 
 from nonebot import get_bots
 from nonebot import logger
 
 from nonebot.adapters.qq import Bot as QQBot
 from nonebot.adapters.qq import Message as QQMessage
+from nonebot.adapters.qq import MessageSegment as QQMessageSegment
 
 from plugins.config import get_active_groups
 from plugins.media import make_text, make_media_link
@@ -31,6 +33,9 @@ MAX_BACKOFF = 30.0
 # 限流通常持续数秒到数十秒，比普通网络错误的 3→6→12 退避更保守
 RATE_LIMIT_BACKOFFS = (3.0, 10.0, 30.0)
 TEXT_CHUNK_LENGTH = 3900  # QQ 官方 bot 文本上限 4000 字符，留余量
+EMOJI_TILE_SIZE = 64
+EMOJI_TILE_GAP = 4
+EMOJI_TILE_COLUMNS = 8
 
 
 def get_qq_bot():
@@ -200,6 +205,38 @@ async def send_text_parts(qq_bot, groups, text_parts, channel_id="", message_id=
     返回 {group_openid: 是否全部送达}"""
     ok_map = {group: True for group in groups}
 
+    # QQ 官方接口一条消息只能上传一个图片媒体，且多图 Message 会被
+    # 适配器取最后一张并把图片置于文字前面。Discord 自定义表情因此必须
+    # 按原顺序拆成文字块/表情合成图块发送，连续表情合并为一张小图。
+    if any(getattr(part, "type", "") == "file_image" for part in text_parts):
+        return await _send_ordered_emoji_parts(
+            qq_bot,
+            groups,
+            text_parts,
+            channel_id=channel_id,
+            message_id=message_id,
+        )
+
+    # QQ 表情是独立的 emoji 段，不能先拼成纯文本，否则会被丢弃。
+    # 这类消息通常很短，保留原消息段一次性发送；纯文本仍走下面的
+    # 分片逻辑，避免改变现有长文本转发行为。
+    if any(getattr(part, "type", "") != "text" for part in text_parts):
+        message = QQMessage([
+            part.copy() if hasattr(part, "copy") else part
+            for part in text_parts
+        ])
+        results = await _send_to_groups(
+            qq_bot,
+            groups,
+            message,
+            channel_id=channel_id,
+            message_id=message_id,
+        )
+        for group, ok in results.items():
+            if not ok:
+                ok_map[group] = False
+        return ok_map
+
     full_text = "".join(
         (getattr(part, "data", None) or {}).get("text", "")
         for part in text_parts
@@ -230,6 +267,139 @@ async def send_text_parts(qq_bot, groups, text_parts, channel_id="", message_id=
             if not ok:
                 ok_map[group] = False
 
+    return ok_map
+
+
+def _compose_emoji_strip(segments):
+    """把连续 Discord 表情合成为一张小尺寸 PNG，保持出现顺序。"""
+    from PIL import Image
+
+    if not segments:
+        return None
+    if len(segments) == 1:
+        data = (getattr(segments[0], "data", None) or {}).get("content")
+        return data if isinstance(data, bytes) else None
+
+    images = []
+    try:
+        for segment in segments:
+            data = (getattr(segment, "data", None) or {}).get("content")
+            if not isinstance(data, bytes):
+                continue
+            with Image.open(BytesIO(data)) as source:
+                # 合成图使用静态 PNG；单个表情走上面的原始字节路径，
+                # 仍可保留 GIF 动画。
+                source.seek(0)
+                image = source.convert("RGBA")
+                image.thumbnail(
+                    (EMOJI_TILE_SIZE, EMOJI_TILE_SIZE),
+                    Image.Resampling.LANCZOS,
+                )
+                tile = Image.new(
+                    "RGBA",
+                    (EMOJI_TILE_SIZE, EMOJI_TILE_SIZE),
+                    (0, 0, 0, 0),
+                )
+                tile.paste(
+                    image,
+                    (
+                        (EMOJI_TILE_SIZE - image.width) // 2,
+                        (EMOJI_TILE_SIZE - image.height) // 2,
+                    ),
+                )
+                images.append(tile)
+    except Exception as exc:
+        logger.warning("Discord 表情合成失败: {}", exc)
+        return None
+
+    if not images:
+        return None
+
+    columns = min(EMOJI_TILE_COLUMNS, len(images))
+    rows = (len(images) + columns - 1) // columns
+    width = columns * EMOJI_TILE_SIZE + (columns - 1) * EMOJI_TILE_GAP
+    height = rows * EMOJI_TILE_SIZE + (rows - 1) * EMOJI_TILE_GAP
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    for index, image in enumerate(images):
+        col = index % columns
+        row = index // columns
+        canvas.paste(
+            image,
+            (
+                col * (EMOJI_TILE_SIZE + EMOJI_TILE_GAP),
+                row * (EMOJI_TILE_SIZE + EMOJI_TILE_GAP),
+            ),
+        )
+
+    output = BytesIO()
+    canvas.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
+async def _send_ordered_emoji_parts(
+    qq_bot,
+    groups,
+    parts,
+    channel_id="",
+    message_id="",
+):
+    """按文字/表情顺序发送，连续表情合并为一张图片。"""
+    ok_map = {group: True for group in groups}
+    text_buffer = []
+    emoji_buffer = []
+
+    async def flush_text():
+        nonlocal ok_map, text_buffer
+        if not text_buffer:
+            return
+        result = await send_text_parts(
+            qq_bot,
+            groups,
+            text_buffer,
+            channel_id=channel_id,
+            message_id=message_id,
+        )
+        ok_map = {
+            group: ok_map[group] and result.get(group, False)
+            for group in groups
+        }
+        text_buffer = []
+
+    async def flush_emoji():
+        nonlocal ok_map, emoji_buffer
+        if not emoji_buffer:
+            return
+        data = _compose_emoji_strip(emoji_buffer)
+        if data is None:
+            logger.warning(
+                "Discord 表情合成失败，跳过本组表情：频道{} 消息{}",
+                channel_id or "-",
+                message_id or "-",
+            )
+            emoji_buffer = []
+            return
+        result = await _send_to_groups(
+            qq_bot,
+            groups,
+            QQMessageSegment.file_image(data, "discord-emoji-strip.png"),
+            channel_id=channel_id,
+            message_id=message_id,
+        )
+        ok_map = {
+            group: ok_map[group] and result.get(group, False)
+            for group in groups
+        }
+        emoji_buffer = []
+
+    for part in parts:
+        if getattr(part, "type", "") == "file_image":
+            await flush_text()
+            emoji_buffer.append(part)
+        else:
+            await flush_emoji()
+            text_buffer.append(part)
+    await flush_emoji()
+    await flush_text()
     return ok_map
 
 

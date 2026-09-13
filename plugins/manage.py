@@ -1,5 +1,6 @@
 import os
 import time
+import re
 
 import httpx
 
@@ -162,8 +163,17 @@ def _help_text():
         "backfill <on/off/run/clear/refresh> 开/关/触发/清空/刷新\n"
         "register {QQ号} {昵称} 用户私聊提交注册申请\n"
         "relay-list 查看可转发群列表\n"
-        "relay {序号} 选择目标群，下一条消息转发\n"
+        "relay {序号1} {序号2} 选择多个目标群，下一条消息转发\n"
         "relay all 选择全部已启用群，下一条消息转发\n"
+        "timer 查看定时消息状态\n"
+        "timer on/off 开启/关闭定时消息\n"
+        "timer text {内容} 设置定时消息内容\n"
+        "timer days {天数} [HH:MM] 每隔几天发送\n"
+        "timer weeks {周数} [HH:MM] 每隔几周发送\n"
+        "timer months {月数} [HH:MM] 每隔几月发送\n"
+        "timer time {HH:MM} 设置发送时间\n"
+        "timer groups 查看/设置定时消息目标群\n"
+        "timer clear 清空定时消息内容\n"
         "list 查看命令清单"
     )
 
@@ -343,6 +353,230 @@ async def _cmd_backfill(args):
     return "用法: backfill（查询）/ on/off / run / clear / refresh"
 
 
+def _timer_time(value):
+    if not isinstance(value, str) or re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value) is None:
+        return None
+    return value
+
+
+async def _cmd_timer(args):
+    """查询或字段级修改定时消息配置。"""
+    if not args:
+        settings = await _panel_get("/api/settings")
+        config = settings.get("scheduled_message") or {}
+        messages = [
+            item for item in config.get("messages") or []
+            if isinstance(item, dict) and str(item.get("content") or "").strip()
+        ]
+        content = str(messages[0].get("content") or "").strip() if messages else str(config.get("content") or "").strip()
+        enabled = config.get("enabled") is True
+        if messages:
+            schedule = str(len(messages)) + " 条消息"
+            send_time = messages[0].get("send_time") or messages[0].get("anchor_at") or "未设置"
+        else:
+            schedule = "未设置"
+            send_time = config.get("send_time") or "09:00"
+        return (
+            "【定时消息】\n"
+            "状态：" + ("开启" if enabled else "关闭") + "\n"
+            "计划：" + schedule + "\n"
+            "时间：" + str(send_time) + "\n"
+            "目标群：" + str(len(config.get("target_groups") or [])) + " 个\n"
+            "内容：" + (content if content else "（未设置）")
+        )
+
+    action = args[0].lower()
+    if action in ("on", "off"):
+        if action == "on":
+            settings = await _panel_get("/api/settings")
+            config = settings.get("scheduled_message") or {}
+            messages = config.get("messages") or []
+            has_content = any(
+                isinstance(item, dict) and str(item.get("content") or "").strip()
+                for item in messages
+            )
+            if not has_content and not str(config.get("content") or "").strip():
+                return "请先使用 timer text {内容} 设置定时消息内容"
+            if not config.get("target_groups"):
+                return "请先使用 timer groups {序号1} {序号2} 设置目标群"
+        data = await _panel_post(
+            "/api/settings/scheduled-message",
+            {"enabled": action == "on"},
+        )
+        if data.get("ok"):
+            return "已" + ("开启" if action == "on" else "关闭") + "定时消息"
+        return data.get("msg") or "设置失败"
+
+    if action in ("text", "content", "set"):
+        content = " ".join(args[1:]).strip()
+        if not content:
+            return "用法: timer text {内容}"
+        data = await _panel_post(
+            "/api/settings/scheduled-message",
+            {"content": content},
+        )
+        if data.get("ok"):
+            return "定时消息内容已更新"
+        return data.get("msg") or "设置失败"
+
+    if action in ("days", "daily"):
+        if len(args) not in (2, 3) or not args[1].isdigit():
+            return "用法: timer days {天数} [HH:MM]（1-365）"
+        every_days = int(args[1])
+        if every_days < 1 or every_days > 365:
+            return "天数必须是 1 到 365"
+        send_time = _timer_time(args[2]) if len(args) == 3 else None
+        if len(args) == 3 and send_time is None:
+            return "时间必须是 HH:MM，例如 09:30"
+        data = await _panel_post(
+            "/api/settings/scheduled-message",
+            {
+                "schedule_mode": "days",
+                "every_days": every_days,
+                **({"send_time": send_time} if send_time else {}),
+            },
+        )
+        if data.get("ok"):
+            return "已设置为每 " + str(every_days) + " 天发送"
+        return data.get("msg") or "设置失败"
+
+    if action in ("weeks", "weekly", "week"):
+        if len(args) not in (2, 3) or not args[1].isdigit():
+            return "用法: timer weeks {周数} [HH:MM]（1-52）"
+        every_weeks = int(args[1])
+        if every_weeks < 1 or every_weeks > 52:
+            return "周数必须是 1 到 52"
+        send_time = _timer_time(args[2]) if len(args) == 3 else None
+        if len(args) == 3 and send_time is None:
+            return "时间必须是 HH:MM，例如 09:30"
+        data = await _panel_post(
+            "/api/settings/scheduled-message",
+            {
+                "schedule_mode": "weekly",
+                "every_weeks": every_weeks,
+                **({"send_time": send_time} if send_time else {}),
+            },
+        )
+        if data.get("ok"):
+            return "已设置为每 " + str(every_weeks) + " 周发送"
+        return data.get("msg") or "设置失败"
+
+    if action in ("months", "monthly", "month"):
+        if len(args) not in (2, 3) or not args[1].isdigit():
+            return "用法: timer months {月数} [HH:MM]（1-120）"
+        every_months = int(args[1])
+        if every_months < 1 or every_months > 120:
+            return "月数必须是 1 到 120"
+        send_time = _timer_time(args[2]) if len(args) == 3 else None
+        if len(args) == 3 and send_time is None:
+            return "时间必须是 HH:MM，例如 09:30"
+        data = await _panel_post(
+            "/api/settings/scheduled-message",
+            {
+                "schedule_mode": "monthly",
+                "every_months": every_months,
+                **({"send_time": send_time} if send_time else {}),
+            },
+        )
+        if data.get("ok"):
+            return "已设置为每 " + str(every_months) + " 月发送"
+        return data.get("msg") or "设置失败"
+
+    if action == "time":
+        if len(args) != 2 or _timer_time(args[1]) is None:
+            return "用法: timer time {HH:MM}"
+        data = await _panel_post(
+            "/api/settings/scheduled-message",
+            {"send_time": args[1]},
+        )
+        if data.get("ok"):
+            return "定时消息发送时间已设置为 " + args[1]
+        return data.get("msg") or "设置失败"
+
+    if action in ("interval", "every"):
+        # 兼容旧命令：把秒数换算成天数，新的交互建议使用 timer days。
+        if len(args) != 2 or not args[1].isdigit():
+            return "用法: timer days {天数} [HH:MM]（旧 interval 也支持秒数）"
+        interval = int(args[1])
+        if interval < 60 or interval > 86400:
+            return "旧间隔必须是 60 到 86400 秒"
+        every_days = max(1, min(365, (interval + 86399) // 86400))
+        data = await _panel_post(
+            "/api/settings/scheduled-message",
+            {
+                "schedule_mode": "days",
+                "every_days": every_days,
+            },
+        )
+        if data.get("ok"):
+            return "旧间隔已换算为每 " + str(every_days) + " 天发送"
+        return data.get("msg") or "设置失败"
+
+    if action in ("groups", "group", "targets"):
+        settings = await _panel_get("/api/settings")
+        entries = [
+            item for item in settings.get("qq_group_openids") or []
+            if isinstance(item, dict) and item.get("openid")
+        ]
+        config = settings.get("scheduled_message") or {}
+        selected = {
+            str(openid)
+            for openid in config.get("target_groups") or []
+        }
+        if len(args) == 1:
+            if not entries:
+                return "当前没有已审核的 QQ 群"
+            lines = ["【定时消息目标群】"]
+            for index, item in enumerate(entries, start=1):
+                name = str(item.get("name") or item.get("remark") or "").strip()
+                label = name or str(item["openid"])
+                flags = []
+                if str(item["openid"]) in selected:
+                    flags.append("已选")
+                if item.get("enabled") is not True:
+                    flags.append("未启用")
+                suffix = "（" + "，".join(flags) + "）" if flags else ""
+                lines.append(f"{index}. {label}{suffix}")
+            lines.append("用法：timer groups {序号1} {序号2}")
+            return "\n".join(lines)
+
+        indexes = args[1:]
+        if not indexes or not all(index.isdigit() for index in indexes):
+            return "用法: timer groups {序号1} {序号2}"
+        target_groups = []
+        seen = set()
+        for index in indexes:
+            position = int(index)
+            if position < 1 or position > len(entries):
+                return "无法找到对应的已审核群"
+            openid = str(entries[position - 1]["openid"])
+            if openid not in seen:
+                target_groups.append(openid)
+                seen.add(openid)
+        data = await _panel_post(
+            "/api/settings/scheduled-message",
+            {"target_groups": target_groups},
+        )
+        if data.get("ok"):
+            return "定时消息目标群已更新（" + str(len(target_groups)) + " 个）"
+        return data.get("msg") or "设置失败"
+
+    if action == "clear":
+        data = await _panel_post(
+            "/api/settings/scheduled-message",
+            {"content": "", "enabled": False},
+        )
+        if data.get("ok"):
+            return "定时消息已关闭并清空内容"
+        return data.get("msg") or "设置失败"
+
+    return (
+        "用法: timer（查询）/ on/off / text {内容} / "
+        "days {天数} [HH:MM] / weeks {周数} [HH:MM] / months {月数} [HH:MM] / "
+        "time {HH:MM} / groups [序号...] / clear"
+    )
+
+
 async def _dispatch(cmd, args):
     if cmd == "list":
         return _help_text()
@@ -361,6 +595,9 @@ async def _dispatch(cmd, args):
 
     if cmd == "backfill":
         return await _cmd_backfill(args)
+
+    if cmd == "timer":
+        return await _cmd_timer(args)
 
     return "未知命令，输入 list 查看可用命令"
 
