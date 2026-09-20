@@ -1,4 +1,5 @@
 const SVG_FUNNEL = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>';
+const SVG_WARNING = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2.8 20h18.4L12 3z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
 const SVG_TRANSLATE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8l6 6"/><path d="M4 14l6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="M14 18h7"/><path d="M17.5 14l3.5 7"/><path d="M14 21l3.5-7"/></svg>';
 const SVG_ORIGINAL_ON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
 const SVG_ORIGINAL_OFF = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
@@ -375,10 +376,8 @@ function renderTranslationRuntimeStatus(st) {
   } else if (runtime.provider === "tencent_tmt") {
     text = "当前翻译服务：腾讯 TMT";
   }
-  ["translationRuntimeStatus", "xTranslationRuntimeStatus"].forEach(function (id) {
-    const el = document.getElementById(id);
-    if (el) el.textContent = text;
-  });
+  const el = document.getElementById("translationRuntimeStatus");
+  if (el) el.textContent = text;
 }
 
 // 开机自启按钮：√ / × 用 SVG 图标绘制（不使用文字字符），状态记录在 data-on 上供点击切换判断
@@ -1183,7 +1182,7 @@ function renderSettings() {
         '<td style="font-size:12px;">' + escapeHtml(uacc) + '</td>' +
         '<td class="mono">' + escapeHtml(u.openid) + '</td>' +
         '<td><div style="display:flex;gap:4px;justify-content:flex-end;">' +
-        '<button class="sec rowicon' + (u.failure_notification ? ' filter-active' : '') + '" title="接收失败通知" aria-label="接收失败通知" data-kind="failureRecipient" data-i="' + ui + '">' + SVG_FUNNEL + '</button>' +
+        '<button class="sec rowicon' + (u.failure_notification ? ' filter-active' : '') + '" title="接收失败通知" aria-label="接收失败通知" data-kind="failureRecipient" data-i="' + ui + '">' + SVG_WARNING + '</button>' +
         '<button class="danger rowicon" data-kind="userDel" data-i="' + ui + '">' + SVG_TRASH + '</button>' +
         '</div></td>';
       ub.appendChild(tr);
@@ -2570,7 +2569,7 @@ function openTranslationSourceModal(scope, index) {
   document.getElementById("translationSourceName").textContent = label;
   renderTranslationSettingButton("translationSourceEnabled", item.translation_enabled === true, "启用翻译");
   renderTranslationSettingButton("translationSourceAppendOriginal", item.translation_append_original !== false, "保留原文");
-  renderTranslationSettingButton("translationSourceShowDatetime", item.translation_show_datetime === true, "显示时间日期");
+  renderTranslationSettingButton("translationSourceShowDatetime", item.translation_show_datetime === true, "显示时间");
   syncTranslationSourceModalButtons();
   document.getElementById("translationSourceModal").style.display = "flex";
 }
@@ -3082,7 +3081,7 @@ document.addEventListener("click", async function (e) {
     return;
   }
   if (btn.id === "translationSourceShowDatetime") {
-    renderTranslationSettingButton("translationSourceShowDatetime", btn.dataset.on !== "1", "显示时间日期");
+    renderTranslationSettingButton("translationSourceShowDatetime", btn.dataset.on !== "1", "显示时间");
     return;
   }
   if (btn.id === "btnRelayRegisteredChannels") {

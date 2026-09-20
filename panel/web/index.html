@@ -194,7 +194,6 @@
         <button id="btnTranslationConfig" class="sec iconbtn" title="翻译服务配置" aria-label="翻译服务配置"><svg width="20" height="20" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10.5" cy="17.5" r="7" stroke="currentColor" stroke-width="2.1"/><line x1="15.9834" y1="11.9145" x2="24.398" y2="3.49992" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="23.5054" y1="5.83398" x2="26.1453" y2="8.47385" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="20.5894" y1="8.75" x2="22.5693" y2="10.7299" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg></button>
       </span>
     </div>
-    <div class="auto-translation-runtime" id="translationRuntimeStatus">当前工作模型：尚未成功翻译</div>
   </div>
   </div>
   </div>
@@ -318,7 +317,6 @@
           <button id="btnXTranslationConfig" class="sec iconbtn" title="翻译服务配置（共享）" aria-label="翻译服务配置（共享）"><svg width="20" height="20" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10.5" cy="17.5" r="7" stroke="currentColor" stroke-width="2.1"/><line x1="15.9834" y1="11.9145" x2="24.398" y2="3.49992" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="23.5054" y1="5.83398" x2="26.1453" y2="8.47385" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="20.5894" y1="8.75" x2="22.5693" y2="10.7299" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg></button>
         </span>
       </div>
-      <div class="auto-translation-runtime" id="xTranslationRuntimeStatus">当前工作模型：尚未成功翻译</div>
     </div>
     </div>
   </div>
@@ -520,6 +518,7 @@
   <div class="translation-config-dialog" style="position:relative;background:var(--modal-bg);border:1px solid var(--modal-border);border-radius:10px;padding:18px;max-width:460px;width:92%;display:flex;flex-direction:column;">
     <button type="button" class="modal-x" data-close="translationConfigModal" aria-label="关闭">×</button>
     <h3 style="margin:0 0 14px;">翻译服务配置</h3>
+    <div id="translationRuntimeStatus" class="translation-runtime-banner" aria-live="polite">当前工作模型：尚未成功翻译</div>
     <h4 style="margin:0 0 10px;font-size:14px;">AI API 配置</h4>
     <div class="ai-profile-toolbar">
       <label for="aiProfileSelect">已保存配置</label>

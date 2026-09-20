@@ -608,8 +608,18 @@
     color: var(--muted);
   }
   .auto-translation-check { color: var(--fg); }
-  .auto-translation-runtime {
-    margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.5;
+  .translation-runtime-banner {
+    display: flex; align-items: center; gap: 10px;
+    margin: 0 0 16px; padding: 11px 13px;
+    border: 1px solid var(--filter-active-border); border-radius: 8px;
+    background: var(--filter-active-bg); color: var(--card-heading);
+    font-size: 14px; font-weight: 700; line-height: 1.5;
+    box-shadow: 0 0 0 1px var(--primary-border);
+  }
+  .translation-runtime-banner::before {
+    content: ""; width: 9px; height: 9px; flex: none;
+    border-radius: 50%; background: var(--filter-active-border);
+    box-shadow: 0 0 0 4px var(--primary-border);
   }
   .auto-translation-field select,
   .auto-translation-field input[type=text],
