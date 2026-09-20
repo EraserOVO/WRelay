@@ -89,6 +89,22 @@ def _should_switch_model(error):
         return "model" in detail and "concurr" in detail and (
             "limit" in detail or "rate_limit" in detail
         )
+    if error.response.status_code in (500, 503):
+        # 500/503 只有在响应明确指向模型容量或服务节点不可用时才轮换；
+        # 普通服务端异常不额外重试，避免放大提供商整体故障。
+        return any(
+            marker in detail
+            for marker in (
+                "no_available_workers",
+                "no available workers",
+                "service unavailable",
+                "temporarily unavailable",
+                "model unavailable",
+                "model is unavailable",
+                "model overloaded",
+                "overloaded",
+            )
+        )
     return False
 
 

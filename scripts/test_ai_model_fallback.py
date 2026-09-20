@@ -58,6 +58,16 @@ async def main():
             "Model 'busy-model' is at its concurrency limit (32); please retry later",
             "concurrency",
         ),
+        (
+            "worker-model", 500,
+            "Error from provider self-deploy: 503 Service Unavailable; no_available_workers",
+            "worker-500",
+        ),
+        (
+            "unavailable-model", 503,
+            "Service Unavailable: model overloaded",
+            "unavailable-503",
+        ),
     )
     for blocked_model, blocked_status, blocked_message, label in scenarios:
         client = FakeClient(blocked_model, blocked_status, blocked_message)
