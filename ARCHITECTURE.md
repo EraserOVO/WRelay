@@ -22,6 +22,8 @@ WRelay/
 │   ├── fetch.py              Discord 消息抓取 + 渲染（统一解析层）
 │   ├── sender.py             QQ 群发送（重试、分片、降级）
 │   ├── retry.py              失败消息延迟重试与持久化队列
+│   ├── message_trace.py      投递结果追踪与持久化
+│   ├── failure_notification.py 管理员失败通知与冷却
 │   ├── media.py              文本美化 + Emoji 解析 + 媒体下载
 │   ├── history.py            去重记录读写（discord_last.json）
 │   ├── dedup.py              去重判断逻辑（纯函数，不碰 I/O）
@@ -91,6 +93,7 @@ plugins/sender.py
     │    └── 多群并行发送（asyncio.gather）
     │    └── 429 限流退避重试（最多 3 次）
     │    └── 返回 {群openid: 是否送达}
+    │    └── 记录最终投递结果、目标群与重试次数
     │
     ▼
 plugins/relay.py
@@ -120,10 +123,10 @@ plugins/backfill.py → _backfill_missed()
     └── 与实时转发共用去重记录，正常情况下不会重复发送
 ```
 
-> 去重竞态说明：on_bot_connect 会同时放行实时接收与补发任务，连接瞬间
-> 新建的消息存在极小竞态窗口——实时路径媒体下载未完成、去重记录尚未
-> 落盘时，补发逐条重读记录也看不到它，可能被两条路径各发送一次。
-> 该窗口目前未修复，仅影响启动瞬间新建的消息。
+> 启动并发说明：on_bot_connect 会同时放行实时接收与补发任务。实时路径在
+> 事件入队时登记共享的在途标记，直到消息处理完成才释放；补发逐条处理时
+> 发现该标记会跳过该消息，避免媒体下载与游标落盘之间的重复投递。实时
+> 路径失败仍按原有延迟重试与后续补发策略处理，不会因跳过而丢失消息。
 >
 > 抓取失败语义：分页抓取任一页失败（请求异常/超时/非 200/429 重试耗尽）
 > 时整轮放弃并返回空，绝不返回不完整列表推进去重游标，宁可下一轮重新
@@ -144,7 +147,8 @@ plugins/backfill.py → _backfill_missed()
     ▼
 plugins/x_rss.py
     │ ① 读取启用的 X 来源与 X 转发组
-    │ ② 请求 RSSHub，复用 ETag / 304 缓存
+    │ ② 请求 RSSHub，复用 ETag / 304 缓存；429/5xx/连接异常同轮退避重试
+    │    RSSHub 不可用时回退 X 公开时间线（同一推文结构）
     │ ③ 解析原创、转发、引用、图片和视频
     │ ④ 以 x_rss:{handle} 作为独立来源游标去重
     │ ⑤ 复用 fetch/media/sender 投递到 QQ 群
@@ -152,7 +156,8 @@ plugins/x_rss.py
 ```
 
 X RSS 与 Discord 使用独立的转发组配置。RSSHub 不可用、解析失败或发送失败
-只影响对应来源，不会阻断 Discord → QQ 链路。
+只影响对应来源，不会阻断 Discord → QQ 链路；RSSHub 临时错误会在同一轮最多尝试 3 次，
+最终失败仍不推进游标；RSSHub 不可用时会回退到 X 公开时间线。
 
 ---
 
@@ -179,7 +184,7 @@ QQ 私聊消息
                                            │ ② 未授权 → 回复拒绝
                                            │ ③ 命令分发：status / mode / groups /
                                            │    channels / users / backfill / restart
-                                           │ ④ 通过 HTTP 调用面板 8090 API
+                                           │ ④ 通过 HTTP 调用面板 18090 API
                                            └── ⑤ 回复执行结果
 ```
 
@@ -240,7 +245,7 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 
 ---
 
-## 7. 管理面板三张核心卡片
+## 7. 管理面板核心卡片与诊断工具
 
 ### 7.1 QQ 接收群
 
@@ -272,6 +277,13 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | 同步按钮 | "注册审核"：读取 `data/qq_registrations.json`（用户注册申请），√ 通过 → 按同步流程加入 settings（默认禁用，昵称/QQ号自动带入条目），× 拒绝 → 移除申请 |
 | 影响范围 | 哪些 QQ 用户可以使用 relay 命令和管理命令（status/restart/mode 等） |
 
+### 7.4 运行日志、消息追踪与连接诊断
+
+运行日志卡片内的「消息追踪」按钮打开二级窗口，读取 `message_trace.py` 保存的最近
+50 条投递记录，展示来源、消息摘要、目标群、最终结果与重试次数。机器人状态卡片的
+「连接诊断」按钮只读显示进程、Discord、QQ 连接和待重试投递数量，不会发送测试消息。
+「失败通知」开关控制失败提醒；仅白名单中已启用且勾选「告警」的用户会收到通知，通知按冷却时间合并重复失败。
+
 ---
 
 ## 8. 重要数据文件
@@ -291,6 +303,7 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | `data/bot.pid` | 面板 | 面板 | 机器人进程 PID（进程管理用） |
 | `data/restart_pending.json` | bot（manage.py） | bot（manage.py） | 跨进程重启确认标记 |
 | `data/retry_pending.json` | bot（retry.py） | bot（retry.py）、面板 | 失败消息摘要、失败群、重试次数和下次重试时间；不保存媒体字节 |
+| `data/message_trace.json` | bot（message_trace.py） | bot（health_api.py）、面板 | 最近投递结果、目标群、失败原因和重试次数；自动限制记录数量 |
 | `data/panel_auth.json` | 面板 | 面板、bot（manage.py） | 本机面板 API 认证令牌，不应外传 |
 | `data/x_rss.json` | bot（x_rss.py） | bot（x_rss.py） | RSS ETag/Last-Modified 等轮询缓存 |
 
@@ -309,6 +322,8 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | `plugins/fetch.py` | Discord 消息抓取 + 归一化 + 渲染为 QQ 消息段（唯一渲染逻辑） | 中 |
 | `plugins/sender.py` | QQ 群发送：分片、重试、限流退避、降级 | 低 |
 | `plugins/retry.py` | 发送失败欠账队列、持久化恢复与延迟重试 | 中 |
+| `plugins/message_trace.py` | 投递结果追踪与持久化 | 低 |
+| `plugins/failure_notification.py` | 管理员失败通知与冷却 | 低 |
 | `plugins/x_rss.py` | X RSS 轮询、游标和投递 | 中 |
 | `plugins/scheduled_message.py` | 按显式目标群名单和日历计划进行 QQ 定时消息投递 | 中 |
 | `plugins/x_rss_parser.py` | RSS 条目解析 | 中 |

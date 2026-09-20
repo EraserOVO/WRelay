@@ -152,8 +152,8 @@ def _first_run_config_check():
         lines.append("    - 在 .env.prod 的 DISCORD_BOTS 中：token 填你的 Bot Token")
         lines.append("    - 记得在 Bot 设置里开启 Message Content Intent（特权网关意图）")
     lines.append("")
-    lines.append("  国内网络访问 Discord 还需在 .env.prod 配置 HTTP_PROXY（例如：")
-    lines.append("      HTTP_PROXY=http://127.0.0.1:7890")
+    lines.append("  国内网络访问 Discord 可启用 Clash 的虚拟网卡模式（TUN）。")
+    lines.append("  WRelay 会随虚拟网卡路由，无需在 .env.prod 配置 HTTP_PROXY。")
     lines.append("  详细说明见 docs/SETUP.md。")
     lines.append("")
     lines.append("  请用记事本编辑 .env.prod 填好以上字段后，重新启动即可。")
@@ -168,6 +168,24 @@ def _first_run_config_check():
 # 适配器，若带着占位符继续会直接对外认证失败
 _first_run_config_check()
 
+
+def _use_tun_network_routing():
+    """让出站连接交给 Clash 虚拟网卡，不强制请求本地 HTTP 代理。"""
+    for name in (
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+        "http_proxy", "https_proxy", "all_proxy",
+    ):
+        os.environ.pop(name, None)
+
+
+# Clash 虚拟网卡会透明接管出站流量；若保留 .env.prod 中的 HTTP_PROXY，
+# HTTP 客户端会绕过虚拟网卡并强制连接本地代理端口，端口未监听时会断网。
+_use_tun_network_routing()
+
+# 机器人 HTTP API 仅供本机管理面板调用。Windows 当前保留 8082 所在范围，
+# 因此在 NoneBot 读取配置前固定为未保留的 18082；不修改 .env.prod。
+os.environ["HOST"] = "127.0.0.1"
+os.environ["PORT"] = "18082"
 nonebot.init()
 
 
@@ -287,8 +305,24 @@ driver.register_adapter(
 )
 
 
-nonebot.load_plugins(
-    "plugins"
+# 只加载真正包含事件处理器或 HTTP 路由的模块。
+# plugins 目录里还放有 paths/json_io/fetch 等内部工具；它们会被下面
+# 的业务插件作为依赖正常导入，但不应被 NoneBot 再次当成插件扫描。
+BOT_PLUGIN_MODULES = (
+    "plugins.backfill",
+    "plugins.backfill_api",
+    "plugins.command",
+    "plugins.health_api",
+    "plugins.manage",
+    "plugins.qq_fwd",
+    "plugins.registration",
+    "plugins.relay",
+    "plugins.scheduled_message",
+    "plugins.x_rss",
+)
+nonebot.load_all_plugins(
+    BOT_PLUGIN_MODULES,
+    [],
 )
 
 

@@ -170,6 +170,40 @@ async function jpost(url, body) {
   return r.json();
 }
 
+function openBackupRestore() {
+  document.getElementById("backupRestoreModal").style.display = "flex";
+}
+function closeBackupRestore() {
+  document.getElementById("backupRestoreModal").style.display = "none";
+}
+async function exportBackup() {
+  await ensurePanelToken();
+  const runtime = document.getElementById("backupIncludeRuntime").checked;
+  const r = await fetch("/api/backup/export?include_runtime_state=" + (runtime ? "true" : "false"), {
+    headers: {"X-WRelay-Token": panelToken},
+  });
+  if (!r.ok) throw new Error("导出失败");
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement("a");
+  a.href = url; a.download = "wrelay-backup.zip"; a.click();
+  setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+}
+async function restoreBackup() {
+  const file = document.getElementById("backupRestoreFile").files[0];
+  if (!file) { showAlert("恢复配置", "请先选择 ZIP 备份文件"); return; }
+  const runtime = document.getElementById("backupIncludeRuntime").checked;
+  if (runtime && !confirm("风险提示：恢复游标或重试队列可能造成重复投递、漏发或改变待补发状态。确定继续吗？")) return;
+  await ensurePanelToken();
+  const r = await fetch("/api/backup/restore?include_runtime_state=" + (runtime ? "true" : "false") + "&confirm_runtime_state=" + (runtime ? "true" : "false"), {
+    method: "POST", headers: {"Content-Type": "application/zip", "X-WRelay-Token": panelToken}, body: file,
+  });
+  const data = await r.json();
+  if (!r.ok || !data.ok) throw new Error(data.msg || "恢复失败");
+  closeBackupRestore();
+  await refreshSettings();
+  showAlert("恢复配置", data.msg || "恢复完成");
+}
+
 // 运行日志自动跟随：仅当用户已在日志底部时新日志才滚到底部，向上翻阅时暂停，滚回底部自动恢复
 var logFollow = true;
 document.getElementById("log").addEventListener("scroll", function () {
@@ -255,6 +289,16 @@ function renderBackfillToggle(on) {
     ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
     : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
   btn.innerHTML = icon + "<span>启用补发</span>";
+}
+
+function renderFailureNotificationToggle(on) {
+  const btn = document.getElementById("btnFailureNotificationToggle");
+  if (!btn) return;
+  btn.dataset.on = on ? "1" : "0";
+  const icon = on
+    ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
+    : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+  btn.innerHTML = icon + "<span>失败通知</span>";
 }
 
 let scheduledMessageDraft = null;
@@ -1020,12 +1064,16 @@ function renderSettings() {
         '</td>' +
         '<td style="font-size:12px;">' + escapeHtml(uacc) + '</td>' +
         '<td class="mono">' + escapeHtml(u.openid) + '</td>' +
-        '<td style="text-align:right"><button class="danger rowicon" data-kind="userDel" data-i="' + ui + '">' + SVG_TRASH + '</button></td>';
+        '<td><div style="display:flex;gap:4px;justify-content:flex-end;">' +
+        '<button class="sec rowicon' + (u.failure_notification ? ' filter-active' : '') + '" title="接收失败通知" aria-label="接收失败通知" data-kind="failureRecipient" data-i="' + ui + '">' + SVG_FUNNEL + '</button>' +
+        '<button class="danger rowicon" data-kind="userDel" data-i="' + ui + '">' + SVG_TRASH + '</button>' +
+        '</div></td>';
       ub.appendChild(tr);
     });
   }
   // 离线补发设置
   renderBackfillToggle(settings.backfill_enabled !== false);
+  renderFailureNotificationToggle(!!(settings.failure_notification && settings.failure_notification.enabled));
   const bfLimit = document.getElementById("backfillLimit");
   if (bfLimit) bfLimit.value = Number(settings.backfill_limit) > 0 ? settings.backfill_limit : 10;
   renderScheduledMessage(settings.scheduled_message);
@@ -1049,6 +1097,37 @@ function renderAIControls() {
   renderTranslationToggle((settings.discord_channels || []).length > 0 && (settings.discord_channels || []).every(function (channel) {
     return channel.translation_enabled === true;
   }));
+}
+
+function aiProfilesForDisplay() {
+  if (settings && Array.isArray(settings.ai_profiles) && settings.ai_profiles.length) {
+    return settings.ai_profiles;
+  }
+  const ai = (settings && settings.ai) || {};
+  return [{
+    id: "default",
+    name: "默认 AI",
+    base_url: ai.base_url || "",
+    model: ai.model || "",
+    api_key_env: ai.api_key_env || "WRELAY_AI_API_KEY",
+    timeout_seconds: Number(ai.timeout_seconds) > 0 ? ai.timeout_seconds : 25,
+    max_output_tokens: Number(ai.max_output_tokens) > 0 ? ai.max_output_tokens : 800,
+  }];
+}
+
+function currentAiProfileId() {
+  const profiles = aiProfilesForDisplay();
+  const active = settings && String(settings.ai_active_profile || "");
+  return profiles.some(function (profile) { return String(profile.id) === active; })
+    ? active
+    : String(profiles[0].id);
+}
+
+function syncLegacyAiConfig(profile) {
+  settings.ai = Object.assign({}, settings.ai || {});
+  ["base_url", "model", "api_key_env", "timeout_seconds", "max_output_tokens"].forEach(function (key) {
+    if (profile[key] !== undefined) settings.ai[key] = profile[key];
+  });
 }
 
 function renderTranslationToggle(on) {
@@ -1365,6 +1444,105 @@ async function refreshXStatus() {
   try {
     renderXStatus(await jget("/api/xrss/status"));
   } catch (err) { /* 面板瞬断：保留当前显示，下一轮覆盖 */ }
+}
+
+// ---------------- 消息追踪（近期投递结果，只读） ----------------
+function messageTraceTime(ts) {
+  const d = new Date(Number(ts || 0) * 1000);
+  if (!Number.isFinite(d.getTime()) || !ts) return "—";
+  const time = d.toLocaleTimeString("zh-CN", {hour12: false});
+  return d.toDateString() === new Date().toDateString()
+    ? time
+    : d.toLocaleDateString("zh-CN") + " " + time;
+}
+
+function messageTraceSource(entry) {
+  const kind = String(entry.source_kind || "other");
+  const id = String(entry.source_id || entry.channel_id || "");
+  if (kind === "x_rss") {
+    const source = ((settings && settings.x_rss_sources) || []).find(function (item) {
+      return xSourceKey(item.source) === id;
+    });
+    return {name: "X RSS", id: (source && source.name) || id || "未知来源"};
+  }
+  if (kind === "discord") {
+    return {name: "Discord", id: channelNames[id] || id || "未知频道"};
+  }
+  return {name: "系统消息", id: "手动或定时发送"};
+}
+
+function messageTraceGroupName(openid) {
+  const group = ((settings && settings.qq_group_openids) || []).find(function (item) {
+    return String(item.openid) === String(openid);
+  });
+  return (group && (group.name || group.remark)) || identityName("groups", openid) || String(openid);
+}
+
+function messageTraceResult(entry) {
+  const delivered = Number(entry.delivered_count) || 0;
+  const total = Number(entry.target_count) || 0;
+  const result = entry.result || "failed";
+  if (result === "success") return {cls: "ok", text: "已送达 " + delivered + "/" + total};
+  if (result === "partial") return {cls: "partial", text: "部分送达 " + delivered + "/" + total};
+  if (result === "not_sent") return {cls: "pending", text: "未投递"};
+  if (result === "skipped") return {cls: "pending", text: "已跳过"};
+  return {cls: "failed", text: "投递失败 " + delivered + "/" + total};
+}
+
+function renderMessageTrace(data) {
+  const body = document.getElementById("messageTraceBody");
+  const summary = document.getElementById("messageTraceSummary");
+  if (!body || !summary) return;
+
+  if (!data || data.ok === false) {
+    summary.textContent = (data && data.msg) || "机器人未运行";
+    body.innerHTML = '<tr><td colspan="5" class="message-trace-empty">暂时无法读取投递记录</td></tr>';
+    return;
+  }
+
+  const entries = Array.isArray(data.entries) ? data.entries : [];
+  summary.textContent = entries.length ? "最近 " + entries.length + " 条投递" : "暂无投递记录";
+  if (!entries.length) {
+    body.innerHTML = '<tr><td colspan="5" class="message-trace-empty">暂无投递记录</td></tr>';
+    return;
+  }
+
+  body.innerHTML = entries.map(function (entry) {
+    const source = messageTraceSource(entry);
+    const groups = (entry.groups || []).map(function (group) {
+      const label = messageTraceGroupName(group.id);
+      return '<span class="message-trace-group' + (group.ok ? '' : ' failed') + '" title="' + escapeHtml(group.id) + '">' + escapeHtml(label) + '</span>';
+    }).join("") || '<span class="pid">—</span>';
+    const result = messageTraceResult(entry);
+    const messageId = entry.message_id ? "消息 " + String(entry.message_id) : "未标记消息";
+    const preview = entry.preview || (Number(entry.media_count) > 0 ? "包含 " + entry.media_count + " 个媒体附件" : "无文本内容");
+    const note = entry.note ? '<div class="message-trace-note">' + escapeHtml(entry.note) + '</div>' : '';
+    return '<tr>' +
+      '<td class="message-trace-time">' + escapeHtml(messageTraceTime(entry.last_at)) + '</td>' +
+      '<td><div class="message-trace-source">' + escapeHtml(source.name) + '</div><div class="message-trace-source-id">' + escapeHtml(source.id) + '</div></td>' +
+      '<td><div class="message-trace-source-id">' + escapeHtml(messageId) + (Number(entry.attempts) > 1 ? ' · 重试 ' + (Number(entry.attempts) - 1) + ' 次' : '') + '</div><div class="message-trace-preview" title="' + escapeHtml(preview) + '">' + escapeHtml(preview) + '</div></td>' +
+      '<td><div class="message-trace-groups">' + groups + '</div></td>' +
+      '<td><span class="message-trace-result ' + result.cls + '">' + escapeHtml(result.text) + '</span>' + note + '</td>' +
+      '</tr>';
+  }).join("");
+}
+
+async function openMessageTrace() {
+  const modal = document.getElementById("messageTraceModal");
+  if (!modal) return;
+  modal.style.display = "flex";
+  await refreshMessageTrace();
+}
+
+function closeMessageTraceModal() {
+  const modal = document.getElementById("messageTraceModal");
+  if (modal) modal.style.display = "none";
+}
+
+async function refreshMessageTrace() {
+  try {
+    renderMessageTrace(await jget("/api/message-trace?limit=50"));
+  } catch (err) { /* 面板瞬断：保留上一份追踪 */ }
 }
 
 // 「注册 X 转发账号」二级窗口：主界面的两个输入框移入此弹窗。
@@ -2388,11 +2566,86 @@ async function saveQQConfig() {
 // ---------- 翻译服务配置弹窗 ----------
 function closeTranslationConfigModal() {
   document.getElementById("translationConfigModal").style.display = "none";
+  aiProfileDraft = null;
 }
+let aiProfileDraft = null;
+
+function cloneAiProfileDraft() {
+  const profiles = aiProfilesForDisplay().map(function (profile) { return Object.assign({}, profile); });
+  const active = currentAiProfileId();
+  const apiKeys = {};
+  profiles.forEach(function (profile) {
+    // 旧版误把密钥填进 api_key_env 时，迁移到临时密码框并恢复合法变量名；
+    // 密钥只在当前页面内存中保留，保存时写入 .env.prod。
+    if (profile.api_key_env && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(String(profile.api_key_env))) {
+      apiKeys[String(profile.id)] = String(profile.api_key_env);
+      profile.api_key_env = "WRELAY_AI_API_KEY";
+    }
+  });
+  return {profiles: profiles, active: active, apiKeys: apiKeys};
+}
+
+function activeAiDraftProfile() {
+  if (!aiProfileDraft) return null;
+  return aiProfileDraft.profiles.find(function (profile) {
+    return String(profile.id) === String(aiProfileDraft.active);
+  }) || null;
+}
+
+function renderAiProfileEditor() {
+  if (!aiProfileDraft) return;
+  const select = document.getElementById("aiProfileSelect");
+  const profile = activeAiDraftProfile();
+  if (!select || !profile) return;
+  select.innerHTML = aiProfileDraft.profiles.map(function (item) {
+    const model = item.model ? " · " + item.model : "";
+    return '<option value="' + escapeHtml(String(item.id)) + '">' + escapeHtml(String(item.name || item.id)) + escapeHtml(model) + '</option>';
+  }).join("");
+  select.value = String(profile.id);
+  document.getElementById("aiProfileName").value = profile.name || "";
+  document.getElementById("aiBaseUrl").value = profile.base_url || "";
+  document.getElementById("aiModel").value = profile.model || "";
+  document.getElementById("aiApiKeyEnv").value = profile.api_key_env || "WRELAY_AI_API_KEY";
+  document.getElementById("aiApiKey").value = (aiProfileDraft.apiKeys || {})[String(profile.id)] || "";
+  document.getElementById("aiProfileDelete").disabled = aiProfileDraft.profiles.length <= 1;
+  document.getElementById("aiApiTestStatus").textContent = "";
+}
+
+function captureAiApiKeyDraft() {
+  const profile = activeAiDraftProfile();
+  const input = document.getElementById("aiApiKey");
+  if (!profile || !input || !aiProfileDraft) return;
+  aiProfileDraft.apiKeys = aiProfileDraft.apiKeys || {};
+  aiProfileDraft.apiKeys[String(profile.id)] = input.value;
+}
+
+async function testAiApi() {
+  const button = document.getElementById("aiApiTest");
+  const status = document.getElementById("aiApiTestStatus");
+  const profile = activeAiDraftProfile();
+  if (!button || !status || !profile) return;
+  captureAiApiKeyDraft();
+  button.disabled = true;
+  status.textContent = "检测中…";
+  try {
+    const result = await jpost("/api/translation/ai-test", {
+      base_url: document.getElementById("aiBaseUrl").value.trim(),
+      model: document.getElementById("aiModel").value.trim(),
+      api_key_env: document.getElementById("aiApiKeyEnv").value.trim(),
+      api_key: (aiProfileDraft.apiKeys || {})[String(profile.id)] || "",
+      timeout_seconds: profile.timeout_seconds,
+    });
+    status.textContent = result.ok ? result.msg : (result.msg || "检测失败");
+  } catch (err) {
+    status.textContent = "检测请求失败";
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function openTranslationConfigModal() {
-  const ai = (settings && settings.ai) || {};
-  document.getElementById("aiBaseUrl").value = ai.base_url || "";
-  document.getElementById("aiModel").value = ai.model || "";
+  aiProfileDraft = cloneAiProfileDraft();
+  renderAiProfileEditor();
   document.getElementById("tencentSecretId").value = "";
   document.getElementById("tencentSecretKey").value = "";
   document.getElementById("tencentConfigStatus").textContent = "TMT 配置状态读取中……";
@@ -2412,11 +2665,17 @@ async function openTranslationConfigModal() {
   }
 }
 async function saveTranslationConfig() {
-  settings.ai = settings.ai || {};
+  const profile = activeAiDraftProfile();
+  if (!profile) { showAlert("保存失败", "请先新增或选择一个 AI 配置"); return; }
+  profile.name = document.getElementById("aiProfileName").value.trim();
+  profile.base_url = document.getElementById("aiBaseUrl").value.trim();
+  profile.model = document.getElementById("aiModel").value.trim();
+  profile.api_key_env = document.getElementById("aiApiKeyEnv").value.trim();
+  captureAiApiKeyDraft();
+  const apiKey = (aiProfileDraft.apiKeys || {})[String(profile.id)] || "";
+  if (!profile.name) { showAlert("保存失败", "配置名称不能为空"); return; }
+  if (!profile.api_key_env) { showAlert("保存失败", "API 密钥环境变量名不能为空"); return; }
   settings.tencent_tmt = settings.tencent_tmt || {};
-  // 服务是否可用由地址、模型和密钥决定；不再提供服务级启用开关。
-  settings.ai.base_url = document.getElementById("aiBaseUrl").value.trim();
-  settings.ai.model = document.getElementById("aiModel").value.trim();
   const saveBtn = document.getElementById("translationConfigSave");
   const cancelBtn = document.getElementById("translationConfigCancel");
   saveBtn.disabled = true;
@@ -2434,6 +2693,22 @@ async function saveTranslationConfig() {
     showAlert("保存失败", (envResult && envResult.msg) || "保存腾讯 TMT 密钥失败");
     return;
   }
+  let aiEnvResult;
+  try {
+    aiEnvResult = await jpost("/api/translation/ai-env", {
+      env_name: profile.api_key_env,
+      api_key: apiKey,
+    });
+  } catch (e) { aiEnvResult = {ok: false, msg: "保存失败，请重试"}; }
+  if (!aiEnvResult || !aiEnvResult.ok) {
+    saveBtn.disabled = false;
+    cancelBtn.disabled = false;
+    showAlert("保存失败", (aiEnvResult && aiEnvResult.msg) || "保存 AI API 密钥失败");
+    return;
+  }
+  settings.ai_profiles = aiProfileDraft.profiles;
+  settings.ai_active_profile = aiProfileDraft.active;
+  syncLegacyAiConfig(profile);
   const saved = await saveAndReload();
   if (!saved) {
     saveBtn.disabled = false;
@@ -2525,6 +2800,9 @@ document.addEventListener("click", async function (e) {
         scheduledMessageDraft = null;
         document.getElementById("scheduledMessageContentModal").style.display = "none";
       },
+      messageTraceModal: closeMessageTraceModal,
+      diagnosticModal: closeDiagnosticModal,
+      backupRestoreModal: closeBackupRestore,
     };
     const closer = closeMap[btn.dataset.close];
     if (closer) closer();
@@ -2533,6 +2811,97 @@ document.addEventListener("click", async function (e) {
   if (btn.dataset.hint) {
     const tip = document.getElementById(btn.dataset.hint);
     showAlert(btn.dataset.title, (tip && tip.textContent) || "当前无附加说明。");
+    return;
+  }
+  if (btn.id === "aiProfileAdd") {
+    if (!aiProfileDraft) aiProfileDraft = cloneAiProfileDraft();
+    const source = activeAiDraftProfile() || {};
+    const id = "ai_" + Date.now();
+    aiProfileDraft.profiles.push({
+      id: id,
+      name: "新 AI 配置",
+      base_url: source.base_url || "",
+      model: source.model || "",
+      api_key_env: source.api_key_env || "WRELAY_AI_API_KEY",
+      timeout_seconds: Number(source.timeout_seconds) > 0 ? source.timeout_seconds : 25,
+      max_output_tokens: Number(source.max_output_tokens) > 0 ? source.max_output_tokens : 800,
+    });
+    aiProfileDraft.apiKeys = aiProfileDraft.apiKeys || {};
+    aiProfileDraft.apiKeys[id] = "";
+    aiProfileDraft.active = id;
+    renderAiProfileEditor();
+    return;
+  }
+  if (btn.id === "aiApiTest") {
+    await testAiApi();
+    return;
+  }
+  if (btn.id === "aiProfileDelete") {
+    if (!aiProfileDraft || aiProfileDraft.profiles.length <= 1) return;
+    const index = aiProfileDraft.profiles.findIndex(function (profile) {
+      return String(profile.id) === String(aiProfileDraft.active);
+    });
+    if (index >= 0) aiProfileDraft.profiles.splice(index, 1);
+    if (aiProfileDraft.apiKeys) delete aiProfileDraft.apiKeys[String(aiProfileDraft.active)];
+    aiProfileDraft.active = String((aiProfileDraft.profiles[Math.max(0, index - 1)] || aiProfileDraft.profiles[0]).id);
+    renderAiProfileEditor();
+    return;
+  }
+  if (btn.id === "btnOpenMessageTrace") {
+    btn.disabled = true;
+    try {
+      await openMessageTrace();
+    } finally {
+      btn.disabled = false;
+    }
+    return;
+  }
+  if (btn.id === "btnBackupRestore") { openBackupRestore(); return; }
+  if (btn.id === "btnBackupExport") {
+    try { await exportBackup(); } catch (err) { showAlert("导出备份", err.message || "导出失败"); }
+    return;
+  }
+  if (btn.id === "btnBackupRestoreConfirm") {
+    try { await restoreBackup(); } catch (err) { showAlert("恢复配置", err.message || "恢复失败"); }
+    return;
+  }
+  if (btn.id === "btnMessageTraceRefresh") {
+    btn.disabled = true;
+    try {
+      await refreshMessageTrace();
+    } finally {
+      btn.disabled = false;
+    }
+    return;
+  }
+  if (btn.id === "btnOpenDiagnostic") {
+    btn.disabled = true;
+    try {
+      await openDiagnostic();
+    } finally {
+      btn.disabled = false;
+    }
+    return;
+  }
+  if (btn.id === "btnDiagnosticRefresh") {
+    btn.disabled = true;
+    try {
+      await refreshDiagnostic();
+    } catch (err) {
+      showAlert("诊断失败", "暂时无法读取诊断状态，请稍后重试。");
+    } finally {
+      btn.disabled = false;
+    }
+    return;
+  }
+  if (btn.id === "btnFailureNotificationToggle") {
+    if (!settings) return;
+    settings.failure_notification = Object.assign(
+      {cooldown_seconds: 900},
+      settings.failure_notification || {},
+      {enabled: btn.dataset.on !== "1"},
+    );
+    await saveAndReload();
     return;
   }
   if (btn.id === "translationSourceEnabled") {
@@ -2756,6 +3125,13 @@ document.addEventListener("click", async function (e) {
   if (k === "fgGroupRemove") {
     removeFgMember(FG_DISCORD, btn.dataset.id, "groups");
     return;
+  } else if (k === "failureRecipient") {
+    const u = settings.qq_user_openids[Number(btn.dataset.i)];
+    if (u) {
+      u.failure_notification = !u.failure_notification;
+      await saveAndReload();
+    }
+    return;
   } else if (k === "userDel") {
     const idx = Number(btn.dataset.i);
     const u = settings.qq_user_openids[idx];
@@ -2898,6 +3274,14 @@ document.addEventListener("click", async function (e) {
 
 document.addEventListener("change", async function (e) {
   const el = e.target;
+  if (el.id === "aiProfileSelect") {
+    if (aiProfileDraft) {
+      captureAiApiKeyDraft();
+      aiProfileDraft.active = el.value;
+      renderAiProfileEditor();
+    }
+    return;
+  }
   if (el.id === "translationProvider" || el.id === "translationFallback") {
     if (el.id === "translationProvider") syncTranslationFallback("translationProvider", "translationFallback");
     saveAIControls();
@@ -3066,10 +3450,62 @@ document.addEventListener("click", function (e) {
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
 let lastBackfillSeq = 0;
+let latestStatus = null;
+
+function renderDiagnostic(st) {
+  const body = document.getElementById("diagnosticBody");
+  if (!body) return;
+  const health = (st && st.health) || {};
+  const retry = health.retry || {};
+  const rows = [
+    ["机器人进程", st && st.running ? "运行中" : "未运行", !!(st && st.running)],
+    ["Discord 连接", health.discord ? "已连接" : "未连接", !!health.discord],
+    ["QQ 连接", health.qq ? "已连接" : "未连接", !!health.qq],
+    ["待重试投递", Number(retry.pending_entries || 0) ? String(retry.pending_entries) + " 条" : "无", !Number(retry.pending_entries || 0)],
+  ];
+  body.innerHTML = "";
+  rows.forEach(function (row) {
+    const item = document.createElement("div");
+    item.className = "diagnostic-row";
+    const label = document.createElement("span");
+    label.textContent = row[0];
+    const value = document.createElement("span");
+    value.className = "diagnostic-result " + (row[2] ? "ok" : "warn");
+    value.textContent = row[1];
+    item.append(label, value);
+    body.appendChild(item);
+  });
+}
+
+async function refreshDiagnostic() {
+  const st = await jget("/api/status");
+  latestStatus = st;
+  renderStatus(st);
+  renderDiagnostic(st);
+}
+
+async function openDiagnostic() {
+  const modal = document.getElementById("diagnosticModal");
+  if (!modal) return;
+  modal.style.display = "flex";
+  if (latestStatus) renderDiagnostic(latestStatus);
+  try {
+    await refreshDiagnostic();
+  } catch (err) {
+    const body = document.getElementById("diagnosticBody");
+    if (body) body.textContent = "暂时无法读取诊断状态，请稍后刷新。";
+  }
+}
+
+function closeDiagnosticModal() {
+  const modal = document.getElementById("diagnosticModal");
+  if (modal) modal.style.display = "none";
+}
 
 async function refreshStatus() {
   try {
     const st = await jget("/api/status");
+    latestStatus = st;
     renderStatus(st);
     // 同步补发开关/上限（QQ 私聊指令可能改动 settings.json）；
     // 正在编辑的控件不覆盖，避免打断用户输入
@@ -3121,6 +3557,8 @@ async function init() {
   // X RSS 状态卡片：独立轻量轮询（只更新卡片文本，10 秒足够）
   await refreshXStatus();
   setInterval(refreshXStatus, 10000);
+  await refreshMessageTrace();
+  setInterval(refreshMessageTrace, 10000);
 }
 
 init();

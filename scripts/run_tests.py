@@ -12,15 +12,26 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = (
     "test_fetch_reference.py",
+    "test_fetch_video.py",
     "test_retry_recovery.py",
+    "test_startup_relay_race.py",
     "test_send_failure_logs.py",
+    "test_failure_notification.py",
+    "test_message_trace.py",
     "test_x_forwarding_groups.py",
     "test_x_poll_concurrency.py",
+    "test_x_rss_fetch_retry.py",
+    "test_x_rss_syndication_fallback.py",
+    "test_x_rss_empty_item_skip.py",
     "test_translation.py",
     "test_forward_service.py",
     "test_http_clients.py",
+    "test_ai_model_fallback.py",
+    "test_discord_rest_retry.py",
     "test_panel_safety.py",
+    "test_backup_restore.py",
     "test_persistence_safety.py",
+    "test_tun_network_routing.py",
 )
 
 

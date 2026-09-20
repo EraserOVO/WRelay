@@ -25,6 +25,7 @@ from plugins.retry import (
     send_and_record,
     schedule_retry,
 )
+from plugins.relay_inflight import is_processing
 from plugins.stats import record
 from plugins.dedup import (
     normalize_channel_map,
@@ -188,6 +189,17 @@ async def _backfill_channel(channel_id, channel_name, active_groups, limit):
         message_id = msg.get("message_id")
 
         if not message_id:
+            continue
+
+        # 实时事件从入队起就持有在途标记。启动瞬间若该消息已由实时
+        # 路径开始渲染，补发不能再走同一条发送链路；实时失败会进入
+        # 既有延迟重试/下次补发兜底，成功则会推进游标。
+        if is_processing(channel_id, message_id):
+            logger.debug(
+                "启动补发: 实时路径正在处理，跳过: {} {}",
+                channel_id,
+                message_id,
+            )
             continue
 
         # 逐条前重读最新记录，实时转发已处理的群自动跳过

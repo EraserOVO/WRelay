@@ -35,10 +35,13 @@
         <span id="stats" class="pid"></span>
       </div>
       <div class="row" style="margin-top:10px;">
-        <button id="btnStart">启动机器人</button>
-        <button id="btnStop" class="danger">停止机器人</button>
-        <button id="btnRestart" class="sec">重启机器人</button>
-        <button id="btnAutostart" class="sec" style="margin-left:auto"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg><span>开机自启</span></button>
+        <button id="btnStart" class="panel-action-icon" type="button" title="启动机器人" aria-label="启动机器人"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 5 11 7-11 7z"/></svg></button>
+        <button id="btnStop" class="danger panel-action-icon" type="button" title="停止机器人" aria-label="停止机器人"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg></button>
+        <button id="btnRestart" class="sec panel-action-icon" type="button" title="重启机器人" aria-label="重启机器人"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></button>
+        <button id="btnBackupRestore" class="sec panel-action-icon" type="button" title="安全备份与恢复" aria-label="安全备份与恢复"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M14 3v5h5M8 13h8M8 17h8"/></svg></button>
+        <button id="btnOpenDiagnostic" class="sec panel-action-icon" type="button" title="连接诊断" aria-label="连接诊断"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M12 11v5M9.5 13.5h5"/></svg></button>
+        <button id="btnFailureNotificationToggle" class="sec" type="button"><span>失败通知</span></button>
+        <button id="btnAutostart" class="sec"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg><span>开机自启</span></button>
       </div>
       <div class="hint" id="managedHint" style="display:none"></div>
     </div>
@@ -155,14 +158,14 @@
     <h2 style="display:flex;justify-content:space-between;align-items:center;"><span style="display:flex;align-items:center;gap:6px;">白名单 <button class="hintbtn" data-hint="hint-user" data-title="白名单">?</button></span> <button class="foldbtn" data-fold="userList" aria-label="展开/折叠"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 5l8 14H4z"/></svg></button></h2>
     <div id="userContent">
       <table id="userList" style="table-layout:fixed">
-        <thead><tr><th style="width:1.6%"></th><th style="width:2.3%;text-align:center"><input type="checkbox" id="userAllEnabled"></th><th style="width:11.2%">名称</th><th style="width:18%">账号</th><th style="width:13%">User OpenID</th><th style="width:3.5%"></th></tr></thead>
+        <thead><tr><th style="width:1.6%"></th><th style="width:2.3%;text-align:center"><input type="checkbox" id="userAllEnabled"></th><th style="width:11.2%">名称</th><th style="width:18%">账号</th><th style="width:13%">User OpenID</th><th style="width:8%"></th></tr></thead>
         <tbody id="userBody"></tbody>
       </table>
       <div class="row addrow">
         <button id="btnAddUser">＋ 新增</button>
         <button id="btnSyncUsers" class="sec">注册审核</button>
       </div>
-      <div class="hint" id="hint-user" style="display:none">仅启用的用户可使用 relay 命令。注册审核通过后，还需点击「＋ 新增」加入白名单；删除注册记录后需重新注册。</div>
+      <div class="hint" id="hint-user" style="display:none">仅启用的用户可使用 relay 命令。点击右侧漏斗图标可指定该用户接收投递失败通知。注册审核通过后，还需点击「＋ 新增」加入白名单；删除注册记录后需重新注册。</div>
     </div>
   </div>
 
@@ -303,8 +306,8 @@
       <h2 style="display:flex;align-items:center;gap:6px;">X 自动翻译 <button class="hintbtn" data-hint="hint-x-auto-translation" data-title="X 自动翻译">?</button></h2>
       <div class="auto-translation-section">
         <div class="row auto-translation-fields">
-          <label class="auto-translation-field"><span>首选方式</span><select id="xTranslationProvider"><option value="tencent_tmt">腾讯 TMT</option><option value="ai">AI API</option></select></label>
-          <label class="auto-translation-field"><span>次选方式</span><select id="xTranslationFallback"><option value="ai">AI API</option><option value="tencent_tmt">腾讯 TMT</option><option value="">仅原文</option></select></label>
+        <label class="auto-translation-field"><span>首选方式</span><select id="xTranslationProvider"><option value="tencent_tmt">腾讯 TMT</option><option value="ai">AI API</option></select></label>
+        <label class="auto-translation-field"><span>次选方式</span><select id="xTranslationFallback"><option value="ai">AI API</option><option value="tencent_tmt">腾讯 TMT</option><option value="">仅原文</option></select></label>
         </div>
       </div>
       <div class="row auto-translation-actions">
@@ -365,10 +368,44 @@
           <option value="WARNING">WARNING</option>
           <option value="ERROR">ERROR</option>
         </select>
+        <button id="btnOpenMessageTrace" class="sec" type="button">消息追踪</button>
         <button id="btnClearLog" class="sec">清空日志</button>
       </div>
+  </div>
+</div>
+
+<div id="diagnosticModal" class="diagnostic-modal" style="display:none;">
+  <div class="diagnostic-dialog" role="dialog" aria-modal="true" aria-labelledby="diagnosticTitle">
+    <button type="button" class="modal-x" data-close="diagnosticModal" aria-label="关闭">×</button>
+    <div class="diagnostic-toolbar">
+      <h3 id="diagnosticTitle">连接诊断</h3>
+      <button id="btnDiagnosticRefresh" class="sec rowicon" type="button" title="刷新诊断" aria-label="刷新诊断"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></button>
+    </div>
+    <div id="diagnosticBody" class="diagnostic-list" aria-live="polite"></div>
+  </div>
+</div>
+
+<div id="messageTraceModal" class="message-trace-modal" style="display:none;">
+  <div class="message-trace-dialog" role="dialog" aria-modal="true" aria-labelledby="messageTraceTitle">
+    <button type="button" class="modal-x" data-close="messageTraceModal" aria-label="关闭">×</button>
+    <div class="message-trace-toolbar">
+      <div>
+        <h3 id="messageTraceTitle">消息追踪</h3>
+        <p>查看最近 50 条投递结果与重试状态。</p>
+      </div>
+      <div class="message-trace-actions">
+        <span id="messageTraceSummary" class="pid">加载中…</span>
+        <button id="btnMessageTraceRefresh" class="sec rowicon" type="button" title="刷新消息追踪" aria-label="刷新消息追踪"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 0 15 6.7L3 16"/></svg></button>
+      </div>
+    </div>
+    <div class="tablewrap message-trace-wrap">
+      <table class="message-trace-table">
+        <thead><tr><th>时间</th><th>来源</th><th>消息</th><th>目标群</th><th>结果</th></tr></thead>
+        <tbody id="messageTraceBody"><tr><td colspan="5" class="message-trace-empty">暂无投递记录</td></tr></tbody>
+      </table>
     </div>
   </div>
+</div>
 
 <div id="confirmModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;align-items:center;justify-content:center;">
   <div style="position:relative;background:var(--modal-bg);border:1px solid var(--modal-border);border-radius:10px;padding:18px;max-width:480px;width:90%;max-height:70vh;display:flex;flex-direction:column;">
@@ -378,6 +415,20 @@
     <div style="display:flex;gap:10px;justify-content:flex-end;">
       <button id="confirmOk">确认添加</button>
     </div>
+  </div>
+</div>
+<div id="backupRestoreModal" class="backup-modal" style="display:none;">
+  <div class="backup-dialog" role="dialog" aria-modal="true" aria-labelledby="backupRestoreTitle">
+    <button type="button" class="modal-x" data-close="backupRestoreModal" aria-label="关闭">×</button>
+    <div class="backup-title"><h3 id="backupRestoreTitle">安全备份与恢复</h3></div>
+    <p class="backup-note">默认仅处理面板配置 <code>settings.json</code>。</p>
+    <label class="backup-runtime"><input id="backupIncludeRuntime" type="checkbox"> <span>包含运行状态（游标和重试队列）</span></label>
+    <div class="backup-actions">
+      <button id="btnBackupExport" class="sec" type="button">导出 ZIP</button>
+      <label class="sec backup-file-select">选择 ZIP<input id="backupRestoreFile" type="file" accept="application/zip,.zip"></label>
+      <button id="btnBackupRestoreConfirm" class="danger" type="button">恢复配置</button>
+    </div>
+    <p class="backup-warning">恢复运行状态可能造成重复投递、漏发或改变待补发状态。</p>
   </div>
 </div>
 <div id="filterModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;align-items:center;justify-content:center;">
@@ -461,21 +512,37 @@
   </div>
 </div>
 <div id="translationConfigModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;align-items:center;justify-content:center;">
-  <div style="position:relative;background:var(--modal-bg);border:1px solid var(--modal-border);border-radius:10px;padding:18px;max-width:460px;width:92%;display:flex;flex-direction:column;">
+  <div class="translation-config-dialog" style="position:relative;background:var(--modal-bg);border:1px solid var(--modal-border);border-radius:10px;padding:18px;max-width:460px;width:92%;display:flex;flex-direction:column;">
     <button type="button" class="modal-x" data-close="translationConfigModal" aria-label="关闭">×</button>
     <h3 style="margin:0 0 14px;">翻译服务配置</h3>
-    <h4 style="margin:0 0 10px;font-size:14px;">AI API</h4>
+    <h4 style="margin:0 0 10px;font-size:14px;">AI API 配置</h4>
+    <div class="ai-profile-toolbar">
+      <label for="aiProfileSelect">已保存配置</label>
+      <select id="aiProfileSelect" aria-label="已保存的 AI API 配置"></select>
+      <button id="aiProfileAdd" class="sec" type="button">新增</button>
+      <button id="aiProfileDelete" class="danger" type="button">删除</button>
+    </div>
+    <label for="aiProfileName" style="font-size:13px;color:var(--muted);margin:14px 0 4px;">配置名称</label>
+    <input type="text" id="aiProfileName" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
     <label for="aiBaseUrl" style="font-size:13px;color:var(--muted);margin-bottom:4px;">AI API 地址</label>
     <input type="text" id="aiBaseUrl" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
     <label for="aiModel" style="font-size:13px;color:var(--muted);margin:14px 0 4px;">AI 模型</label>
     <input type="text" id="aiModel" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
+    <label for="aiApiKeyEnv" style="font-size:13px;color:var(--muted);margin:14px 0 4px;">API 密钥环境变量名</label>
+    <input type="text" id="aiApiKeyEnv" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
+    <label for="aiApiKey" style="font-size:13px;color:var(--muted);margin:14px 0 4px;">API 密钥</label>
+    <input type="password" id="aiApiKey" autocomplete="new-password" spellcheck="false" placeholder="留空表示保持已保存的密钥" style="width:100%;box-sizing:border-box;">
+    <div style="display:flex;align-items:center;gap:10px;margin-top:10px;">
+      <button id="aiApiTest" class="sec" type="button">检测当前 API</button>
+      <span id="aiApiTestStatus" style="font-size:12px;color:var(--muted);" aria-live="polite"></span>
+    </div>
     <h4 style="margin:18px 0 10px;font-size:14px;">腾讯 TMT</h4>
     <label for="tencentSecretId" style="font-size:13px;color:var(--muted);margin-bottom:4px;">SecretId</label>
     <input type="text" id="tencentSecretId" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
     <label for="tencentSecretKey" style="font-size:13px;color:var(--muted);margin:14px 0 4px;">SecretKey</label>
     <input type="password" id="tencentSecretKey" autocomplete="new-password" spellcheck="false" style="width:100%;box-sizing:border-box;">
     <p id="tencentConfigStatus" style="font-size:12px;color:var(--muted);margin:10px 0 0;line-height:1.6;">TMT 配置状态读取中……</p>
-    <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.6;">翻译服务不再单独启用；左下角总开关打开后，首选方式和次选方式会按配置自动尝试。保存密钥后机器人会自动重启。</p>
+    <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.6;">密钥会写入对应环境变量，不会保存到 settings.json；留空表示保持当前密钥。在此窗口选择已保存配置并保存后即可切换模型。</p>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
       <button id="translationConfigCancel" class="sec">取消</button>
       <button id="translationConfigSave">保存</button>

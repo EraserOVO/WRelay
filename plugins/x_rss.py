@@ -27,7 +27,7 @@ import asyncio
 import re
 import threading
 import time
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import httpx
 
@@ -56,6 +56,7 @@ from plugins.history import (
 from plugins.dedup import (
     apply_baseline,
     apply_success,
+    apply_skipped,
     normalize_channel_map,
     select_target_groups,
 )
@@ -74,6 +75,13 @@ FEED_TIMEOUT = 30
 # RSSHub 请求属于外部 I/O：有限并发避免慢源拖住整轮，
 # 同时避免一次性并发过多触发 RSSHub/代理限流。
 X_POLL_CONCURRENCY = 4
+# RSSHub 的 429、5xx 和连接异常通常是短暂的；同一轮内做有限退避重试，
+# 避免把偶发故障直接延后到下一个完整轮询周期。非临时 4xx 不重试。
+FEED_MAX_ATTEMPTS = 3
+FEED_RETRY_DELAYS = (1, 3)
+# RSSHub 暂时不可用时使用 X 公开时间线作为回退，避免本地 RSSHub
+# 停止或 Twitter 路由短暂异常时整条 RSS 链路长期显示失败。
+SYNDICATION_BASE = "https://syndication.twitter.com/srv/timeline-profile/screen-name"
 
 # 运行时状态：每源的 ETag / 最近轮询时间（data/ 已在 .gitignore，
 # 文件首次轮询时自动创建，不进版本库）
@@ -84,12 +92,15 @@ X_STATE_FILE = data_path("x_rss.json")
 _posts_cache = {}
 _state_file_lock = threading.Lock()
 _feed_client = None
+_syndication_lock = asyncio.Lock()
 
 
 def _get_feed_client():
     global _feed_client
     if _feed_client is None:
-        _feed_client = httpx.AsyncClient(follow_redirects=True)
+        # .env.prod 的代理只服务 Discord；localhost RSSHub 必须直连，
+        # 否则代理会把连接失败改写成无上下文的 HTTP 502。
+        _feed_client = httpx.AsyncClient(follow_redirects=True, trust_env=False)
     return _feed_client
 
 
@@ -185,20 +196,68 @@ async def _fetch_feed(url, etag=None):
     headers = {"Accept-Encoding": "identity"}
     if etag:
         headers["If-None-Match"] = etag.removeprefix("W/")
-    try:
-        resp = await _get_feed_client().get(
-            url,
-            headers=headers,
-            timeout=FEED_TIMEOUT,
-        )
-    except Exception as exc:
-        return None, None, f"请求异常: {exc}"
+    last_error = ""
+    for attempt in range(FEED_MAX_ATTEMPTS):
+        try:
+            resp = await _get_feed_client().get(
+                url,
+                headers=headers,
+                timeout=FEED_TIMEOUT,
+            )
+        except Exception as exc:
+            last_error = f"请求异常: {exc}"
+            retriable = True
+        else:
+            if resp.status_code == 304:
+                return None, etag, None
+            if resp.status_code == 200:
+                return resp.content, resp.headers.get("etag"), None
+            last_error = f"HTTP {resp.status_code}"
+            retriable = resp.status_code == 429 or resp.status_code >= 500
 
-    if resp.status_code == 304:
-        return None, etag, None
-    if resp.status_code != 200:
-        return None, None, f"HTTP {resp.status_code}"
-    return resp.content, resp.headers.get("etag"), None
+        if not retriable or attempt + 1 >= FEED_MAX_ATTEMPTS:
+            break
+
+        delay = FEED_RETRY_DELAYS[min(attempt, len(FEED_RETRY_DELAYS) - 1)]
+        logger.warning(
+            "X RSS 拉取临时失败，将在 {} 秒后重试（{}/{}）: {}",
+            delay,
+            attempt + 1,
+            FEED_MAX_ATTEMPTS,
+            last_error,
+        )
+        await asyncio.sleep(delay)
+
+    # RSSHub 服务本身不可用时，回退到 X 的公开时间线接口。只有能从
+    # RSSHub 标准路径提取出用户名时才启用，避免改变自定义 RSS URL 行为。
+    match = re.search(r"/twitter/user/([^/?#]+)", str(url or ""))
+    if match:
+        handle = unquote(match.group(1)).lstrip("@")
+        fallback_url = f"{SYNDICATION_BASE}/{quote(handle, safe='')}"
+        try:
+            # X 公开时间线对同一出口的并发请求较敏感；同一轮多个源
+            # 回退时串行访问，避免把正常的 RSS 故障放大成 429。
+            async with _syndication_lock:
+                response = await _get_feed_client().get(
+                    fallback_url,
+                    headers={
+                        "Accept": "text/html,application/xhtml+xml",
+                        "User-Agent": "Mozilla/5.0 (WRelay RSS fallback)",
+                    },
+                    timeout=FEED_TIMEOUT,
+                )
+            if response.status_code == 200 and response.content:
+                # 公开时间线对不存在的用户也会返回 200 空页面；先校验
+                # __NEXT_DATA__，避免把无效源记录成 RSS 正常。
+                parse_feed(response.content)
+                logger.warning("RSSHub 不可用，已使用 X 公开时间线回退: {}", handle)
+                return response.content, None, None
+            fallback_error = f"HTTP {response.status_code}"
+        except Exception as exc:
+            fallback_error = f"请求异常: {exc}"
+        logger.warning("X 公开时间线回退失败（{}）: {}", handle, fallback_error)
+        last_error = f"{last_error}; 回退失败: {fallback_error}"
+    return None, None, last_error
 
 
 def is_x_status_url(text):
@@ -452,8 +511,16 @@ async def _send_posts(source, posts):
 
             rendered = await _render_post(post, name)
             if rendered is None:
-                # 空 item（正文与媒体全为空）本轮无法投递，计失败
-                failed_count += 1
+                # 空 item 或所有内容类型均被关闭时，不存在可恢复的发送
+                # 条件；标记为已处理，避免每轮 304 缓存都重复处理它。
+                logger.debug("X 推文无可发送内容，标记跳过: {} {}", name, post["id"])
+                await update_last_messages(
+                    lambda last: apply_skipped(
+                        normalize_channel_map(last, channel_key),
+                        targets,
+                        post["id"],
+                    )
+                )
                 continue
             text_parts, media_items = rendered
             text_parts = await translate_text_parts(
@@ -591,9 +658,10 @@ async def _poll_all():
 
     一轮结束后把聚合结果（完成时间/结果/新帖与发送计数）写入
     _runtime_status 供面板展示。状态文件的 read-modify-write 由锁保护。"""
+    # 没有启用目标群的源不需要拉取；否则关闭的路由仍会消耗 X 回退配额。
     sources = [
         s for s in get_x_rss_sources()
-        if s["enabled"]
+        if s["enabled"] and get_x_groups_for_source(s["key"])
     ]
     if not sources:
         return

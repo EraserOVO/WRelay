@@ -165,6 +165,10 @@ class SettingsModel(dict):
             },
             "backfill_enabled": True,
             "backfill_limit": 10,
+            "failure_notification": {
+                "enabled": False,
+                "cooldown_seconds": 900,
+            },
             "qq_appid": "",
             "qq_fwd_recency_limit": 1800,
             "qq_fwd_select_timeout": 60,
@@ -210,6 +214,10 @@ class SettingsModel(dict):
                 "timeout_seconds": 25,
                 "max_output_tokens": 800,
             },
+            # AI API 配置档案：保留上面的 ai 字段作为旧版兼容镜像，
+            # 当前请求由 ai_active_profile 指向的档案决定。
+            "ai_profiles": [],
+            "ai_active_profile": "",
             "tencent_tmt": {
                 "secret_id_env": "WRELAY_TENCENT_SECRET_ID",
                 "secret_key_env": "WRELAY_TENCENT_SECRET_KEY",
@@ -350,6 +358,19 @@ def validate_settings(
         if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
             return "backfill_limit 必须是正整数"
 
+    failure_notification = data.get("failure_notification")
+    if not isinstance(failure_notification, dict):
+        return "failure_notification 必须是对象"
+    if not isinstance(failure_notification.get("enabled"), bool):
+        return "failure_notification.enabled 必须是布尔值"
+    cooldown = failure_notification.get("cooldown_seconds")
+    if (
+        not isinstance(cooldown, int)
+        or isinstance(cooldown, bool)
+        or not 60 <= cooldown <= 86400
+    ):
+        return "failure_notification.cooldown_seconds 必须是 60 到 86400 之间的整数"
+
     scheduled = data.get("scheduled_message")
     if not isinstance(scheduled, dict):
         return "scheduled_message 必须是对象"
@@ -461,6 +482,38 @@ def validate_settings(
         value = ai.get(key)
         if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
             return "ai.%s 必须是正整数" % key
+
+    ai_profiles = data.get("ai_profiles", [])
+    if not isinstance(ai_profiles, list):
+        return "ai_profiles 必须是列表"
+    if len(ai_profiles) > 20:
+        return "ai_profiles 最多保留 20 个配置"
+    profile_ids = set()
+    for index, profile in enumerate(ai_profiles):
+        prefix = "ai_profiles[%d]" % index
+        if not isinstance(profile, dict):
+            return "%s 必须是对象" % prefix
+        for key in ("id", "name", "base_url", "model", "api_key_env"):
+            if not isinstance(profile.get(key), str):
+                return "%s.%s 必须是字符串" % (prefix, key)
+        profile_id = profile.get("id", "").strip()
+        if not profile_id:
+            return "%s.id 不能为空" % prefix
+        if profile_id in profile_ids:
+            return "%s.id 不能重复" % prefix
+        profile_ids.add(profile_id)
+        if not profile.get("name", "").strip():
+            return "%s.name 不能为空" % prefix
+        for key in ("timeout_seconds", "max_output_tokens"):
+            value = profile.get(key)
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                return "%s.%s 必须是正整数" % (prefix, key)
+    ai_active_profile = data.get("ai_active_profile", "")
+    if not isinstance(ai_active_profile, str):
+        return "ai_active_profile 必须是字符串"
+    if ai_active_profile and ai_active_profile not in profile_ids:
+        return "ai_active_profile 不存在"
+
     tmt = data.get("tencent_tmt")
     if not isinstance(tmt, dict):
         return "tencent_tmt 必须是对象"

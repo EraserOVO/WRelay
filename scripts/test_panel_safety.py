@@ -5,10 +5,13 @@
 """
 import asyncio
 import importlib.util
+import io
 import json
 import sys
 import tempfile
+from urllib.error import HTTPError
 from pathlib import Path
+from unittest.mock import patch
 
 from starlette.requests import Request
 from starlette.responses import Response
@@ -36,7 +39,7 @@ def make_request(path, headers=None):
         "headers": raw_headers,
         "query_string": b"",
         "scheme": "http",
-        "server": ("127.0.0.1", 8090),
+        "server": ("127.0.0.1", panel.PANEL_PORT),
         "client": ("127.0.0.1", 50000),
     })
 
@@ -60,6 +63,16 @@ def main():
     assert check_guard(
         "/api/status", {"X-WRelay-Token": panel.PANEL_TOKEN}
     ).status_code == 200
+    for path in (
+        "/api/backup/export",
+        "/api/backup/restore",
+        "/api/translation/ai-test",
+        "/api/translation/ai-env",
+    ):
+        assert check_guard(path, {}).status_code == 401
+        assert check_guard(
+            path, {"X-WRelay-Token": panel.PANEL_TOKEN}
+        ).status_code == 200
     print("PASS - 面板 Origin 与 API 令牌边界")
 
     valid_settings = panel.get_default_settings()
@@ -95,6 +108,70 @@ def main():
     assert panel._proc_exists(0) is False
     assert panel._proc_exists(2 ** 31 - 1) is False
     print("PASS - PID 无效值不会被判定为运行中")
+
+    class FakeResponse:
+        def __init__(self, body=b'{"choices":[{"message":{"content":"OK"}}]}'):
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return self.body
+
+    with patch.object(panel, "_read_env_secret", return_value="test-key"), patch(
+        "urllib.request.urlopen", return_value=FakeResponse()
+    ):
+        assert panel._probe_ai_api({
+            "base_url": "https://example.test/v1",
+            "model": "test-model",
+            "api_key_env": "WRELAY_TEST_KEY",
+            "timeout_seconds": 5,
+        }) == "test-model"
+    with patch.object(panel, "_read_env_secret", return_value=""), patch(
+        "urllib.request.urlopen", return_value=FakeResponse()
+    ):
+        assert panel._probe_ai_api({
+            "base_url": "https://example.test/v1",
+            "model": "test-model",
+            "api_key_env": "WRELAY_TEST_KEY",
+            "api_key": "typed-key",
+            "timeout_seconds": 5,
+        }) == "test-model"
+    http_error = HTTPError(
+        "https://example.test/v1/chat/completions",
+        400,
+        "Bad Request",
+        {},
+        io.BytesIO(b'{"error":{"message":"model is not supported"}}'),
+    )
+    with patch.object(panel, "_read_env_secret", return_value="test-key"), patch(
+        "urllib.request.urlopen", side_effect=[
+            http_error,
+            FakeResponse(b'{"data":[{"id":"DeepSeek-V4.1-Flash"}]}'),
+        ]
+    ):
+        try:
+            panel._probe_ai_api({
+                "base_url": "https://example.test/v1",
+                "model": "test-model",
+                "api_key_env": "WRELAY_TEST_KEY",
+                "timeout_seconds": 5,
+            })
+        except RuntimeError as exc:
+            assert str(exc) == "AI API 返回 HTTP 400：model is not supported；当前可用模型：DeepSeek-V4.1-Flash"
+        else:
+            raise AssertionError("HTTP 错误应包含服务端返回的安全说明")
+    try:
+        panel._probe_ai_api({"base_url": "", "model": "", "api_key_env": ""})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("缺失 AI API 配置应被拒绝")
+    print("PASS - AI API 检测使用最小请求且不暴露密钥")
 
 
 if __name__ == "__main__":

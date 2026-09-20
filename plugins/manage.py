@@ -27,7 +27,7 @@ from plugins.paths import data_path
 # =====================================================
 # 私聊管理命令
 #
-# 白名单内的 QQ 用户私聊 Bot，通过管理面板的 8090 API
+# 白名单内的 QQ 用户私聊 Bot，通过管理面板的 18090 API
 # 执行管理操作（状态/重启/模式/列表/补发），不在本进程
 # 内重复实现管理逻辑；面板是唯一的管理入口。
 #
@@ -38,7 +38,7 @@ from plugins.paths import data_path
 # =====================================================
 
 # 与管理面板 PANEL_PORT（panel/管理面板.pyw）保持一致
-PANEL_API_BASE = "http://127.0.0.1:8090"
+PANEL_API_BASE = "http://127.0.0.1:18090"
 PANEL_AUTH_FILE = data_path("panel_auth.json")
 
 
@@ -744,13 +744,13 @@ async def handle(
 
 
 # =====================================================
-# 群内 @ 机器人的未知命令提示
+# 群内空白消息
 #
-# 本部署下 QQ 平台不下发 GROUP_AT_MESSAGE_CREATE 事件：@机器人的消息
-# 以「整条消息只有空文本」的 GroupMessageCreateEvent 送达（@指向与
-# @后的文字都不在 content / mentions 里，没有任何标记）。因此用该
-# 形态识别被 @，命中时回复「未知命令，输入 list 查看可用命令」，
-# 避免群里 @ 机器人后静默无响应。
+# QQ 平台在本部署下可能把 @机器人的消息和普通空格消息都下发为
+# 「整条消息只有空文本」的 GroupMessageCreateEvent，且没有 mentions
+# 可供区分。不能在没有可靠 @ 标记时回复，否则普通空格会被误判。
+# 因此空白群消息一律静默；有实际文本的 relay / register-group 等命令
+# 仍由各自处理器正常响应。
 #
 # 正常文字消息、图片/语音等附件消息、@其他成员的消息、机器人自己的
 # 消息都不会是这种形态，不会误触发；该用户存在进行中的 relay 转发
@@ -800,13 +800,6 @@ async def handle_group_at_hint(
         # 有实际文本：交给 list / relay / register-group 等命令处理
         return
 
-    if qq_fwd.has_pending(
-        event.group_openid,
-        event.author.member_openid
-    ):
-        return
-
-    await bot.send(
-        event,
-        "未知命令，输入 list 查看可用命令"
-    )
+    # 无法安全区分“仅 @机器人”和普通空格，保持静默。
+    # pending relay 的空白内容也继续由 qq_fwd 自行处理。
+    return

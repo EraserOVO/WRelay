@@ -147,7 +147,33 @@ def get_x_source_filter(source_key):
 
 
 def get_ai_config():
-    return _setting_object("ai")
+    data = _load_settings()
+    config = dict(data.get("ai") or {})
+    profiles = data.get("ai_profiles")
+    active_id = str(data.get("ai_active_profile") or "").strip()
+    selected = None
+    if isinstance(profiles, list):
+        for profile in profiles:
+            if not isinstance(profile, dict):
+                continue
+            if active_id and str(profile.get("id") or "") == active_id:
+                selected = profile
+                break
+        if selected is None and profiles:
+            selected = profiles[0] if isinstance(profiles[0], dict) else None
+    if selected is not None:
+        for key in (
+            "base_url",
+            "model",
+            "api_key_env",
+            "timeout_seconds",
+            "max_output_tokens",
+        ):
+            if key in selected:
+                config[key] = selected[key]
+        config["_profile_id"] = str(selected.get("id") or "")
+        config["_profile_name"] = str(selected.get("name") or "")
+    return config
 
 
 def get_tencent_tmt_config():
@@ -537,6 +563,39 @@ def get_active_user_openids():
                 active.append(str(item["openid"]))
         return active
     return []
+
+
+def get_failure_notification_config():
+    """返回失败通知设置；配置缺失或异常时安全地保持关闭。"""
+    data = _load_settings()
+    value = data.get("failure_notification")
+    if not isinstance(value, dict):
+        return {"enabled": False, "cooldown_seconds": 900}
+    enabled = value.get("enabled") is True
+    try:
+        cooldown = int(value.get("cooldown_seconds", 900))
+    except (TypeError, ValueError):
+        cooldown = 900
+    return {
+        "enabled": enabled,
+        "cooldown_seconds": min(86400, max(60, cooldown)),
+    }
+
+
+def get_failure_notification_recipients():
+    """返回明确勾选接收失败通知的已启用私聊用户。"""
+    data = _load_settings()
+    items = data.get("qq_user_openids")
+    if not isinstance(items, list):
+        return []
+    return [
+        str(item["openid"])
+        for item in items
+        if isinstance(item, dict)
+        and item.get("enabled") is True
+        and item.get("failure_notification") is True
+        and item.get("openid")
+    ]
 
 
 def get_related_group_openids(group_openid):

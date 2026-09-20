@@ -143,6 +143,13 @@
   }
   #btnRestartPanel svg { flex: none; }
   #btnRestartPanel:hover { color: var(--hover-fg); opacity: 1; }
+  .panel-action-icon {
+    width: 34px; height: 34px; min-width: 34px; padding: 0;
+    box-sizing: border-box; aspect-ratio: 1;
+    border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .panel-action-icon svg { width: 18px; height: 18px; pointer-events: none; }
   /* 「关于作者」社交按钮：横向并列、圆角矩形、图标+名称、尺寸统一 */
   #aboutModal button { padding: 10px 16px; border-radius: 8px; font-size: 14px; }
   #aboutModal .about-social {
@@ -156,6 +163,9 @@
     display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   }
   #btnBackfillToggle svg { flex: none; }
+  #btnFailureNotificationToggle { display: inline-flex; align-items: center; justify-content: center; gap: 6px; margin-left: auto; }
+  #btnFailureNotificationToggle svg { flex: none; }
+  #btnFailureNotificationToggle[data-on="1"] { background: var(--primary); color: var(--btn-fg); }
   /* 离线补发第一行：紧凑排列；上限+待补发同行，待补发靠右 */
   .bf-row { gap: 8px; align-items: center; flex-wrap: wrap; }
   /* 「单次补发上限 条/频道」文字：字号/颜色与模式卡片说明（.pid）一致 */
@@ -173,13 +183,47 @@
   /* 「刷新」「清空」圆角方形图标按钮：尺寸一致（清空为红色、刷新复用 .sec 漏斗图标颜色） */
   #btnBackfillRefresh, #btnBackfillClear {
     width: 34px; height: 34px; padding: 0;
+    min-width: 34px; box-sizing: border-box; aspect-ratio: 1;
     border-radius: 8px;
     display: inline-flex; align-items: center; justify-content: center;
   }
-  #btnBackfillRefresh svg, #btnBackfillClear svg { flex: none; }
+  #btnBackfillRefresh svg, #btnBackfillClear svg { width: 18px; height: 18px; flex: none; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
   th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--table-border); }
   th { color: var(--muted); font-weight: normal; font-size: 13px; }
+  .message-trace-modal {
+    position: fixed; inset: 0; z-index: 1001;
+    background: rgba(0, 0, 0, .55);
+    align-items: center; justify-content: center;
+  }
+  .message-trace-dialog {
+    position: relative; width: min(1080px, calc(100vw - 32px)); max-height: min(78vh, 720px);
+    box-sizing: border-box; padding: 20px;
+    display: flex; flex-direction: column;
+    background: var(--modal-bg); border: 1px solid var(--modal-border);
+    border-radius: 14px; box-shadow: 0 18px 48px rgba(0, 0, 0, .28);
+  }
+  .message-trace-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-right: 28px; }
+  .message-trace-toolbar h3 { margin: 0; color: var(--card-heading); font-size: 16px; }
+  .message-trace-toolbar p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+  .message-trace-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .message-trace-actions .pid { font-weight: normal; white-space: nowrap; }
+  .message-trace-wrap { flex: 1; min-height: 0; margin-top: 16px; overflow: auto; }
+  .message-trace-wrap table { min-width: 720px; }
+  .message-trace-table td { vertical-align: middle; }
+  .message-trace-time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .message-trace-source { font-size: 13px; font-weight: bold; }
+  .message-trace-source-id, .message-trace-preview { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .message-trace-preview { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .message-trace-groups { display: flex; flex-wrap: wrap; gap: 4px; }
+  .message-trace-group { background: var(--sec-bg); border-radius: 4px; color: var(--sec-fg); font-size: 12px; padding: 3px 6px; }
+  .message-trace-group.failed { background: var(--badge-off-bg); color: var(--badge-off-fg); }
+  .message-trace-result { display: inline-block; border-radius: 14px; font-size: 12px; font-weight: bold; padding: 4px 8px; white-space: nowrap; }
+  .message-trace-result.ok { background: var(--badge-on-bg); color: var(--badge-on-fg); }
+  .message-trace-result.partial { background: var(--badge-warn-bg); color: var(--badge-warn-fg); }
+  .message-trace-result.failed, .message-trace-result.pending { background: var(--badge-off-bg); color: var(--badge-off-fg); }
+  .message-trace-note { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .message-trace-empty { color: var(--empty); padding: 18px 6px; text-align: center; }
   input[type=text] {
     background: var(--field-bg); border: 1px solid var(--field-border); color: var(--field-fg);
     border-radius: 5px; padding: 6px 8px; font-size: 14px; width: 100%;
@@ -399,6 +443,15 @@
     background: var(--field-bg); border: 1px solid var(--field-border); color: var(--field-fg);
     border-radius: 5px; padding: 6px 8px; font-size: 14px; width: 100%; color-scheme: dark;
   }
+  #translationConfigModal {
+    overflow-y: auto; padding: 16px; box-sizing: border-box;
+  }
+  #translationConfigModal .translation-config-dialog {
+    max-height: min(78vh, 720px); overflow-y: auto; box-sizing: border-box;
+  }
+  @media (max-height: 720px) {
+    #translationConfigModal .translation-config-dialog { max-height: calc(100vh - 20px); padding: 14px; }
+  }
   body.theme-light #qqConfigModal input[type=password],
   body.theme-light #discordConfigModal input[type=password],
   body.theme-light #translationConfigModal input[type=password] {
@@ -573,6 +626,16 @@
   .auto-translation-field input[type=text] {
     width: 150px;
   }
+  .ai-profile-toolbar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    color: var(--muted); font-size: 13px;
+  }
+  .ai-profile-toolbar select {
+    flex: 1 1 180px; min-width: 0; height: 32px;
+    background: var(--field-bg); border: 1px solid var(--field-border);
+    border-radius: 5px; color: var(--field-fg); padding: 5px 8px;
+  }
+  .ai-profile-toolbar button { padding: 6px 10px; font-size: 12px; }
   .auto-translation-actions {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
@@ -665,6 +728,38 @@
   #aboutModal button.modal-x { padding: 0; border-radius: 50%; }
   /* 确认/提示弹窗永远在最上层，目标群管理可从定时消息编辑弹窗内继续打开 */
   #confirmModal { z-index: 1100 !important; }
+  .diagnostic-modal {
+    position: fixed; inset: 0; z-index: 1001;
+    background: rgba(0, 0, 0, .55);
+    align-items: center; justify-content: center;
+  }
+  .diagnostic-dialog, .backup-dialog {
+    position: relative; box-sizing: border-box;
+    width: min(440px, calc(100vw - 32px)); padding: 18px;
+    background: var(--modal-bg); border: 1px solid var(--modal-border);
+    border-radius: 10px; box-shadow: 0 18px 48px rgba(0, 0, 0, .28);
+  }
+  .diagnostic-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-right: 28px; }
+  .diagnostic-toolbar h3 { margin: 0; color: var(--card-heading); font-size: 16px; }
+  .diagnostic-list { margin-top: 12px; border-top: 1px solid var(--field-border); }
+  .diagnostic-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 2px; border-bottom: 1px solid var(--field-border); font-size: 13px; }
+  .diagnostic-result { font-size: 12px; font-weight: 600; }
+  .diagnostic-result.ok { color: var(--badge-on-fg); }
+  .diagnostic-result.warn { color: var(--badge-warn-fg); }
+  .backup-modal {
+    position: fixed; inset: 0; z-index: 1001;
+    background: rgba(0, 0, 0, .55);
+    align-items: center; justify-content: center;
+  }
+  .backup-title { padding-right: 28px; }
+  .backup-title h3 { margin: 0; color: var(--card-heading); font-size: 16px; }
+  .backup-note, .backup-warning { margin: 12px 0 0; font-size: 12px; line-height: 1.5; }
+  .backup-note { color: var(--muted); }
+  .backup-runtime { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; }
+  .backup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .backup-file-select { display: inline-flex; align-items: center; cursor: pointer; }
+  .backup-file-select input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  .backup-warning { color: var(--danger); }
   #chanBody input[data-kind="chanName"] { width: 25%; }
   button.rowicon {
     width: 28px; height: 28px; padding: 0;
@@ -786,8 +881,17 @@
   /* .fgtab.active 背景为蓝色（--primary），中央文字颜色统一为 --btn-fg
     （与「关于作者」按钮中央图案同源；日间主题原值相同，夜间由 #e6e8eb 统一为基准色） */
   .fgtab.active { background: var(--primary); border-color: var(--primary-border); color: var(--btn-fg); }
-  .fgtab.paused { color: var(--muted); border-style: dashed; }
-  .fgtab.active.paused { background: var(--sec-bg); border-color: var(--warn-bg); color: var(--warn-fg); }
+  /* 暂停中的转发组即使未选中也保持橙黄色，避免与正常组混淆。 */
+  .fgtab.paused {
+    background: var(--badge-warn-bg);
+    background: color-mix(in srgb, var(--warn-bg) 38%, var(--sec-bg));
+    border: 1px solid var(--field-border);
+    color: var(--warn-fg);
+  }
+  .fgtab.active.paused {
+    background: var(--warn-bg); border: 1px solid var(--primary-border);
+    color: var(--warn-fg);
+  }
   button.fg-toggle {
     background: var(--sec-bg); color: var(--muted); border: 1px solid var(--field-border);
   }
@@ -805,7 +909,8 @@
   /* 当前组的暂停/编辑/删除操作按钮：比转发组 tab 小一档，并与 tab 底边对齐。 */
   .fgtabs > button.fg-toggle,
   .fgtabs > button.fgctrl {
-    width: 24px; height: 24px; padding: 0; border-radius: 5px;
+    width: 24px; height: 24px; min-width: 24px; padding: 0;
+    flex: 0 0 24px; box-sizing: border-box; aspect-ratio: 1; border-radius: 5px;
     font-size: 12px; line-height: 1;
     display: inline-flex; align-items: center; justify-content: center;
   }

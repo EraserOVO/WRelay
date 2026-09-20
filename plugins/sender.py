@@ -9,7 +9,9 @@ from nonebot.adapters.qq import Message as QQMessage
 from nonebot.adapters.qq import MessageSegment as QQMessageSegment
 
 from plugins.config import get_active_groups
+from plugins.failure_notification import notify_delivery_failure
 from plugins.media import make_text, make_media_link
+from plugins.message_trace import record_delivery
 
 
 # =====================================================
@@ -52,6 +54,30 @@ def get_qq_bot():
             return b
 
     return None
+
+
+async def _record_trace(
+    channel_id,
+    message_id,
+    text_parts,
+    media_items,
+    groups,
+    ok_map,
+    note="",
+):
+    """追踪写入绝不能影响真实投递。"""
+    try:
+        await record_delivery(
+            channel_id,
+            message_id,
+            text_parts,
+            media_items,
+            groups,
+            ok_map,
+            note=note,
+        )
+    except Exception as exc:
+        logger.warning("消息追踪记录失败: {}", exc)
 
 
 def _is_rate_limit(exc):
@@ -460,6 +486,11 @@ async def send_media_items(qq_bot, groups, media_items, channel_id="", message_i
 async def send_relay_message(text_parts, media_items, groups=None, channel_id="", message_id=""):
     """发送文字 + 媒体到指定群（默认全部启用群）；
     返回 {group_openid: 是否全部送达}；QQ Bot 未连接返回空 dict"""
+    if groups is None:
+        groups = get_active_groups()
+    else:
+        groups = list(groups)
+
     qq_bot = get_qq_bot()
 
     if qq_bot is None:
@@ -468,12 +499,17 @@ async def send_relay_message(text_parts, media_items, groups=None, channel_id=""
             "QQ Bot 未连接，本次消息未发送、不记录去重ID"
         )
 
+        await _record_trace(
+            channel_id, message_id, text_parts, media_items, groups, {},
+            note="QQ Bot 未连接",
+        )
         return {}
 
-    if groups is None:
-        groups = get_active_groups()
-
     if not groups:
+        await _record_trace(
+            channel_id, message_id, text_parts, media_items, groups, {},
+            note="没有可用目标群",
+        )
         return {}
 
     ok_map = {group: True for group in groups}
@@ -501,6 +537,19 @@ async def send_relay_message(text_parts, media_items, groups=None, channel_id=""
 
     for group, ok in media_ok.items():
         ok_map[group] = ok_map[group] and ok
+
+    await _record_trace(
+        channel_id, message_id, text_parts, media_items, groups, ok_map,
+    )
+
+    failed_groups = [group for group, ok in ok_map.items() if not ok]
+    if failed_groups:
+        await notify_delivery_failure(
+            qq_bot,
+            failed_groups,
+            channel_id=channel_id,
+            message_id=message_id,
+        )
 
     return ok_map
 

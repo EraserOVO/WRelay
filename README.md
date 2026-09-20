@@ -22,7 +22,10 @@ WRelay 是一个基于 NoneBot2 的 Windows 消息转发服务。当前代码包
 - QQ 群发送失败不会影响其他群，失败群会在重试或补发时继续处理
 - 失败消息会持久化到 `data/retry_pending.json`，进程重启后继续重试；媒体字节不写入队列
 - 支持媒体并发下载、大小限制、发送重试、429 限流退避和链接降级
+- 视频媒体优先以 QQ 视频消息发送，下载或上传失败时自动降级为文字链接
 - Discord Bot 重连后自动补发离线期间的未转发消息，可限制每个频道单次补发数量
+- 可选失败通知：按冷却时间向管理员反馈投递失败，避免重复刷屏
+- 每条投递会记录最终结果、目标群和重试次数，供面板消息追踪查看
 
 ### X/Twitter RSS → QQ
 
@@ -30,6 +33,8 @@ WRelay 是一个基于 NoneBot2 的 Windows 消息转发服务。当前代码包
 - 支持多个 X 来源和独立的 X 转发组
 - 支持原创内容、转发、引用内容、图片和视频
 - 支持 RSS ETag/304 缓存，减少重复请求
+- 对 RSSHub 的 429、5xx 和连接异常做同轮退避重试（最多 3 次）；其他 4xx 快速失败
+- RSSHub 暂时不可用时回退到 X 公开时间线，保持订阅轮询不中断
 - 使用独立的来源游标去重
 - QQ 未连接、发送失败或媒体处理失败时保留游标并在后续轮询中补投
 - 管理面板提供 RSS 运行状态、最近轮询结果和失败原因
@@ -83,7 +88,7 @@ list                           查看命令帮助
 
 ### 本地管理面板
 
-面板默认地址为 `http://127.0.0.1:8090`，提供：
+面板默认地址为 `http://127.0.0.1:18090`，提供：
 
 - 启动、停止、重启机器人
 - 机器人异常退出后的自动拉起
@@ -98,6 +103,9 @@ list                           查看命令帮助
 - 查看转发统计
 - 查看和操作 Discord 离线补发
 - 查看 X RSS 轮询状态
+- 在运行日志卡片中打开消息追踪二级窗口，查看最近 50 条投递结果
+- 使用连接诊断工具查看机器人、Discord、QQ 和待重试投递状态
+- 在机器人状态卡片中开关失败通知
 - 编辑 QQ Bot 与 Discord Bot 配置
 
 ## 快速开始（Windows）
@@ -108,7 +116,7 @@ list                           查看命令帮助
 2. 源码版本如果不存在 `.env.prod`，安装脚本会从 `.env.example` 生成配置模板。
 3. 编辑 `.env.prod`，填写 QQ 官方机器人和 Discord Bot 配置。
 4. 如需访问 Discord，在 `.env.prod` 中配置 `HTTP_PROXY`。
-5. 双击 `启动面板.bat`，打开 `http://127.0.0.1:8090`。
+5. 双击 `启动面板.bat`，打开 `http://127.0.0.1:18090`。
 6. 在面板中登记并启用 Discord 频道、X 来源、QQ 群和私聊用户，然后启动机器人。
 
 详细的 Bot 创建、权限、`group_openid`、频道登记、代理和 RSSHub 配置方式见 [docs/SETUP.md](docs/SETUP.md)。
@@ -145,6 +153,8 @@ WRelay/
 │  ├─ media.py               # Markdown、提及、Emoji 和媒体处理
 │  ├─ sender.py              # QQ 消息发送、分片、重试和降级
 │  ├─ retry.py               # 失败消息延迟重试
+│  ├─ message_trace.py       # 投递结果追踪与持久化
+│  ├─ failure_notification.py # 管理员失败通知与冷却
 │  ├─ backfill.py            # Discord 离线补发
 │  ├─ backfill_api.py        # 补发和频道审计 HTTP 接口
 │  ├─ health_api.py          # Bot 健康状态接口
@@ -178,6 +188,7 @@ WRelay/
 - `data/settings.json`：频道、来源、群、用户、转发组和补发配置
 - `data/discord_last.json`：Discord/X 按目标群保存的去重游标
 - `data/stats.json`：成功、失败和当日转发统计
+- `data/message_trace.json`：最近投递结果追踪（自动限制保留数量）
 - `data/qq_identities.json`：QQ 用户和群身份资料
 - `data/qq_registrations.json`：待审核注册申请
 - `data/channels_audit.json`：Discord 频道权限审计结果

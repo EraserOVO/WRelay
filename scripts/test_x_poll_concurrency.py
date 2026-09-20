@@ -17,9 +17,11 @@ from plugins import x_rss as x_rss_mod
 async def main():
     active = 0
     peak = 0
+    polled = []
 
     async def fake_poll(source):
         nonlocal active, peak
+        polled.append(source["key"])
         active += 1
         peak = max(peak, active)
         await asyncio.sleep(0.01)
@@ -31,12 +33,21 @@ async def main():
     sources = [
         {"key": str(i), "name": str(i), "enabled": True}
         for i in range(6)
-    ] + [{"key": "bad", "name": "bad", "enabled": True}]
+    ] + [
+        {"key": "bad", "name": "bad", "enabled": True},
+        {"key": "ignored", "name": "ignored", "enabled": True},
+    ]
 
     with mock.patch.object(x_rss_mod, "get_x_rss_sources", return_value=sources), \
+            mock.patch.object(
+                x_rss_mod,
+                "get_x_groups_for_source",
+                side_effect=lambda key: [] if key == "ignored" else ["group"],
+            ), \
             mock.patch.object(x_rss_mod, "_poll_source", side_effect=fake_poll):
         await x_rss_mod._poll_all()
 
+    assert "ignored" not in polled
     assert peak <= x_rss_mod.X_POLL_CONCURRENCY, peak
     assert peak > 1, peak
     assert x_rss_mod._runtime_status["last_result"] == "fetch_failed"

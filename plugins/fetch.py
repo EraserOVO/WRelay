@@ -19,6 +19,7 @@ from plugins.filter import (
 from plugins.media import (
     AUDIO_EXTS,
     IMAGE_EXTS,
+    VIDEO_EXTS,
     _get_proxy,
     convert_mentions,
     convert_mention_ids,
@@ -80,6 +81,12 @@ FETCH_COLLECT_CAP = 1000
 RATE_LIMIT_ATTEMPTS = 3
 RATE_LIMIT_FALLBACK = 5.0
 
+# 频道名称/最新消息是面板与补发统计使用的轻量 REST 查询；
+# 遇到短暂连接异常、429 或 5xx 时重试一次，避免一次瞬时网络抖动
+# 让面板显示不完整或把待补发数量误报为失败。
+REST_RETRY_ATTEMPTS = 2
+REST_RETRY_DELAY = 0.5
+
 # 回复引用行正文显示上限（防止被回复的长文刷屏）
 REFERENCE_TEXT_LIMIT = 50
 
@@ -93,6 +100,60 @@ def _rate_limit_wait(response, fallback):
     except Exception:
         pass
     return fallback
+
+
+async def _discord_get_with_retry(api, headers):
+    """执行轻量 Discord GET，并对瞬时错误做有限重试。
+
+    非临时 HTTP 错误原样返回给调用方；连接异常在重试耗尽后返回 None。
+    该函数只供频道元数据/最新消息查询使用，分页补发仍沿用自己的
+    完整限流与安全处理。
+    """
+    for attempt in range(REST_RETRY_ATTEMPTS):
+        try:
+            response = await _get_discord_client().get(
+                api,
+                headers=headers,
+            )
+        except Exception as exc:
+            if attempt + 1 >= REST_RETRY_ATTEMPTS:
+                logger.warning(
+                    "Discord API请求异常，重试耗尽（{}）: {}",
+                    type(exc).__name__,
+                    repr(exc),
+                )
+                return None
+            logger.warning(
+                "Discord API请求异常，将在 {} 秒后重试（{}/{}，{}）: {}",
+                REST_RETRY_DELAY,
+                attempt + 1,
+                REST_RETRY_ATTEMPTS,
+                type(exc).__name__,
+                repr(exc),
+            )
+            await asyncio.sleep(REST_RETRY_DELAY)
+            continue
+
+        if response.status_code != 429 and response.status_code < 500:
+            return response
+        if attempt + 1 >= REST_RETRY_ATTEMPTS:
+            return response
+
+        wait = (
+            _rate_limit_wait(response, REST_RETRY_DELAY)
+            if response.status_code == 429
+            else REST_RETRY_DELAY
+        )
+        logger.warning(
+            "Discord API临时错误，将在 {} 秒后重试（{}/{}）: HTTP {}",
+            wait,
+            attempt + 1,
+            REST_RETRY_ATTEMPTS,
+            response.status_code,
+        )
+        await asyncio.sleep(wait)
+
+    return None
 
 
 def parse_discord_url(url):
@@ -479,17 +540,8 @@ async def fetch_channel_latest(channel_id):
             f"Bot {get_discord_token()}"
     }
 
-    try:
-        client = _get_discord_client()
-        response = await client.get(
-            api,
-            headers=headers,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Discord API请求异常: {}",
-            exc
-        )
+    response = await _discord_get_with_retry(api, headers)
+    if response is None:
         return None
 
     if response.status_code != 200:
@@ -517,17 +569,8 @@ async def fetch_channel_name(channel_id):
             f"Bot {get_discord_token()}"
     }
 
-    try:
-        client = _get_discord_client()
-        response = await client.get(
-            api,
-            headers=headers,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Discord API请求异常: {}",
-            exc
-        )
+    response = await _discord_get_with_retry(api, headers)
+    if response is None:
         return None
 
     if response.status_code != 200:
@@ -986,6 +1029,7 @@ async def build_parts(message, source_label="自动转发来自", enabled_types=
 
     image_jobs = []
     audio_jobs = []
+    video_jobs = []
     type_image = _type_enabled(MESSAGE_TYPE_IMAGE)
     type_audio = _type_enabled(MESSAGE_TYPE_AUDIO)
     type_file = _type_enabled(MESSAGE_TYPE_FILE)
@@ -1004,6 +1048,10 @@ async def build_parts(message, source_label="自动转发来自", enabled_types=
         elif ext in AUDIO_EXTS:
             if type_audio:
                 audio_jobs.append((url, filename))
+        elif ext in VIDEO_EXTS:
+            # 视频沿用“文件”筛选项，兼容既有筛选配置。
+            if type_file:
+                video_jobs.append((url, filename))
         else:
             if type_file:
                 text_parts.append(
@@ -1050,6 +1098,27 @@ async def build_parts(message, source_label="自动转发来自", enabled_types=
             else:
                 text_parts.append(
                     make_media_link("音频", url)
+                )
+            has_content = True
+
+    if video_jobs:
+        video_bytes_map = await fetch_bytes_many(
+            [url for url, _ in video_jobs]
+        )
+        for url, filename in video_jobs:
+            media_bytes = video_bytes_map.get(url)
+            if media_bytes:
+                media_items.append({
+                    "kind": "视频",
+                    "url": url,
+                    "segment": QQMessageSegment.file_video(
+                        media_bytes,
+                        filename
+                    ),
+                })
+            else:
+                text_parts.append(
+                    make_media_link("视频", url)
                 )
             has_content = True
 

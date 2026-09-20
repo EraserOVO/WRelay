@@ -32,7 +32,7 @@ from plugins.dedup import (
 # bot HTTP 接口（供管理面板调用）
 #
 # 面板与 bot 通过 HTTP 通信（bot 的 NoneBot FastAPI 运行在
-# 127.0.0.1:8082）。提供端点：
+# 127.0.0.1:18082）。提供端点：
 #   - GET  /api/backfill/pending  各启用频道的待补发缺口数
 #   - POST /api/backfill/run      手动触发一轮补发（尊重总开关）
 #   - POST /api/backfill/clear    清除待补发（把记录推进到最新，不发送）

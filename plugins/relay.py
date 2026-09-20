@@ -27,6 +27,10 @@ from plugins.retry import (
     send_and_record,
     schedule_retry,
 )
+from plugins.relay_inflight import (
+    claim_processing,
+    release_processing,
+)
 from plugins.dedup import (
     normalize_channel_map,
     select_target_groups,
@@ -62,7 +66,7 @@ async def _drain_relay_channel(channel_id):
                 _relay_workers.discard(channel_id)
                 return
 
-            bot, event = queue.popleft()
+            bot, event, processing_key = queue.popleft()
             try:
                 async with _relay_processing:
                     await _process_event(bot, event)
@@ -75,21 +79,25 @@ async def _drain_relay_channel(channel_id):
                     getattr(event, "id", "?"),
                 )
             finally:
+                release_processing(*processing_key)
                 _relay_capacity.release()
     finally:
         # 取消时释放尚未取出的队列项占用，避免关闭/测试场景泄漏容量。
         queue = _relay_queues.pop(channel_id, None)
         if queue:
-            for _ in range(len(queue)):
+            for _, _, processing_key in queue:
+                release_processing(*processing_key)
                 _relay_capacity.release()
         _relay_workers.discard(channel_id)
 
 
-async def _enqueue_relay_event(channel_id, bot, event):
+async def _enqueue_relay_event(channel_id, bot, event, processing_key=None):
     """把实时事件放入有界频道队列。"""
+    if processing_key is None:
+        processing_key = (str(channel_id), str(getattr(event, "id", "")))
     await _relay_capacity.acquire()
     queue = _relay_queues.setdefault(channel_id, deque())
-    queue.append((bot, event))
+    queue.append((bot, event, processing_key))
     if channel_id in _relay_workers:
         return
 
@@ -321,7 +329,15 @@ async def handle(
         return
     if not isinstance(event, GuildMessageCreateEvent):
         return
-    await _enqueue_relay_event(str(event.channel_id), bot, event)
+    processing_key = (str(event.channel_id), str(event.id))
+    if not claim_processing(*processing_key):
+        logger.debug("实时 Discord 消息已在处理，跳过重复事件: {} {}", *processing_key)
+        return
+    try:
+        await _enqueue_relay_event(processing_key[0], bot, event, processing_key)
+    except BaseException:
+        release_processing(*processing_key)
+        raise
 
 
 # =====================================================

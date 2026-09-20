@@ -17,6 +17,8 @@ import sys
 import json
 import shutil
 import time
+import asyncio
+import re
 import ctypes
 import socket
 import threading
@@ -24,6 +26,10 @@ import subprocess
 import webbrowser
 import secrets
 import uuid
+import io
+import zipfile
+from datetime import datetime, timezone
+from contextlib import ExitStack
 
 # ---------------- 路径 ----------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))      # .../panel
@@ -42,6 +48,11 @@ PID_FILE = data_path("bot.pid")
 RUNTIME_LEVEL_FILE = data_path("runtime_log_level.json")
 STATS_FILE = data_path("stats.json")
 PANEL_AUTH_FILE = data_path("panel_auth.json")
+DISCORD_LAST_FILE = data_path("discord_last.json")
+RETRY_PENDING_FILE = data_path("retry_pending.json")
+RESTORE_BACKUP_DIR = data_path("restore_backups")
+PANEL_LOG_MAX_BYTES = 5 * 1024 * 1024
+PANEL_LOG_BACKUPS = 3
 
 # 正式安装包使用 {项目根}\python\python.exe（standalone Python，无 .venv）；
 # 开发环境若存在 .venv 则优先使用，否则回退到项目根的 python。
@@ -51,8 +62,8 @@ if not os.path.exists(VENV_PYTHON):
 BOT_ENTRY = os.path.join(PROJECT_ROOT, "bot.py")
 
 PANEL_HOST = "127.0.0.1"
-PANEL_PORT = 8090
-BOT_PORT = 8082
+PANEL_PORT = 18090
+BOT_PORT = 18082
 
 # ---------------- 转发组 ----------------
 # 与 plugins/config.py（bot 侧）保持一致：
@@ -73,9 +84,59 @@ RESTART_FLAG = "--restart"
 
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# pythonw 下没有控制台窗口，把面板自身的输出重定向到 panel.log
+# pythonw 下没有控制台窗口。面板输出写入可轮转日志，避免 panel.log
+# 随运行时间无限增长；单个文件最多 5MB，保留最近 3 份历史文件。
+class _RotatingPanelLog:
+    def __init__(self, path):
+        self.path = path
+        self._lock = threading.RLock()
+        self._file = None
+        self._open()
+
+    @property
+    def encoding(self):
+        return "utf-8"
+
+    def isatty(self):
+        return False
+
+    def _open(self):
+        self._file = open(self.path, "a", encoding="utf-8", buffering=1)
+
+    def _rotate(self):
+        if self._file is not None:
+            self._file.close()
+        for index in range(PANEL_LOG_BACKUPS - 1, 0, -1):
+            source = "%s.%d" % (self.path, index)
+            target = "%s.%d" % (self.path, index + 1)
+            if os.path.exists(source):
+                os.replace(source, target)
+        if os.path.exists(self.path):
+            os.replace(self.path, self.path + ".1")
+        self._open()
+
+    def write(self, text):
+        if not text:
+            return 0
+        value = str(text)
+        with self._lock:
+            try:
+                current_size = os.path.getsize(self.path)
+                if current_size and current_size + len(value.encode("utf-8")) > PANEL_LOG_MAX_BYTES:
+                    self._rotate()
+            except OSError:
+                # 日志轮转失败时继续写当前文件，不能影响面板功能。
+                pass
+            self._file.write(value)
+        return len(value)
+
+    def flush(self):
+        with self._lock:
+            self._file.flush()
+
+
 try:
-    _panel_log = open(PANEL_LOG, "a", encoding="utf-8", buffering=1)
+    _panel_log = _RotatingPanelLog(PANEL_LOG)
     sys.stdout = _panel_log
     sys.stderr = _panel_log
 except Exception:
@@ -111,8 +172,7 @@ except Exception:
 def _log(msg):
     """面板运行日志（panel.log），带时间戳"""
     try:
-        with open(PANEL_LOG, "a", encoding="utf-8") as f:
-            f.write("%s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg))
+        _panel_log.write("%s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg))
     except Exception:
         pass
 
@@ -189,6 +249,174 @@ def _validate_settings(data):
         require_nonempty_forwarding_groups=True,
         validate_forwarding_groups=True,
     )
+
+
+# ---------------- 安全备份与恢复 ----------------
+# 仅允许这些明确列出的文件进入归档；不要把身份、令牌、日志或环境变量
+# 当作“配置”处理。运行状态只在用户明确选择时才会导出或恢复。
+BACKUP_SETTINGS_NAME = "settings.json"
+BACKUP_RUNTIME_NAMES = ("discord_last.json", "retry_pending.json")
+BACKUP_MANIFEST_NAME = "manifest.json"
+BACKUP_MAX_BYTES = 5 * 1024 * 1024
+RESTORE_BACKUP_RETENTION = 10
+
+
+def _backup_targets():
+    return {
+        BACKUP_SETTINGS_NAME: SETTINGS_FILE,
+        "discord_last.json": DISCORD_LAST_FILE,
+        "retry_pending.json": RETRY_PENDING_FILE,
+    }
+
+
+def _lock_backup_targets(names):
+    """按稳定顺序锁住一批文件，避免多文件操作产生交错快照或死锁。"""
+    targets = _backup_targets()
+    stack = ExitStack()
+    for name in sorted(names):
+        stack.enter_context(json_file_lock(targets[name]))
+    return stack
+
+
+def _backup_manifest(names, include_runtime_state):
+    return {
+        "format": "wrelay-backup",
+        "version": 1,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "include_runtime_state": bool(include_runtime_state),
+        "files": list(names),
+    }
+
+
+def create_backup_archive(include_runtime_state=False):
+    """生成只含白名单文件的 ZIP，供 API 和测试共用。"""
+    targets = _backup_targets()
+    requested_names = [BACKUP_SETTINGS_NAME]
+    if include_runtime_state:
+        requested_names.extend(BACKUP_RUNTIME_NAMES)
+    with _lock_backup_targets(requested_names):
+        names = [name for name in requested_names if os.path.exists(targets[name])]
+        if BACKUP_SETTINGS_NAME not in names:
+            names.insert(0, BACKUP_SETTINGS_NAME)
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                BACKUP_MANIFEST_NAME,
+                json.dumps(_backup_manifest(names, include_runtime_state), ensure_ascii=False, indent=2),
+            )
+            for name in names:
+                try:
+                    with open(targets[name], "rb") as source:
+                        archive.writestr(name, source.read())
+                except FileNotFoundError:
+                    if name == BACKUP_SETTINGS_NAME:
+                        archive.writestr(name, json.dumps(get_default_settings(), ensure_ascii=False, indent=2))
+                    else:
+                        raise
+    return payload.getvalue()
+
+
+def _read_restore_archive(payload):
+    if not isinstance(payload, (bytes, bytearray)) or not payload or len(payload) > BACKUP_MAX_BYTES:
+        raise ValueError("备份文件为空或超过 5 MB 限制")
+    try:
+        with zipfile.ZipFile(io.BytesIO(payload), "r") as archive:
+            infos = archive.infolist()
+            names = [info.filename for info in infos]
+            allowed = {BACKUP_MANIFEST_NAME, BACKUP_SETTINGS_NAME, *BACKUP_RUNTIME_NAMES}
+            if len(names) != len(set(names)) or set(names) - allowed:
+                raise ValueError("备份内含不允许的文件")
+            if BACKUP_MANIFEST_NAME not in names or BACKUP_SETTINGS_NAME not in names:
+                raise ValueError("备份缺少清单或 settings.json")
+            if any("/" in name or "\\" in name or name.startswith(".") for name in names):
+                raise ValueError("备份文件名不安全")
+            total = sum(info.file_size for info in infos)
+            if total > BACKUP_MAX_BYTES or any(info.file_size > BACKUP_MAX_BYTES for info in infos):
+                raise ValueError("备份解压后超过 5 MB 限制")
+            try:
+                manifest = json.loads(archive.read(BACKUP_MANIFEST_NAME).decode("utf-8"))
+            except Exception as exc:
+                raise ValueError("备份清单格式错误") from exc
+            if not isinstance(manifest, dict) or manifest.get("format") != "wrelay-backup" or manifest.get("version") != 1:
+                raise ValueError("不支持的备份格式")
+            if manifest.get("files") != [name for name in names if name != BACKUP_MANIFEST_NAME]:
+                raise ValueError("备份清单与文件不一致")
+            if any(name in names for name in BACKUP_RUNTIME_NAMES) and manifest.get("include_runtime_state") is not True:
+                raise ValueError("备份清单未声明运行状态")
+            data = {}
+            for name in names:
+                if name == BACKUP_MANIFEST_NAME:
+                    continue
+                try:
+                    data[name] = json.loads(archive.read(name).decode("utf-8"))
+                except Exception as exc:
+                    raise ValueError("%s 不是有效 JSON" % name) from exc
+    except zipfile.BadZipFile as exc:
+        raise ValueError("请选择有效的 ZIP 备份文件") from exc
+    err = _validate_settings(data[BACKUP_SETTINGS_NAME])
+    if err:
+        raise ValueError("settings.json 配置校验失败: " + err)
+    return data
+
+
+def _save_restore_rollback(names):
+    """先完整备份当前待覆盖文件；失败时绝不开始写入恢复数据。"""
+    os.makedirs(RESTORE_BACKUP_DIR, exist_ok=True)
+    path = os.path.join(
+        RESTORE_BACKUP_DIR,
+        "restore-before-%s-%s.zip" % (datetime.now().strftime("%Y%m%d-%H%M%S"), uuid.uuid4().hex[:8]),
+    )
+    targets = _backup_targets()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(BACKUP_MANIFEST_NAME, json.dumps({
+            "format": "wrelay-restore-rollback", "version": 1,
+            "created_at": datetime.now(timezone.utc).isoformat(), "files": list(names),
+        }, ensure_ascii=False, indent=2))
+        for name in names:
+            if os.path.exists(targets[name]):
+                with open(targets[name], "rb") as source:
+                    archive.writestr(name, source.read())
+    _prune_restore_rollbacks(path)
+    return path
+
+
+def _prune_restore_rollbacks(current_path):
+    """仅清理本功能创建的旧回退 ZIP，绝不碰目录中的其他文件。"""
+    try:
+        current = os.path.normcase(os.path.abspath(current_path))
+        backups = []
+        with os.scandir(RESTORE_BACKUP_DIR) as entries:
+            for entry in entries:
+                if (
+                    entry.is_file(follow_symlinks=False)
+                    and entry.name.startswith("restore-before-")
+                    and entry.name.endswith(".zip")
+                ):
+                    path = os.path.normcase(os.path.abspath(entry.path))
+                    if path != current:
+                        backups.append((entry.stat(follow_symlinks=False).st_mtime_ns, entry.name, entry.path))
+        backups.sort(reverse=True)
+        for _mtime, _name, path in backups[max(RESTORE_BACKUP_RETENTION - 1, 0):]:
+            os.remove(path)
+    except OSError as exc:
+        # 清理失败不影响刚创建的回退备份，更不能阻断本次恢复。
+        _log("清理旧恢复前备份失败: %s" % exc)
+
+
+def restore_backup_archive(payload, include_runtime_state=False, confirmed_runtime_state=False):
+    """验证 ZIP 后恢复白名单数据；返回本次自动回退备份位置。"""
+    data = _read_restore_archive(payload)
+    names = [BACKUP_SETTINGS_NAME]
+    if include_runtime_state:
+        if not confirmed_runtime_state:
+            raise ValueError("恢复运行状态需要明确确认风险")
+        names.extend(name for name in BACKUP_RUNTIME_NAMES if name in data)
+    targets = _backup_targets()
+    with _lock_backup_targets(names):
+        rollback_path = _save_restore_rollback(names)
+        for name in names:
+            _atomic_write_json_unlocked(targets[name], data[name], indent=2)
+    return {"restored": names, "rollback": rollback_path}
 
 
 def _sync_legacy_scheduled_message(scheduled, body):
@@ -520,10 +748,10 @@ PANEL_PING_URL = "http://%s:%d/api/status" % (PANEL_HOST, PANEL_PORT)
 def panel_alive():
     """判断面板是否真正在运行：HTTP 探测 /api/status 成功才算。
 
-    不能只用 TCP 探测（port_open）：一旦 8090 被其它进程（如系统里
+    不能只用 TCP 探测（port_open）：一旦 18090 被其它进程（如系统里
     恰好占用的无关软件）监听，新面板会被误判为"面板已在运行"而直接
     退出，浏览器反而打不开管理页。只有返回 200 的 HTTP 响应才说明
-    当前 8090 上确实是本面板。
+    当前 18090 上确实是本面板。
     """
     import urllib.request
     try:
@@ -892,8 +1120,8 @@ def current_log_level():
         return ""
 
 
-# ---------------- bot HTTP 转发（面板 -> bot 8082） ----------------
-# bot 的 NoneBot FastAPI 运行在 127.0.0.1:8082，补发相关查询/操作
+# ---------------- bot HTTP 转发（面板 -> bot 18082） ----------------
+# bot 的 NoneBot FastAPI 运行在 127.0.0.1:18082，补发相关查询/操作
 # （待补发数量、手动补发、清除待补发）由 bot 进程完成，面板只做转发。
 BOT_API_BASE = "http://127.0.0.1:%d" % BOT_PORT
 
@@ -902,7 +1130,11 @@ def bot_api_get(path, timeout=10.0):
     """GET bot HTTP 端点，返回 dict；bot 不可用时返回 None"""
     import urllib.request
     try:
-        with urllib.request.urlopen(BOT_API_BASE + path, timeout=timeout) as resp:
+        req = urllib.request.Request(
+            BOT_API_BASE + path,
+            headers={"X-WRelay-Token": PANEL_TOKEN},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except Exception:
         return None
@@ -916,6 +1148,7 @@ def bot_api_post(path, timeout=30.0):
             BOT_API_BASE + path,
             data=b"",
             method="POST",
+            headers={"X-WRelay-Token": PANEL_TOKEN},
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -946,7 +1179,7 @@ def _bot_health_cached():
 
 # ---------------- FastAPI 面板 ----------------
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
@@ -957,7 +1190,7 @@ app = FastAPI()
 # 面板只绑定 127.0.0.1，但无请求体的 POST（/api/bot/stop 等）
 # 可被任意网页用 mode:"no-cors" 的 fetch 触发（浏览器不发预检），从而停掉机器
 # 人或重置配置。浏览器禁止自定义 Origin 头，故校验 Origin 即可堵住跨站请求：
-# 只放行面板自身来源（http://127.0.0.1:8090）与无 Origin 的本地调用（curl/urllib）。
+# 只放行面板自身来源（http://127.0.0.1:18090）与无 Origin 的本地调用（curl/urllib）。
 ALLOWED_ORIGIN = "http://%s:%s" % (PANEL_HOST, PANEL_PORT)
 ALLOWED_ORIGINS = {
     ALLOWED_ORIGIN,
@@ -1015,6 +1248,19 @@ def api_status():
     }
 
 
+@app.get("/api/message-trace")
+def api_message_trace(limit: int = 50):
+    """代理 bot 的近期投递追踪接口；bot 不可用时返回可展示的空状态。"""
+    try:
+        limit = max(1, min(int(limit), 200))
+    except (TypeError, ValueError):
+        limit = 50
+    data = bot_api_get("/api/message-trace?limit=%d" % limit, timeout=2.0)
+    if not isinstance(data, dict):
+        return {"ok": False, "msg": "机器人未运行", "entries": []}
+    return data
+
+
 def _settings_payload():
     """load_settings() + 注入 X 转发组归一化结果（复用 bot 侧默认组兼容
     逻辑，仅内存不写盘）：旧配置缺省时前端也能拿到默认 X 转发组用于渲染，
@@ -1036,6 +1282,32 @@ def api_settings():
 @app.get("/api/settings/default")
 def api_settings_default():
     return get_default_settings()
+
+
+@app.get("/api/backup/export")
+def api_backup_export(include_runtime_state: bool = False):
+    payload = create_backup_archive(include_runtime_state)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="wrelay-backup-%s.zip"' % stamp},
+    )
+
+
+@app.post("/api/backup/restore")
+async def api_backup_restore(request: Request, include_runtime_state: bool = False, confirm_runtime_state: bool = False):
+    try:
+        result = restore_backup_archive(
+            await request.body(), include_runtime_state, confirm_runtime_state,
+        )
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "msg": str(exc)}, status_code=400)
+    except Exception as exc:
+        _log("恢复备份失败: %s" % exc)
+        return JSONResponse({"ok": False, "msg": "恢复失败，当前文件未被覆盖"}, status_code=500)
+    _log("已恢复备份：%s；回退备份：%s" % (", ".join(result["restored"]), result["rollback"]))
+    return {"ok": True, "restored": result["restored"], "msg": "恢复完成，已自动创建恢复前备份"}
 
 
 @app.post("/api/settings/save")
@@ -1624,6 +1896,160 @@ def _read_translation_env_state():
     return state
 
 
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _valid_env_name(name):
+    return bool(_ENV_NAME_RE.fullmatch(str(name or "").strip()))
+
+
+def _read_env_secret(name):
+    """只供本机检测请求读取密钥，绝不返回、记录或写入该值。"""
+    key = str(name or "").strip()
+    if not _valid_env_name(key):
+        return ""
+    value = os.environ.get(key, "").strip()
+    if value:
+        return value
+    if not os.path.exists(ENV_PROD):
+        return ""
+    with open(ENV_PROD, "r", encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            env_key, raw_value = stripped.split("=", 1)
+            if env_key.strip() == key:
+                return str(_dotenv_line_value(raw_value) or "").strip()
+    return ""
+
+
+def _ai_chat_endpoint(base_url):
+    base = str(base_url or "").strip().rstrip("/")
+    if not base:
+        raise ValueError("AI API 地址不能为空")
+    return base if base.endswith("/chat/completions") else base + "/chat/completions"
+
+
+def _ai_models_endpoint(base_url):
+    base = str(base_url or "").strip().rstrip("/")
+    if not base:
+        raise ValueError("AI API 地址不能为空")
+    suffix = "/chat/completions"
+    if base.endswith(suffix):
+        base = base[:-len(suffix)].rstrip("/")
+    return base + "/models"
+
+
+def _fetch_ai_models(base_url, api_key, timeout):
+    """读取当前兼容接口的模型目录；只返回无凭据的模型 ID。"""
+    import urllib.request
+
+    request = urllib.request.Request(
+        _ai_models_endpoint(base_url),
+        headers={"Authorization": "Bearer " + api_key},
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+        return []
+    model_ids = []
+    for item in data["data"]:
+        if not isinstance(item, dict):
+            continue
+        model_id = str(item.get("id") or "").strip()
+        if model_id and model_id not in model_ids:
+            model_ids.append(model_id)
+    return model_ids[:20]
+
+
+def _probe_ai_api(config):
+    """用最小 OpenAI 兼容请求验证配置；不返回模型回复或密钥。"""
+    import urllib.error
+    import urllib.request
+
+    if not isinstance(config, dict):
+        raise ValueError("检测配置格式错误")
+    model = str(config.get("model") or "").strip()
+    api_key_env = str(config.get("api_key_env") or "").strip()
+    if not model:
+        raise ValueError("AI 模型不能为空")
+    if not api_key_env:
+        raise ValueError("API 密钥环境变量名不能为空")
+    api_key = str(config.get("api_key") or "").strip() or _read_env_secret(api_key_env)
+    if not api_key:
+        raise ValueError("AI API 密钥未配置")
+    try:
+        timeout = int(config.get("timeout_seconds") or 25)
+    except (TypeError, ValueError):
+        timeout = 25
+    timeout = min(30, max(1, timeout))
+    payload = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": "Reply with exactly OK."}],
+        "temperature": 0,
+        "max_tokens": 8,
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        _ai_chat_endpoint(config.get("base_url")),
+        data=payload,
+        headers={
+            "Authorization": "Bearer " + api_key,
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            error_data = json.loads(exc.read().decode("utf-8"))
+            if isinstance(error_data, dict):
+                error_value = error_data.get("error")
+                if isinstance(error_value, dict):
+                    detail = error_value.get("message") or error_value.get("detail") or ""
+                elif isinstance(error_value, str):
+                    detail = error_value
+                if not detail:
+                    detail = error_data.get("message") or error_data.get("detail") or ""
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            pass
+        detail = str(detail or "").replace("\r", " ").replace("\n", " ").strip()
+        if api_key and api_key in detail:
+            detail = detail.replace(api_key, "[已隐藏]")
+        detail = detail[:240]
+        message = "AI API 返回 HTTP %s" % exc.code
+        if detail:
+            message += "：" + detail
+        detail_lower = detail.lower()
+        if "model" in detail_lower and (
+            "unsupported" in detail_lower or "not supported" in detail_lower
+        ):
+            try:
+                available_models = _fetch_ai_models(
+                    config.get("base_url"), api_key, timeout
+                )
+            except Exception:
+                available_models = []
+            if available_models:
+                message += "；当前可用模型：" + ", ".join(available_models)
+        raise RuntimeError(message) from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise RuntimeError("无法连接 AI API") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("AI API 返回了无效响应") from exc
+    try:
+        content = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError("AI API 响应格式不兼容") from exc
+    if not str(content or "").strip():
+        raise RuntimeError("AI API 未返回检测结果")
+    return model
+
+
 def _repair_translation_env_file():
     """修复密钥被追加到上一行的旧配置，仅处理腾讯翻译变量。"""
     if not os.path.exists(ENV_PROD):
@@ -1725,6 +2151,60 @@ def _write_translation_env(values):
                     pass
 
 
+def _write_ai_env(env_name, api_key):
+    """原子保存 AI 密钥；空值表示保留现有值，密钥不进入 settings.json。"""
+    key = str(env_name or "").strip()
+    value = str(api_key or "").strip()
+    if not _valid_env_name(key):
+        raise ValueError("API 密钥环境变量名格式不正确")
+    if not value:
+        return
+    if "\r" in value or "\n" in value:
+        raise ValueError("API 密钥不能包含换行")
+    if not os.path.exists(ENV_PROD):
+        raise RuntimeError(".env.prod 不存在")
+
+    with _ENV_WRITE_LOCK:
+        with open(ENV_PROD, "r", encoding="utf-8", newline="") as f:
+            lines = f.readlines()
+        ending = "\r\n"
+        for line in lines:
+            if line.endswith("\r\n"):
+                ending = "\r\n"
+                break
+            if line.endswith("\n"):
+                ending = "\n"
+                break
+        seen = False
+        for index, line in enumerate(lines):
+            raw = line.lstrip()
+            if raw.startswith("#") or "=" not in raw:
+                continue
+            line_key = raw.split("=", 1)[0].strip()
+            if line_key != key:
+                continue
+            line_ending = "\r\n" if line.endswith("\r\n") else ("\n" if line.endswith("\n") else "")
+            lines[index] = "%s=%s%s" % (key, json.dumps(value, ensure_ascii=False), line_ending)
+            seen = True
+            break
+        if not seen:
+            if lines and not lines[-1].endswith(("\r\n", "\n", "\r")):
+                lines[-1] += ending
+            lines.append("%s=%s%s" % (key, json.dumps(value, ensure_ascii=False), ending))
+
+        tmp = "%s.%s.%s.tmp" % (ENV_PROD, os.getpid(), uuid.uuid4().hex)
+        try:
+            with open(tmp, "w", encoding="utf-8", newline="") as f:
+                f.writelines(lines)
+            os.replace(tmp, ENV_PROD)
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+
+
 @app.get("/api/translation/env")
 def api_translation_env():
     """返回腾讯密钥配置状态，不返回密钥内容。"""
@@ -1766,6 +2246,51 @@ async def api_translation_env_save(request: Request):
         return JSONResponse({"ok": False, "msg": "保存腾讯 TMT 密钥失败"}, status_code=500)
     _log("腾讯 TMT 密钥配置已更新")
     return {"ok": True, "configured": _read_translation_env_state()}
+
+
+@app.post("/api/translation/ai-test")
+async def api_translation_ai_test(request: Request):
+    """检测 AI API 当前编辑中的地址、模型与密钥，不写入配置。"""
+    try:
+        config = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "msg": "检测配置格式错误"}, status_code=400)
+    if not isinstance(config, dict):
+        return JSONResponse({"ok": False, "msg": "检测配置格式错误"}, status_code=400)
+    try:
+        model = await asyncio.to_thread(_probe_ai_api, config)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "msg": str(exc)}, status_code=400)
+    except RuntimeError as exc:
+        _log("AI API 检测失败: %s" % type(exc).__name__)
+        return JSONResponse({"ok": False, "msg": str(exc)}, status_code=502)
+    except Exception:
+        _log("AI API 检测异常")
+        return JSONResponse({"ok": False, "msg": "AI API 检测失败"}, status_code=502)
+    return {"ok": True, "msg": "AI API 检测成功（%s）" % model}
+
+
+@app.post("/api/translation/ai-env")
+async def api_translation_ai_env_save(request: Request):
+    """保存 AI 密钥到指定环境变量；密钥本身绝不回传。"""
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
+    if not isinstance(data, dict):
+        return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
+    env_name = str(data.get("env_name") or "").strip()
+    api_key = str(data.get("api_key") or "").strip()
+    if not _valid_env_name(env_name):
+        return JSONResponse({"ok": False, "msg": "API 密钥环境变量名格式不正确"}, status_code=400)
+    try:
+        _write_ai_env(env_name, api_key)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "msg": str(exc)}, status_code=400)
+    except Exception:
+        _log("保存 AI API 密钥失败")
+        return JSONResponse({"ok": False, "msg": "保存 AI API 密钥失败"}, status_code=500)
+    return {"ok": True, "configured": bool(_read_env_secret(env_name))}
 
 
 @app.get("/api/bot/qq-config")
@@ -1875,7 +2400,7 @@ async def api_bot_discord_config_save(request: Request):
 @app.post("/api/panel/restart")
 def api_panel_restart():
     """重启面板自身：拉起独立 worker 进程，待本进程退出并释放
-    8090 后由 worker 按原启动方式（autostart/双击）拉起新面板。
+    18090 后由 worker 按原启动方式（autostart/双击）拉起新面板。
 
     面板的路由与静态资源在进程启动时载入内存，改代码后必须
     重启面板进程才生效；此接口提供一键入口，免去手动杀进程。"""
@@ -1941,7 +2466,7 @@ def api_bot_log_clear():
         return {"ok": False, "msg": str(exc)}
 
 
-# ---------------- 离线补发（转发到 bot 8082） ----------------
+# ---------------- 离线补发（转发到 bot 18082） ----------------
 # _backfill_seq：补发/清除成功一次递增一次，前端轮询 /api/status
 # 发现变化后立即刷新待补发数量（否则最长 5 分钟才更新）。
 _backfill_seq = 0
@@ -1985,7 +2510,7 @@ def api_backfill_clear():
     return data
 
 
-# ---------------- X RSS 运行状态（代理到 bot 8082） ----------------
+# ---------------- X RSS 运行状态（代理到 bot 18082） ----------------
 @app.get("/api/xrss/status")
 def api_xrss_status():
     """X → QQ 页状态卡片数据源：bot 未运行直接返回未运行，

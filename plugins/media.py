@@ -31,6 +31,14 @@ AUDIO_EXTS = {
     ".m4a"
 }
 
+VIDEO_EXTS = {
+    ".mp4",
+    ".mov",
+    ".webm",
+    ".mkv",
+    ".avi",
+}
+
 # Discord 自定义表情通常原图只有 128px 左右，但 QQ 将独立图片段展示得
 # 更大。通过 Discord CDN 的 size 参数请求小图，避免表情在 QQ 中占屏。
 DISCORD_EMOJI_SIZE = 64
@@ -214,17 +222,8 @@ def make_media_link(kind, url):
 
 
 def _get_proxy():
-    """读取 NoneBot 配置中的代理（Discord CDN 需走代理才能下载）"""
-    try:
-        from nonebot import get_driver
-        proxy = getattr(
-            get_driver().config,
-            "http_proxy",
-            None
-        )
-        return proxy or None
-    except Exception:
-        return None
+    """由 Clash 虚拟网卡路由媒体请求，不强制连接本地 HTTP 代理。"""
+    return None
 
 
 # =====================================================

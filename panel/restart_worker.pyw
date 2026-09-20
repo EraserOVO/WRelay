@@ -3,10 +3,10 @@
 面板重启中转脚本。
 
 由管理面板 /api/panel/restart 以独立进程方式拉起：
-  1. 等待旧面板退出并释放 127.0.0.1:8090（最多 15 秒）
+  1. 等待旧面板退出并释放 127.0.0.1:18090（最多 15 秒）
   2. 按当前面板的启动方式（autostart.pyw 或 管理面板.pyw）重新拉起
 旧面板在返回重启响应后自行退出，因此本脚本只需轮询端口即可，
-避免新旧进程抢 8090 导致新面板起不来。
+避免新旧进程抢 18090 导致新面板起不来。
 """
 
 import os
@@ -22,7 +22,7 @@ sys.path.insert(0, PROJECT_ROOT)
 from plugins.paths import data_path
 
 PANEL_HOST = "127.0.0.1"
-PANEL_PORT = 8090
+PANEL_PORT = 18090
 
 AUTOSTART_FLAG = "--autostart"
 RESTART_FLAG = "--restart"

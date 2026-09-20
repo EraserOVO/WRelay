@@ -1,10 +1,11 @@
 """WRelay 转发消息的可选翻译路由。"""
 import re
+import time
 
 from nonebot import logger
 
 from plugins.ai_client import AIClientError, generate_text
-from plugins.config import get_translation_config
+from plugins.config import get_ai_config, get_translation_config
 from plugins.media import make_text
 from plugins.tencent_tmt import TencentTMTError, translate_text
 
@@ -12,6 +13,20 @@ _CHINESE = re.compile(r"[\u4e00-\u9fff]")
 _FOREIGN = re.compile(r"[A-Za-z\u3040-\u30ff\uac00-\ud7af]")
 _cache = {}
 _CACHE_LIMIT = 512
+_last_successful_provider = None
+_last_successful_at = None
+_last_successful_profile = None
+_last_successful_model = None
+
+
+def get_translation_status():
+    """返回最近一次成功工作的翻译服务，不包含任何凭据。"""
+    return {
+        "provider": _last_successful_provider,
+        "at": _last_successful_at,
+        "profile": _last_successful_profile,
+        "model": _last_successful_model,
+    }
 
 
 def _should_translate(text, config):
@@ -53,6 +68,8 @@ async def translate_for_relay(text, cache_key, config=None):
     providers = [config.get("provider"), config.get("fallback_provider")]
     providers = [name for index, name in enumerate(providers) if name and name not in providers[:index]]
     target = str(config.get("target_language") or "zh")
+    global _last_successful_provider, _last_successful_at
+    global _last_successful_profile, _last_successful_model
     for provider in providers:
         try:
             if provider == "tencent_tmt":
@@ -61,6 +78,16 @@ async def translate_for_relay(text, cache_key, config=None):
                 translated = await _translate_by_ai(text, target)
             else:
                 continue
+            if translated:
+                _last_successful_provider = provider
+                _last_successful_at = int(time.time())
+                if provider == "ai":
+                    ai_config = get_ai_config()
+                    _last_successful_profile = ai_config.get("_profile_name") or None
+                    _last_successful_model = ai_config.get("model") or None
+                else:
+                    _last_successful_profile = None
+                    _last_successful_model = None
             if cache_key is not None:
                 _cache[cache_key] = translated
                 if len(_cache) > _CACHE_LIMIT:
