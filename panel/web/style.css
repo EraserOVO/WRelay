@@ -936,6 +936,8 @@
     display: inline-flex; align-items: center; justify-content: center;
   }
   .chan-name .chan-name-edit:hover { color: var(--hover-fg); }
+  .x-account-link { color: var(--card-heading); text-decoration: none; }
+  .x-account-link:hover { color: var(--hover-fg); text-decoration: underline; }
   .tablewrap { overflow-x: auto; }
   .tablewrap table { min-width: 540px; }
   /* 「启用」表头弱化 */

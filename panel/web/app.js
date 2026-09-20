@@ -107,6 +107,32 @@ function xSourceKey(raw) {
   return raw.replace(/^@+/, "");
 }
 
+// X source 字符串 → X 账号主页地址；兼容账号名、X/Twitter 主页 URL 和 RSSHub URL。
+function xSourceProfileUrl(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  let handle = xSourceKey(value);
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const url = new URL(value);
+      const rssMatch = url.pathname.match(/\/twitter\/user\/([^/?#]+)/i);
+      if (rssMatch) {
+        handle = decodeURIComponent(rssMatch[1]);
+      } else if (/^(?:www\.)?(?:x|twitter)\.com$/i.test(url.hostname)) {
+        const firstPath = url.pathname.split("/").filter(Boolean)[0];
+        if (firstPath) handle = firstPath;
+      } else {
+        return "";
+      }
+    } catch (e) {
+      return "";
+    }
+  }
+  handle = String(handle || "").replace(/^@+/, "").trim();
+  if (!handle || /[/?#\s]/.test(handle)) return "";
+  return "https://x.com/" + encodeURIComponent(handle);
+}
+
 // ---------------- 主要界面切换（Discord → QQ / X → QQ / QQ → QQ） ----------------
 // 每种转发组合一个独立页面，页面选择持久化到 localStorage（与主题/转发组同方式），
 // 刷新后恢复；默认进入 Discord → QQ（不改变原有使用习惯）。
@@ -708,6 +734,9 @@ function openFgAddPicker(ctx, kind) {
     },
     {
       defaultChecked: false,
+      labelLinkFn: kind === "source" ? function (item) {
+        return xSourceProfileUrl(item.source);
+      } : null,
       onRowDelete: function (item) {
         deleteRegisteredItem(kind, item, function () { openFgAddPicker(ctx, kind); });
       },
@@ -1261,6 +1290,7 @@ function renderXPage() {
     const i = allSources.indexOf(s);
     const handle = xSourceKey(s.source);
     const name = s.name || handle;
+    const profileUrl = xSourceProfileUrl(s.source);
     const tr = document.createElement("tr");
     tr.setAttribute("data-id", handle);
     tr.innerHTML =
@@ -1272,7 +1302,11 @@ function renderXPage() {
           '<span class="chan-name-edit" data-kind="xSourceNameEdit" data-i="' + i + '" title="编辑账号名称">' + SVG_PEN + '</span>' +
         '</span>' +
       '</td>' +
-      '<td class="mono">@' + escapeHtml(handle) + '</td>' +
+      '<td class="mono">' +
+        (profileUrl
+          ? '<a class="x-account-link" href="' + escapeHtml(profileUrl) + '" target="_blank" rel="noopener noreferrer" title="打开 X 主页">@' + escapeHtml(handle) + '</a>'
+          : '@' + escapeHtml(handle)) +
+      '</td>' +
       '<td style="text-align:right"><div style="display:flex;gap:4px;justify-content:flex-end;">' +
         '<button class="sec rowicon translation-toggle-icon' + (s.translation_enabled ? ' translation-active' : '') + '" title="翻译设置" aria-label="翻译设置" data-kind="xSourceTranslation" data-i="' + i + '">' + SVG_TRANSLATE + '</button>' +
         '<button class="sec rowicon' + (channelFilterActive(s) ? ' filter-active' : '') + '" data-kind="xSourceFilter" data-i="' + i + '">' + SVG_FUNNEL + '</button>' +
@@ -1945,7 +1979,20 @@ function showConfirmSelect(title, items, labelFn, onOkSelected, opts) {
     span.className = "mono";
     span.style.flex = "1";
     span.style.minWidth = "0";
-    span.textContent = labelFn(it);
+    const labelLink = typeof opts.labelLinkFn === "function" ? opts.labelLinkFn(it) : "";
+    if (labelLink) {
+      const link = document.createElement("a");
+      link.className = "x-account-link";
+      link.href = labelLink;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = labelFn(it);
+      link.title = "打开 X 主页";
+      link.addEventListener("click", function (e) { e.stopPropagation(); });
+      span.appendChild(link);
+    } else {
+      span.textContent = labelFn(it);
+    }
     row.appendChild(cb);
     row.appendChild(span);
     if (opts.onRowDelete) {
@@ -2271,9 +2318,23 @@ function openRelayChannelsModal(scope) {
       info.className = "relay-channel-row-info";
       const name = document.createElement("div");
       name.className = "relay-channel-row-name";
-      name.textContent = relayChannelsEditScope === "x"
-        ? "@" + id
-        : (channelNames[id] ? "# " + channelNames[id] : "# " + (channel.name || id));
+      if (relayChannelsEditScope === "x") {
+        const profileUrl = xSourceProfileUrl(channel.source);
+        if (profileUrl) {
+          const link = document.createElement("a");
+          link.className = "x-account-link";
+          link.href = profileUrl;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.textContent = "@" + id;
+          link.title = "打开 X 主页";
+          name.appendChild(link);
+        } else {
+          name.textContent = "@" + id;
+        }
+      } else {
+        name.textContent = channelNames[id] ? "# " + channelNames[id] : "# " + (channel.name || id);
+      }
       name.title = name.textContent;
       const channelId = document.createElement("div");
       channelId.className = "relay-channel-row-id";
