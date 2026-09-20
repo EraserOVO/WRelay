@@ -28,6 +28,7 @@ TESTS = (
     "test_message_datetime.py",
     "test_http_clients.py",
     "test_ai_model_fallback.py",
+    "test_qq_event_compat.py",
     "test_discord_rest_retry.py",
     "test_panel_safety.py",
     "test_user_errors.py",

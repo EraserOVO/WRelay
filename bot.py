@@ -188,6 +188,10 @@ os.environ["HOST"] = "127.0.0.1"
 os.environ["PORT"] = "18082"
 nonebot.init()
 
+from plugins.qq_event_compat import install_qq_event_compat
+
+install_qq_event_compat()
+
 
 # =====================================================
 # 日志轮转 + 运行时日志级别（B4）
