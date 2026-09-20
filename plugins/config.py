@@ -113,9 +113,11 @@ def _translation_config_for_item(config_name, items_name, item_id):
         if candidate_id == str(item_id):
             config["enabled"] = item.get("translation_enabled") is True
             config["append_original"] = item.get("translation_append_original") is not False
+            config["show_datetime"] = item.get("translation_show_datetime") is True
             return config
     config["enabled"] = False
     config["append_original"] = True
+    config["show_datetime"] = False
     return config
 
 

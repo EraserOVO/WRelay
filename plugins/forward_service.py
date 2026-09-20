@@ -26,11 +26,13 @@ async def prepare_discord_message(
     """
     if filter_config is None:
         filter_config = get_channel_filter(channel_id)
+    translation_config = get_channel_translation_config(channel_id)
 
     text_parts, media_items, has_content = await build_parts(
         message,
         source_label=source_label,
         enabled_types=get_enabled_message_types(filter_config),
+        show_datetime=translation_config.get("show_datetime") is True,
     )
     if not has_content:
         return None
@@ -39,6 +41,6 @@ async def prepare_discord_message(
         text_parts,
         ("discord", str(channel_id), str(message_id)),
         skip_leading_parts=1,
-        config=get_channel_translation_config(channel_id),
+        config=translation_config,
     )
     return text_parts, media_items

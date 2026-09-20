@@ -608,6 +608,9 @@
     color: var(--muted);
   }
   .auto-translation-check { color: var(--fg); }
+  .auto-translation-runtime {
+    margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.5;
+  }
   .auto-translation-field select,
   .auto-translation-field input[type=text],
   .scheduled-message-mode,
@@ -785,9 +788,12 @@
   button.rowicon.translation-active:hover { background: var(--primary-border); }
   .translation-setting-toggle {
     display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-    min-height: 30px; align-self: flex-start;
+    min-height: 30px; min-width: 0; flex: 1 1 0;
   }
   .translation-setting-toggle svg { flex: none; }
+  .translation-setting-buttons {
+    display: flex; align-items: stretch; gap: 8px; width: 100%;
+  }
   .translation-setting-toggle[data-on="1"] {
     background: var(--primary); border-color: var(--primary-border); color: var(--btn-fg);
   }
@@ -936,6 +942,8 @@
     display: inline-flex; align-items: center; justify-content: center;
   }
   .chan-name .chan-name-edit:hover { color: var(--hover-fg); }
+  .discord-channel-link { color: inherit; text-decoration: none; }
+  .discord-channel-link:hover { color: var(--hover-fg); text-decoration: underline; }
   .x-account-link { color: var(--card-heading); text-decoration: none; }
   .x-account-link:hover { color: var(--hover-fg); text-decoration: underline; }
   .tablewrap { overflow-x: auto; }

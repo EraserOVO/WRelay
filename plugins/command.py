@@ -21,8 +21,9 @@ from plugins.config import (
     get_qq_group_entries,
     get_qq_fwd_select_timeout,
     get_qq_c2c_relay_filter,
+    get_channel_translation_config,
     get_x_c2c_relay_filter,
-    get_x_translation_config,
+    get_x_source_translation_config,
 )
 from plugins.fetch import (
     is_discord_url,
@@ -32,6 +33,7 @@ from plugins.fetch import (
 from plugins.media import make_text
 from plugins.sender import send_relay_message
 from plugins.translation import translate_text_parts
+from plugins.user_errors import localize_user_error
 from plugins.filter import get_enabled_message_types
 from plugins.x_rss import (
     is_x_status_url,
@@ -512,7 +514,7 @@ async def _consume_next(bot, event, message, entry, user, qq_message=None):
                 event,
                 "获取Discord消息失败"
                 + (
-                    f"（{fetch_err}）"
+                    f"（{localize_user_error(fetch_err)}）"
                     if fetch_err
                     else ""
                 )
@@ -527,10 +529,12 @@ async def _consume_next(bot, event, message, entry, user, qq_message=None):
         )
 
         relay_filter = get_qq_c2c_relay_filter()
+        translation_config = get_channel_translation_config(msg["channel_id"])
         text_parts, media_items, has_content = await build_parts(
             msg,
             source_label="手动转发来自",
             enabled_types=get_enabled_message_types(relay_filter),
+            show_datetime=translation_config.get("show_datetime") is True,
         )
         if not has_content:
             await bot.send(
@@ -555,16 +559,21 @@ async def _consume_next(bot, event, message, entry, user, qq_message=None):
             await bot.send(
                 event,
                 "获取X消息失败"
-                + (f"（{fetch_err}）" if fetch_err else "")
+                + (f"（{localize_user_error(fetch_err)}）" if fetch_err else "")
             )
             _stop_propagation()
             return
 
         x_filter = get_x_c2c_relay_filter()
+        x_match = is_x_status_url(message)
+        translation_config = get_x_source_translation_config(
+            x_match.group(1) if x_match else source_name
+        )
         rendered = await render_x_post(
             post,
             source_name,
             enabled_types=get_enabled_message_types(x_filter),
+            show_datetime=translation_config.get("show_datetime") is True,
         )
         if rendered is None:
             await bot.send(event, "消息被筛选，未转发")
@@ -576,7 +585,6 @@ async def _consume_next(bot, event, message, entry, user, qq_message=None):
             "x_manual",
             str(post.get("id") or ""),
         )
-        translation_config = get_x_translation_config()
 
     else:
 

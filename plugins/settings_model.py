@@ -140,7 +140,12 @@ class SettingsModel(dict):
     @classmethod
     def default(cls, discord_channels=None, qq_group_openids=None):
         channels = [
-            {"id": str(key), "name": value, "enabled": True}
+            {
+                "id": str(key),
+                "name": value,
+                "enabled": True,
+                "translation_show_datetime": False,
+            }
             for key, value in (discord_channels or {}).items()
         ]
         groups = [
@@ -263,6 +268,7 @@ class SettingsModel(dict):
                 if isinstance(item, dict):
                     item.setdefault("translation_enabled", legacy_enabled)
                     item.setdefault("translation_append_original", legacy_append_original)
+                    item.setdefault("translation_show_datetime", False)
         if qq_forwarding_groups_missing:
             result["qq_forwarding_groups"] = _legacy_qq_forwarding_groups(
                 result,
@@ -306,7 +312,11 @@ def validate_settings(
         for item in items:
             if not isinstance(item, dict):
                 return "%s 的每一项必须是对象" % key
-            for translation_key in ("translation_enabled", "translation_append_original"):
+            for translation_key in (
+                "translation_enabled",
+                "translation_append_original",
+                "translation_show_datetime",
+            ):
                 if translation_key in item and not isinstance(item[translation_key], bool):
                     return "%s.%s 必须是布尔值" % (key, translation_key)
 
@@ -316,7 +326,11 @@ def validate_settings(
     for item in x_sources:
         if not isinstance(item, dict):
             return "x_rss_sources 的每一项必须是对象"
-        for translation_key in ("translation_enabled", "translation_append_original"):
+        for translation_key in (
+            "translation_enabled",
+            "translation_append_original",
+            "translation_show_datetime",
+        ):
             if translation_key in item and not isinstance(item[translation_key], bool):
                 return "x_rss_sources.%s 必须是布尔值" % translation_key
         if "filter_keywords" in item:

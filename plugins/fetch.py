@@ -31,6 +31,7 @@ from plugins.media import (
     make_media_link,
     fetch_bytes_many,
 )
+from plugins.message_time import format_message_datetime
 
 
 # =====================================================
@@ -308,6 +309,7 @@ def normalize_api_message(msg):
         "username": username,
         "channel_id": str(msg.get("channel_id") or ""),
         "channel_name": None,
+        "created_at": msg.get("timestamp"),
         "content": msg.get("content", ""),
         "embeds": embeds,
         "attachments": attachments,
@@ -560,8 +562,8 @@ async def fetch_channel_latest(channel_id):
     return str(data[0].get("id") or "")
 
 
-async def fetch_channel_name(channel_id):
-    """REST 获取频道名称；失败返回 None"""
+async def fetch_channel_metadata(channel_id):
+    """REST 获取频道名称与服务器 ID；失败返回 None"""
     api = f"https://discord.com/api/v10/channels/{channel_id}"
 
     headers = {
@@ -587,8 +589,18 @@ async def fetch_channel_name(channel_id):
         return None
 
     name = data.get("name")
+    guild_id = data.get("guild_id")
 
-    return str(name) if name else None
+    return {
+        "name": str(name) if name else None,
+        "guild_id": str(guild_id) if guild_id else None,
+    }
+
+
+async def fetch_channel_name(channel_id):
+    """REST 获取频道名称；失败返回 None"""
+    metadata = await fetch_channel_metadata(channel_id)
+    return metadata.get("name") if metadata else None
 
 
 async def fetch_channel_gap_count(channel_id, after_id, cap=1000):
@@ -717,6 +729,7 @@ def normalize_event(event, channel_name):
         "username": username,
         "channel_id": str(event.channel_id),
         "channel_name": channel_name,
+        "created_at": getattr(event, "timestamp", None),
         "content": getattr(event, "content", "") or "",
         "embeds": embeds,
         "attachments": attachments,
@@ -733,19 +746,24 @@ def normalize_event(event, channel_name):
 # 都请求一次 Discord。
 # =====================================================
 
-_channel_name_cache = {}
+_channel_metadata_cache = {}
+
+
+async def _resolve_channel_metadata(channel_id):
+    """查 Discord 频道元数据，进程内缓存；失败返回 None"""
+    if channel_id in _channel_metadata_cache:
+        return _channel_metadata_cache[channel_id]
+
+    metadata = await fetch_channel_metadata(channel_id)
+    _channel_metadata_cache[channel_id] = metadata
+
+    return metadata
 
 
 async def _resolve_channel_name(channel_id):
     """查 Discord 真实频道名，进程内缓存；失败返回 None（调用方回退 ID）"""
-    if channel_id in _channel_name_cache:
-        return _channel_name_cache[channel_id]
-
-    name = await fetch_channel_name(channel_id)
-
-    _channel_name_cache[channel_id] = name
-
-    return name
+    metadata = await _resolve_channel_metadata(channel_id)
+    return metadata.get("name") if metadata else None
 
 
 # =====================================================
@@ -865,7 +883,12 @@ def _render_reference(reference):
 # 规范化消息 → QQ 消息段（唯一一份渲染逻辑）
 # =====================================================
 
-async def build_parts(message, source_label="自动转发来自", enabled_types=None):
+async def build_parts(
+    message,
+    source_label="自动转发来自",
+    enabled_types=None,
+    show_datetime=False,
+):
     """规范化消息 → (text_parts, media_items, has_content)
 
     - header（来源频道/作者）始终在 text_parts 首位
@@ -895,12 +918,15 @@ async def build_parts(message, source_label="自动转发来自", enabled_types=
     channel_name = channel_name or channel_id or "?"
     username = message.get("username") or "unknown"
 
-    text_parts.append(
-        make_text(
-            f"{source_label}\n"
-            f"Discord [#{channel_name}] 中 [{username}]的消息："
-        )
+    header = (
+        f"{source_label}\n"
+        f"Discord [#{channel_name}] 中 [{username}]的消息："
     )
+    if show_datetime:
+        message_time = format_message_datetime(message.get("created_at"))
+        if message_time:
+            header += "\n时间：" + message_time
+    text_parts.append(make_text(header))
 
     # ======================
     # 回复引用行（best-effort，失败不影响当前消息转发）

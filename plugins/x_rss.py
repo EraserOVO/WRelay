@@ -47,6 +47,7 @@ from plugins.config import (
 )
 from plugins.filter import check_x_post_filter
 from plugins.media import fetch_bytes_many, make_text, make_media_link
+from plugins.message_time import format_message_datetime
 from plugins.sender import get_qq_bot
 from plugins.stats import record
 from plugins.history import (
@@ -318,7 +319,13 @@ def _image_filename(url):
     return f"image.{ext}"
 
 
-async def _render_post(post, source_name, source_label="自动转发来自", enabled_types=None):
+async def _render_post(
+    post,
+    source_name,
+    source_label="自动转发来自",
+    enabled_types=None,
+    show_datetime=False,
+):
     """推文 dict → (text_parts, media_items) 或 None（无可发送内容）
 
     文字层级与 RSS 顺序一致：header → RT 行 → 主推文字 → 引用行；
@@ -329,9 +336,12 @@ async def _render_post(post, source_name, source_label="自动转发来自", ena
     def type_enabled(kind):
         return enabled_types is None or kind in enabled_types
 
-    text_parts.append(
-        make_text(f"{source_label} X 中 [{source_name}] 的消息：")
-    )
+    header = f"{source_label} X 中 [{source_name}] 的消息："
+    if show_datetime:
+        post_time = format_message_datetime(post.get("pub_date"))
+        if post_time:
+            header += "\n时间：" + post_time
+    text_parts.append(make_text(header))
 
     has_body = False
 
@@ -406,13 +416,14 @@ async def _render_post(post, source_name, source_label="自动转发来自", ena
     return text_parts, media_items
 
 
-async def render_x_post(post, source_name, enabled_types=None):
+async def render_x_post(post, source_name, enabled_types=None, show_datetime=False):
     """渲染私聊手动转发的 X 推文，沿用自动 RSS 的内容格式。"""
     return await _render_post(
         post,
         source_name,
         source_label="手动转发来自",
         enabled_types=enabled_types,
+        show_datetime=show_datetime,
     )
 
 
@@ -509,7 +520,12 @@ async def _send_posts(source, posts):
                 )
                 continue
 
-            rendered = await _render_post(post, name)
+            translation_config = get_x_source_translation_config(source["key"])
+            rendered = await _render_post(
+                post,
+                name,
+                show_datetime=translation_config.get("show_datetime") is True,
+            )
             if rendered is None:
                 # 空 item 或所有内容类型均被关闭时，不存在可恢复的发送
                 # 条件；标记为已处理，避免每轮 304 缓存都重复处理它。
@@ -527,7 +543,7 @@ async def _send_posts(source, posts):
                 text_parts,
                 ("x_rss", source["key"], post["id"]),
                 skip_leading_parts=1,
-                config=get_x_source_translation_config(source["key"]),
+                config=translation_config,
             )
 
             # 组状态可能在渲染期间被面板修改；发送前重新计算目标，避免暂停后仍投递一条。

@@ -153,6 +153,7 @@ from plugins.json_io import (
     ConcurrentWriteError,
 )
 from plugins.settings_model import SettingsModel, validate_settings
+from plugins.user_errors import localize_user_error
 
 # X 转发组：复用 bot 侧的归一化结果（GET 注入默认组）与 source key 派生
 # （保存时清理悬空引用）。导入失败时用最小回退（等价于不做注入/清理）。
@@ -889,7 +890,7 @@ def start_bot():
         )
     except Exception as exc:
         _log("启动机器人失败: %s" % exc)
-        return {"ok": False, "msg": f"启动失败: {exc}"}
+        return {"ok": False, "msg": localize_user_error(f"启动失败: {exc}", "启动失败")}
     _bot["proc"] = proc
     write_pid(proc.pid)
     _want_running = True
@@ -1202,7 +1203,7 @@ ALLOWED_ORIGINS = {
 async def origin_guard(request: Request, call_next):
     origin = request.headers.get("origin")
     if origin and origin not in ALLOWED_ORIGINS:
-        return JSONResponse({"ok": False, "msg": "Forbidden"}, status_code=403)
+        return JSONResponse({"ok": False, "msg": "禁止访问"}, status_code=403)
     path = request.url.path
     if path == "/api/auth/bootstrap":
         # 本地浏览器、内嵌浏览器可能不发送 Origin；令牌本身仍保护后续 API。
@@ -1210,7 +1211,7 @@ async def origin_guard(request: Request, call_next):
         pass
     elif path.startswith("/api/"):
         if request.headers.get("x-wrelay-token") != PANEL_TOKEN:
-            return JSONResponse({"ok": False, "msg": "Unauthorized"}, status_code=401)
+            return JSONResponse({"ok": False, "msg": "未授权"}, status_code=401)
     response = await call_next(request)
     # 面板是本地单页应用，禁止浏览器缓存页面/接口，
     # 否则改版后浏览器仍显示旧页面（曾导致"机器人状态检测中…"残留）
@@ -1302,7 +1303,7 @@ async def api_backup_restore(request: Request, include_runtime_state: bool = Fal
             await request.body(), include_runtime_state, confirm_runtime_state,
         )
     except ValueError as exc:
-        return JSONResponse({"ok": False, "msg": str(exc)}, status_code=400)
+        return JSONResponse({"ok": False, "msg": localize_user_error(exc)}, status_code=400)
     except Exception as exc:
         _log("恢复备份失败: %s" % exc)
         return JSONResponse({"ok": False, "msg": "恢复失败，当前文件未被覆盖"}, status_code=500)
@@ -2240,7 +2241,7 @@ async def api_translation_env_save(request: Request):
     try:
         _write_translation_env(values)
     except ValueError as exc:
-        return JSONResponse({"ok": False, "msg": str(exc)}, status_code=400)
+        return JSONResponse({"ok": False, "msg": localize_user_error(exc)}, status_code=400)
     except Exception:
         _log("写入腾讯翻译密钥失败")
         return JSONResponse({"ok": False, "msg": "保存腾讯 TMT 密钥失败"}, status_code=500)
@@ -2260,10 +2261,10 @@ async def api_translation_ai_test(request: Request):
     try:
         model = await asyncio.to_thread(_probe_ai_api, config)
     except ValueError as exc:
-        return JSONResponse({"ok": False, "msg": str(exc)}, status_code=400)
+        return JSONResponse({"ok": False, "msg": localize_user_error(exc)}, status_code=400)
     except RuntimeError as exc:
         _log("AI API 检测失败: %s" % type(exc).__name__)
-        return JSONResponse({"ok": False, "msg": str(exc)}, status_code=502)
+        return JSONResponse({"ok": False, "msg": localize_user_error(exc, "AI API 检测失败")}, status_code=502)
     except Exception:
         _log("AI API 检测异常")
         return JSONResponse({"ok": False, "msg": "AI API 检测失败"}, status_code=502)
@@ -2286,7 +2287,7 @@ async def api_translation_ai_env_save(request: Request):
     try:
         _write_ai_env(env_name, api_key)
     except ValueError as exc:
-        return JSONResponse({"ok": False, "msg": str(exc)}, status_code=400)
+        return JSONResponse({"ok": False, "msg": localize_user_error(exc)}, status_code=400)
     except Exception:
         _log("保存 AI API 密钥失败")
         return JSONResponse({"ok": False, "msg": "保存 AI API 密钥失败"}, status_code=500)
@@ -2421,7 +2422,7 @@ def api_panel_restart():
         )
     except Exception as exc:
         _log("重启面板 worker 启动失败: %s" % exc)
-        return {"ok": False, "msg": f"启动重启进程失败: {exc}"}
+        return {"ok": False, "msg": localize_user_error(f"启动重启进程失败: {exc}", "启动重启进程失败")}
     _log("面板重启：worker 已拉起，本进程 2 秒后退出")
     # 让 HTTP 响应先返回，再退出当前面板进程
     threading.Timer(2.0, os._exit, args=(0,)).start()
@@ -2463,7 +2464,7 @@ def api_bot_log_clear():
         _log("清空机器人日志")
         return {"ok": True}
     except Exception as exc:
-        return {"ok": False, "msg": str(exc)}
+        return {"ok": False, "msg": localize_user_error(exc)}
 
 
 # ---------------- 离线补发（转发到 bot 18082） ----------------

@@ -14,8 +14,8 @@ async def main():
     build_calls = []
     translate_calls = []
 
-    async def fake_build(message, source_label, enabled_types):
-        build_calls.append((message, source_label, enabled_types))
+    async def fake_build(message, source_label, enabled_types, show_datetime):
+        build_calls.append((message, source_label, enabled_types, show_datetime))
         return ["header", "body"], ["media"], True
 
     async def fake_translate(parts, cache_key, skip_leading_parts, config=None):
@@ -34,6 +34,7 @@ async def main():
 
     assert result == (["translated"], ["media"]), result
     assert build_calls[0][1] == "自动补发来自"
+    assert build_calls[0][3] is False
     assert translate_calls[0][:3] == (
         ["header", "body"],
         ("discord", "C1", "M1"),

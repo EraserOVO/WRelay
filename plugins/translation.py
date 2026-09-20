@@ -4,7 +4,7 @@ import time
 
 from nonebot import logger
 
-from plugins.ai_client import AIClientError, generate_text
+from plugins.ai_client import AIClientError, generate_text, get_last_used_model
 from plugins.config import get_ai_config, get_translation_config
 from plugins.media import make_text
 from plugins.tencent_tmt import TencentTMTError, translate_text
@@ -84,7 +84,7 @@ async def translate_for_relay(text, cache_key, config=None):
                 if provider == "ai":
                     ai_config = get_ai_config()
                     _last_successful_profile = ai_config.get("_profile_name") or None
-                    _last_successful_model = ai_config.get("model") or None
+                    _last_successful_model = get_last_used_model() or ai_config.get("model") or None
                 else:
                     _last_successful_profile = None
                     _last_successful_model = None

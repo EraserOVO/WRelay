@@ -54,6 +54,8 @@ function toggleTheme() {
 })();
 // Discord 频道真实名称映射 {频道ID: 真实名}，由 /api/channel-names 拉取（仅展示，不写入 settings）
 let channelNames = {};
+// Discord 频道服务器 ID 映射 {频道ID: 服务器ID}，仅用于生成频道跳转链接
+let channelGuildIds = {};
 // 转发组机制：Discord、X、QQ→QQ 各自一套上下文（组列表字段 / 成员字段 / active
 // 状态 / id 前缀等），组相关函数全部按 ctx 参数化复用，三者交互一致。
 // active 组 id 各自持久化到 localStorage，刷新后恢复且互不影响；
@@ -107,6 +109,13 @@ function xSourceKey(raw) {
   return raw.replace(/^@+/, "");
 }
 
+function discordChannelUrl(channelId) {
+  const id = String(channelId || "").trim();
+  const guildId = String(channelGuildIds[id] || "").trim();
+  if (!/^\d+$/.test(id) || !/^\d+$/.test(guildId)) return "";
+  return "https://discord.com/channels/" + guildId + "/" + id;
+}
+
 // X source 字符串 → X 账号主页地址；兼容账号名、X/Twitter 主页 URL 和 RSSHub URL。
 function xSourceProfileUrl(raw) {
   const value = String(raw || "").trim();
@@ -131,6 +140,66 @@ function xSourceProfileUrl(raw) {
   handle = String(handle || "").replace(/^@+/, "").trim();
   if (!handle || /[/?#\s]/.test(handle)) return "";
   return "https://x.com/" + encodeURIComponent(handle);
+}
+
+// 只翻译用户可见的错误提示；运行日志区域 renderStatus() 保留原文，便于排查。
+function localizeUserError(message, fallback) {
+  const text = String(message || "").trim();
+  if (!text) return fallback || "操作失败";
+  const statusMatch = text.match(/\bHTTP(?:\s+Error)?\s+(\d{3})\b/i);
+  const status = statusMatch ? statusMatch[1] : "";
+  const lower = text.toLowerCase();
+  if (lower.includes("no_available_workers") || lower.includes("no available workers")) {
+    const prefix = text.includes("AI API 返回 HTTP") && status
+      ? "AI API 返回 HTTP " + status + "："
+      : status ? "接口返回 HTTP " + status + "：" : "";
+    return prefix + "服务商暂时不可用，没有可用的服务节点（所有线路均已熔断或不健康），请稍后重试";
+  }
+  const replacements = [
+    [/Error from provider self-deploy:?/gi, "服务商自托管服务错误："],
+    [/No available workers \(all circuits open or unhealthy\)/gi, "没有可用的服务节点（所有线路均已熔断或不健康）"],
+    [/Service Unavailable/gi, "服务不可用"],
+    [/Bad Gateway/gi, "网关错误"],
+    [/Gateway Timeout/gi, "网关超时"],
+    [/Unauthorized/gi, "未授权"],
+    [/Forbidden/gi, "禁止访问"],
+    [/Not Found/gi, "未找到资源"],
+    [/Bad Request/gi, "请求参数错误"],
+    [/model is not supported/gi, "模型不受支持"],
+    [/invalid model/gi, "模型无效"],
+    [/invalid api key/gi, "API 密钥无效"],
+    [/authentication failed/gi, "认证失败"],
+    [/connection refused/gi, "连接被拒绝"],
+    [/connection reset/gi, "连接被重置"],
+    [/read timed out/gi, "读取超时"],
+    [/ReadTimeout/gi, "读取超时"],
+    [/timed out/gi, "请求超时"],
+    [/timeout/gi, "超时"],
+    [/connection error/gi, "连接错误"],
+    [/ConnectError/gi, "连接错误"],
+    [/ConnectionError/gi, "连接错误"],
+    [/JSONDecodeError/gi, "响应 JSON 解析失败"],
+    [/No such file or directory/gi, "文件或目录不存在"],
+    [/Permission denied/gi, "没有权限"],
+    [/Request failed/gi, "请求失败"],
+    [/HTTP Error/gi, "HTTP 错误"],
+  ];
+  let translated = text;
+  replacements.forEach(function (item) {
+    translated = translated.replace(item[0], item[1]);
+  });
+  const untranslated = translated.replace(/\b(?:AI|API|HTTP|TMT)\b/gi, "");
+  if (translated.includes("AI API 返回 HTTP") && /[A-Za-z]/.test(untranslated)) {
+    return "AI API 返回 HTTP " + (status || "未知") + "：服务商返回了无法识别的错误，请检查配置或稍后重试";
+  }
+  if (/[A-Za-z]/.test(untranslated)) {
+    const prefixMatch = translated.match(/^(启动失败|启动重启进程失败|执行失败|请求异常|调用失败|保存失败|恢复失败)/);
+    if (prefixMatch) return prefixMatch[1] + "，请稍后重试";
+  }
+  if (!/[\u3400-\u9fff]/.test(translated) && /[A-Za-z]/.test(translated)) {
+    return status ? "接口返回 HTTP " + status : (fallback || "请求失败");
+  }
+  return translated;
 }
 
 // ---------------- 主要界面切换（Discord → QQ / X → QQ / QQ → QQ） ----------------
@@ -293,7 +362,23 @@ function renderStatus(st) {
   const stick = logFollow;
   el.textContent = st.log || "（暂无日志）";
   if (stick) el.scrollTop = el.scrollHeight;
+  renderTranslationRuntimeStatus(st);
   renderAutostart(document.getElementById("btnAutostart"), st.autostart);
+}
+
+function renderTranslationRuntimeStatus(st) {
+  const health = (st && st.health) || {};
+  const runtime = health.translation || {};
+  let text = st && st.running ? "当前工作模型：尚未成功翻译" : "当前工作模型：机器人未运行";
+  if (runtime.provider === "ai" && runtime.model) {
+    text = "当前工作模型：" + runtime.model;
+  } else if (runtime.provider === "tencent_tmt") {
+    text = "当前翻译服务：腾讯 TMT";
+  }
+  ["translationRuntimeStatus", "xTranslationRuntimeStatus"].forEach(function (id) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  });
 }
 
 // 开机自启按钮：√ / × 用 SVG 图标绘制（不使用文字字符），状态记录在 data-on 上供点击切换判断
@@ -1053,6 +1138,10 @@ function renderSettings() {
     tr.setAttribute("data-id", String(c.id));
     const gi = settings.discord_channels.indexOf(c);
     const realName = channelNames[c.id] || "";
+    const channelUrl = discordChannelUrl(c.id);
+    const realNameHtml = channelUrl
+      ? '<a class="discord-channel-link" href="' + escapeHtml(channelUrl) + '" target="_blank" rel="noopener noreferrer" title="打开 Discord 频道">' + escapeHtml(realName) + '</a>'
+      : escapeHtml(realName);
     tr.innerHTML =
       '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
       '<td style="text-align:center"><input type="checkbox" data-kind="chan" data-i="' + gi + '"' + (c.enabled ? " checked" : "") + '></td>' +
@@ -1061,7 +1150,7 @@ function renderSettings() {
           '<span class="chan-name-text">' + escapeHtml(c.name || "") + '</span>' +
           '<span class="chan-name-edit" data-kind="chanNameEdit" data-i="' + gi + '" title="编辑频道名称">' + SVG_PEN + '</span>' +
         '</span>' +
-        (realName ? '<div style="color:var(--name-green);font-size:12px;">' + escapeHtml(realName) + '</div>' : '') +
+        (realName ? '<div style="color:var(--name-green);font-size:12px;">' + realNameHtml + '</div>' : '') +
       '</td>' +
       '<td class="mono">' + escapeHtml(c.id) + '</td>' +
       '<td><div style="display:flex;gap:4px;justify-content:flex-end;">' +
@@ -1429,7 +1518,7 @@ function renderXStatus(st) {
     badgeText = "未运行";
     badgeCls = "badge off";
   } else if (st.ok === false) {
-    badgeText = st.msg || "检测中…";
+    badgeText = localizeUserError(st.msg, "检测中…");
     badgeCls = "badge warn";
   } else if (!st.running) {
     // 轮询循环只在 QQ Bot 连接后启动：未启动即 QQ 尚未连接过
@@ -1464,7 +1553,7 @@ function renderXStatus(st) {
     if (!botUp) {
       summary.textContent = "—";
     } else if (failed) {
-      summary.textContent = (st.last_error || "请求失败") + " · 上次轮询 " + pollText;
+      summary.textContent = localizeUserError(st.last_error, "请求失败") + " · 上次轮询 " + pollText;
     } else {
       summary.textContent = "订阅源 " + srcText + " · 上次轮询 " + pollText
         + " · 发现 " + (Number(st.last_new_count) || 0) + " 条"
@@ -1529,7 +1618,7 @@ function renderMessageTrace(data) {
   if (!body || !summary) return;
 
   if (!data || data.ok === false) {
-    summary.textContent = (data && data.msg) || "机器人未运行";
+    summary.textContent = localizeUserError(data && data.msg, "机器人未运行");
     body.innerHTML = '<tr><td colspan="5" class="message-trace-empty">暂时无法读取投递记录</td></tr>';
     return;
   }
@@ -1916,6 +2005,7 @@ async function refreshChannelNames() {
   try {
     const r = await jget("/api/channel-names");
     if (r && r.names) channelNames = r.names || {};
+    if (r && r.guild_ids) channelGuildIds = r.guild_ids || {};
   } catch (err) { /* ignore */ }
   renderSettings();
 }
@@ -1935,7 +2025,7 @@ function showAlert(title, message) {
   body.innerHTML = "";
   const p = document.createElement("div");
   p.style.whiteSpace = "pre-wrap";
-  p.textContent = message;
+  p.textContent = localizeUserError(message);
   body.appendChild(p);
   setConfirmButtons("确定", false);
   confirmAction = null;
@@ -1948,7 +2038,7 @@ function showConfirmDlg(title, message, onOk, okText) {
   body.innerHTML = "";
   const p = document.createElement("div");
   p.style.whiteSpace = "pre-wrap";
-  p.textContent = message;
+  p.textContent = localizeUserError(message);
   body.appendChild(p);
   setConfirmButtons(okText || "确定", true);
   confirmAction = onOk;
@@ -2333,7 +2423,20 @@ function openRelayChannelsModal(scope) {
           name.textContent = "@" + id;
         }
       } else {
-        name.textContent = channelNames[id] ? "# " + channelNames[id] : "# " + (channel.name || id);
+        const realName = channelNames[id] || "";
+        const channelUrl = discordChannelUrl(id);
+        if (realName && channelUrl) {
+          const link = document.createElement("a");
+          link.className = "discord-channel-link";
+          link.href = channelUrl;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.textContent = "# " + realName;
+          link.title = "打开 Discord 频道";
+          name.appendChild(link);
+        } else {
+          name.textContent = realName ? "# " + realName : "# " + (channel.name || id);
+        }
       }
       name.title = name.textContent;
       const channelId = document.createElement("div");
@@ -2467,6 +2570,7 @@ function openTranslationSourceModal(scope, index) {
   document.getElementById("translationSourceName").textContent = label;
   renderTranslationSettingButton("translationSourceEnabled", item.translation_enabled === true, "启用翻译");
   renderTranslationSettingButton("translationSourceAppendOriginal", item.translation_append_original !== false, "保留原文");
+  renderTranslationSettingButton("translationSourceShowDatetime", item.translation_show_datetime === true, "显示时间日期");
   syncTranslationSourceModalButtons();
   document.getElementById("translationSourceModal").style.display = "flex";
 }
@@ -2503,6 +2607,7 @@ async function saveTranslationSourceModal() {
   if (!item) return;
   item.translation_enabled = document.getElementById("translationSourceEnabled").dataset.on === "1";
   item.translation_append_original = document.getElementById("translationSourceAppendOriginal").dataset.on === "1";
+  item.translation_show_datetime = document.getElementById("translationSourceShowDatetime").dataset.on === "1";
   const saved = await saveAndReload();
   if (saved) closeTranslationSourceModal();
 }
@@ -2696,7 +2801,7 @@ async function testAiApi() {
       api_key: (aiProfileDraft.apiKeys || {})[String(profile.id)] || "",
       timeout_seconds: profile.timeout_seconds,
     });
-    status.textContent = result.ok ? result.msg : (result.msg || "检测失败");
+    status.textContent = result.ok ? result.msg : localizeUserError(result.msg, "检测失败");
   } catch (err) {
     status.textContent = "检测请求失败";
   } finally {
@@ -2718,7 +2823,7 @@ async function openTranslationConfigModal() {
   const keyReady = !!configured.WRELAY_TENCENT_SECRET_KEY;
   const status = document.getElementById("tencentConfigStatus");
   if (!r || !r.ok) {
-    status.textContent = (r && r.msg) || "无法读取 TMT 配置状态";
+    status.textContent = localizeUserError((r && r.msg), "无法读取 TMT 配置状态");
   } else if (idReady && keyReady) {
     status.textContent = "TMT SecretId / SecretKey 已配置；输入框留空表示保持当前密钥。";
   } else {
@@ -2974,6 +3079,10 @@ document.addEventListener("click", async function (e) {
   if (btn.id === "translationSourceAppendOriginal") {
     if (btn.disabled) return;
     renderTranslationSettingButton("translationSourceAppendOriginal", btn.dataset.on !== "1", "保留原文");
+    return;
+  }
+  if (btn.id === "translationSourceShowDatetime") {
+    renderTranslationSettingButton("translationSourceShowDatetime", btn.dataset.on !== "1", "显示时间日期");
     return;
   }
   if (btn.id === "btnRelayRegisteredChannels") {

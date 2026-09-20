@@ -12,12 +12,18 @@ class AIClientError(RuntimeError):
     """AI 服务未配置、请求失败或响应格式无效。"""
 
 
+def get_last_used_model():
+    """返回最近一次成功完成请求的实际模型，不包含任何凭据。"""
+    return _last_used_model
+
+
 _ai_client = None
 _MODEL_CACHE_TTL = 300
 _MODEL_RECHECK_TTL = 300
 _model_cache = {}
 _model_overrides = {}
 _model_recheck_at = {}
+_last_used_model = None
 _PREFERRED_MODELS = (
     "DeepSeek-V4-Flash",
     "DeepSeek-V4.1-Flash",
@@ -165,6 +171,7 @@ async def _request_completion(base_url, api_key, model, messages, max_tokens, te
 
 async def generate_text(messages, max_tokens=None, temperature=0.7):
     """调用已配置的 OpenAI 兼容接口，返回供翻译路由使用的纯文本。"""
+    global _last_used_model
     config = get_ai_config()
     api_key = os.getenv(str(config.get("api_key_env") or "WRELAY_AI_API_KEY"), "").strip()
     if not api_key:
@@ -204,6 +211,7 @@ async def generate_text(messages, max_tokens=None, temperature=0.7):
                 config.get("base_url"), api_key, fallback_model, messages,
                 output_limit, temperature, timeout,
             )
+            model = fallback_model
         except AIClientError:
             raise
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as fallback_exc:
@@ -214,4 +222,5 @@ async def generate_text(messages, max_tokens=None, temperature=0.7):
     text = str(content or "").strip()
     if not text:
         raise AIClientError("AI API 未返回文本")
+    _last_used_model = model
     return text

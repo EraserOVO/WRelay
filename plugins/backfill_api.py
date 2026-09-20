@@ -15,10 +15,11 @@ from plugins.history import (
 )
 from plugins.json_io import load_json
 from plugins.paths import data_path
+from plugins.user_errors import localize_user_error
 from plugins.fetch import (
     fetch_channel_latest,
     fetch_channel_gap_count,
-    _resolve_channel_name,
+    _resolve_channel_metadata,
 )
 from plugins.backfill import _backfill_missed
 from plugins.dedup import (
@@ -192,20 +193,28 @@ async def api_backfill_clear():
 async def api_channel_names():
     """返回设置文件中全部频道的 Discord 真实名称（供面板展示）
 
-    返回 {"ok": True, "names": {频道ID: 真实名或null}}；
+    返回 {"ok": True, "names": {频道ID: 真实名或null},
+    "guild_ids": {频道ID: 服务器ID或null}}；
     API 拉取失败的频道值为 null（复用 fetch.py 进程内缓存）"""
     channels = get_all_channels()
 
     if not channels:
-        return {"ok": True, "names": {}}
+        return {"ok": True, "names": {}, "guild_ids": {}}
 
     results = await asyncio.gather(
-        *(_resolve_channel_name(channel_id) for channel_id in channels)
+        *(_resolve_channel_metadata(channel_id) for channel_id in channels)
     )
 
     return {
         "ok": True,
-        "names": dict(zip(channels, results)),
+        "names": {
+            channel_id: (metadata or {}).get("name")
+            for channel_id, metadata in zip(channels, results)
+        },
+        "guild_ids": {
+            channel_id: (metadata or {}).get("guild_id")
+            for channel_id, metadata in zip(channels, results)
+        },
     }
 
 
@@ -272,10 +281,11 @@ async def api_channels_refresh():
     except asyncio.TimeoutError:
         return {"ok": False, "msg": "刷新超时"}
     except Exception as exc:
-        return {"ok": False, "msg": f"执行失败: {exc}"}
+        return {"ok": False, "msg": localize_user_error(f"执行失败: {exc}", "执行失败")}
 
     if proc.returncode != 0:
-        return {"ok": False, "msg": (stderr.decode("utf-8", "ignore") or "执行失败")[:200]}
+        detail = (stderr.decode("utf-8", "ignore") or "执行失败")[:200]
+        return {"ok": False, "msg": localize_user_error(detail, "执行失败")}
 
     out = stdout.decode("utf-8", "ignore").strip()
     summary = out.splitlines()[-1] if out else "已刷新"

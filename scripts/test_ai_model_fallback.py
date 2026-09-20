@@ -77,6 +77,7 @@ async def main():
         ), patch.dict(os.environ, {"WRELAY_TEST_KEY": "test-key"}, clear=False):
             assert await ai_client.generate_text([{"role": "user", "content": "hello"}]) == "译文"
             assert client.post_models == [blocked_model, "DeepSeek-V4.1-Flash"]
+            assert ai_client.get_last_used_model() == "DeepSeek-V4.1-Flash"
             assert client.get_paths == ["https://example.test/v1/models"]
             client.post_models.clear()
             client.get_paths.clear()
