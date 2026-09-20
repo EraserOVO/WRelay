@@ -515,35 +515,35 @@
   </div>
 </div>
 <div id="translationConfigModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;align-items:center;justify-content:center;">
-  <div class="translation-config-dialog" style="position:relative;background:var(--modal-bg);border:1px solid var(--modal-border);border-radius:10px;padding:18px;max-width:460px;width:92%;display:flex;flex-direction:column;">
+  <div class="translation-config-dialog" style="position:relative;background:var(--modal-bg);border:1px solid var(--modal-border);border-radius:10px;padding:16px;max-width:460px;width:92%;display:flex;flex-direction:column;">
     <button type="button" class="modal-x" data-close="translationConfigModal" aria-label="关闭">×</button>
-    <h3 style="margin:0 0 14px;">翻译服务配置</h3>
+    <h3 style="margin:0 0 10px;">翻译服务配置</h3>
     <div id="translationRuntimeStatus" class="translation-runtime-banner" aria-live="polite">当前工作模型：尚未成功翻译</div>
-    <h4 style="margin:0 0 10px;font-size:14px;">AI API 配置</h4>
+    <h4 class="translation-config-section-title">AI API 配置</h4>
     <div class="ai-profile-toolbar">
       <label for="aiProfileSelect">已保存配置</label>
       <select id="aiProfileSelect" aria-label="已保存的 AI API 配置"></select>
       <button id="aiProfileAdd" class="sec" type="button">新增</button>
       <button id="aiProfileDelete" class="danger" type="button">删除</button>
     </div>
-    <label for="aiProfileName" style="font-size:13px;color:var(--muted);margin:14px 0 4px;">配置名称</label>
+    <label for="aiProfileName" class="translation-config-label">配置名称</label>
     <input type="text" id="aiProfileName" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
-    <label for="aiBaseUrl" style="font-size:13px;color:var(--muted);margin-bottom:4px;">AI API 地址</label>
+    <label for="aiBaseUrl" class="translation-config-label">AI API 地址</label>
     <input type="text" id="aiBaseUrl" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
-    <label for="aiModel" style="font-size:13px;color:var(--muted);margin:14px 0 4px;">AI 模型</label>
+    <label for="aiModel" class="translation-config-label">AI 模型</label>
     <input type="text" id="aiModel" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
-    <label for="aiApiKeyEnv" style="font-size:13px;color:var(--muted);margin:14px 0 4px;">API 密钥环境变量名</label>
+    <label for="aiApiKeyEnv" class="translation-config-label">API 密钥环境变量名</label>
     <input type="text" id="aiApiKeyEnv" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
-    <label for="aiApiKey" style="font-size:13px;color:var(--muted);margin:14px 0 4px;">API 密钥</label>
+    <label for="aiApiKey" class="translation-config-label">API 密钥</label>
     <input type="password" id="aiApiKey" autocomplete="new-password" spellcheck="false" placeholder="留空表示保持已保存的密钥" style="width:100%;box-sizing:border-box;">
     <div style="display:flex;align-items:center;gap:10px;margin-top:10px;">
       <button id="aiApiTest" class="sec" type="button">检测当前 API</button>
       <span id="aiApiTestStatus" style="font-size:12px;color:var(--muted);" aria-live="polite"></span>
     </div>
-    <h4 style="margin:18px 0 10px;font-size:14px;">腾讯 TMT</h4>
-    <label for="tencentSecretId" style="font-size:13px;color:var(--muted);margin-bottom:4px;">SecretId</label>
+    <h4 class="translation-config-section-title">腾讯 TMT</h4>
+    <label for="tencentSecretId" class="translation-config-label">SecretId</label>
     <input type="text" id="tencentSecretId" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
-    <label for="tencentSecretKey" style="font-size:13px;color:var(--muted);margin:14px 0 4px;">SecretKey</label>
+    <label for="tencentSecretKey" class="translation-config-label">SecretKey</label>
     <input type="password" id="tencentSecretKey" autocomplete="new-password" spellcheck="false" style="width:100%;box-sizing:border-box;">
     <p id="tencentConfigStatus" style="font-size:12px;color:var(--muted);margin:10px 0 0;line-height:1.6;">TMT 配置状态读取中……</p>
     <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.6;">密钥会写入对应环境变量，不会保存到 settings.json；留空表示保持当前密钥。在此窗口选择已保存配置并保存后即可切换模型。</p>

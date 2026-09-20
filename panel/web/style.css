@@ -610,16 +610,22 @@
   .auto-translation-check { color: var(--fg); }
   .translation-runtime-banner {
     display: flex; align-items: center; gap: 10px;
-    margin: 0 0 16px; padding: 11px 13px;
-    border: 1px solid var(--filter-active-border); border-radius: 8px;
-    background: var(--filter-active-bg); color: var(--card-heading);
-    font-size: 14px; font-weight: 700; line-height: 1.5;
-    box-shadow: 0 0 0 1px var(--primary-border);
+    margin: 0 0 12px; padding: 7px 10px;
+    border: 1px solid var(--table-border); border-radius: 6px;
+    background: var(--sec-bg); color: var(--muted);
+    font-size: 12px; font-weight: 600; line-height: 1.4;
   }
   .translation-runtime-banner::before {
-    content: ""; width: 9px; height: 9px; flex: none;
-    border-radius: 50%; background: var(--filter-active-border);
-    box-shadow: 0 0 0 4px var(--primary-border);
+    content: ""; width: 6px; height: 6px; flex: none;
+    border-radius: 50%; background: var(--muted);
+  }
+  .translation-config-section-title {
+    margin: 14px 0 8px; font-size: 14px;
+  }
+  .translation-config-section-title:first-of-type { margin-top: 0; }
+  .translation-config-label {
+    display: block; margin: 10px 0 4px;
+    font-size: 13px; color: var(--muted);
   }
   .auto-translation-field select,
   .auto-translation-field input[type=text],
