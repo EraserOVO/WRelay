@@ -677,6 +677,16 @@
   .auto-translation-field input[type=text] {
     width: 150px;
   }
+  .qq-bot-workspace-field {
+    flex: 0 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+  }
+  .qq-bot-workspace-field select {
+    width: 180px;
+    max-width: 180px;
+    min-width: 0;
+  }
   .ai-profile-toolbar {
     display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
     color: var(--muted); font-size: 13px;

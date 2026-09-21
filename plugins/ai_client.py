@@ -136,17 +136,34 @@ async def _fetch_models(base_url, api_key, timeout, force=False):
     return models
 
 
-def _choose_fallback_model(models, failed_model):
-    available = [str(model).strip() for model in models if str(model).strip()]
-    available = [model for model in available if model != failed_model]
+def _choose_fallback_models(models, failed_models):
+    failed_models = {
+        str(model).strip() for model in (failed_models or ()) if str(model).strip()
+    }
+    available = []
+    seen = set()
+    for model in models:
+        model = str(model).strip()
+        if not model or model in failed_models or model in seen:
+            continue
+        lowered = model.lower()
+        if "ocr" in lowered or "mineru" in lowered or "embedding" in lowered:
+            continue
+        seen.add(model)
+        available.append(model)
+
+    ordered = []
     for preferred in _PREFERRED_MODELS:
         if preferred in available:
-            return preferred
-    for model in available:
-        lowered = model.lower()
-        if "ocr" not in lowered and "mineru" not in lowered and "embedding" not in lowered:
-            return model
-    return ""
+            ordered.append(preferred)
+    ordered.extend(model for model in available if model not in ordered)
+    return ordered
+
+
+def _choose_fallback_model(models, failed_model):
+    """兼容旧调用方，返回排序后的第一个备用模型。"""
+    candidates = _choose_fallback_models(models, {failed_model})
+    return candidates[0] if candidates else ""
 
 
 async def _model_for_request(config, api_key, timeout, configured_model, override_key):
@@ -213,25 +230,45 @@ async def generate_text(messages, max_tokens=None, temperature=0.7):
     except httpx.HTTPStatusError as exc:
         if not _should_switch_model(exc):
             raise AIClientError("AI API 调用失败: %s" % exc) from exc
-        try:
-            models = await _fetch_models(
-                config.get("base_url"), api_key, timeout, force=True
-            )
-            fallback_model = _choose_fallback_model(models, model)
-            if not fallback_model:
-                raise AIClientError("AI API 当前模型不可用，且没有可切换模型")
+        models = await _fetch_models(
+            config.get("base_url"), api_key, timeout, force=True
+        )
+        fallback_models = _choose_fallback_models(models, {model})
+        if not fallback_models:
+            raise AIClientError("AI API 当前模型不可用，且没有可切换模型")
+        last_model_error = exc
+        for index, fallback_model in enumerate(fallback_models, start=1):
             _model_overrides[override_key] = fallback_model
             _model_recheck_at[override_key] = time.monotonic() + _MODEL_RECHECK_TTL
-            logger.warning("AI API 模型不可用或繁忙，已自动切换：{} -> {}", model, fallback_model)
-            content = await _request_completion(
-                config.get("base_url"), api_key, fallback_model, messages,
-                output_limit, temperature, timeout,
+            logger.warning(
+                "AI API 模型不可用或繁忙，已自动切换：{} -> {}（候选 {}/{}）",
+                model,
+                fallback_model,
+                index,
+                len(fallback_models),
             )
+            try:
+                content = await _request_completion(
+                    config.get("base_url"), api_key, fallback_model, messages,
+                    output_limit, temperature, timeout,
+                )
+            except httpx.HTTPStatusError as fallback_exc:
+                if _should_switch_model(fallback_exc):
+                    last_model_error = fallback_exc
+                    logger.warning(
+                        "AI API 备用模型仍不可用，继续尝试下一个模型：{}",
+                        fallback_model,
+                    )
+                    continue
+                raise AIClientError("AI API 自动切换失败: %s" % fallback_exc) from fallback_exc
+            except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as fallback_exc:
+                raise AIClientError("AI API 自动切换失败: %s" % fallback_exc) from fallback_exc
             model = fallback_model
-        except AIClientError:
-            raise
-        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as fallback_exc:
-            raise AIClientError("AI API 自动切换失败: %s" % fallback_exc) from fallback_exc
+            break
+        else:
+            _model_overrides.pop(override_key, None)
+            _model_recheck_at.pop(override_key, None)
+            raise AIClientError("AI API 当前模型不可用，已尝试所有可用模型") from last_model_error
     except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
         raise AIClientError("AI API 调用失败: %s" % exc) from exc
 

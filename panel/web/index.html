@@ -31,6 +31,7 @@
       <h2 style="display:flex;align-items:center;gap:6px;">机器人状态 <button class="hintbtn" data-hint="managedHint" data-title="机器人状态">?</button></h2>
       <div class="row">
         <span id="badge" class="badge off">检测中…</span>
+        <label class="auto-translation-field qq-bot-workspace-field"><span>当前 QQ Bot</span><select id="qqBotWorkspace"></select></label>
         <span id="pidinfo" class="pid"></span>
         <span id="stats" class="pid"></span>
       </div>
@@ -139,7 +140,7 @@
             <thead><tr>
               <th style="width:1.6%"></th>
               <th style="width:2.3%;text-align:center" class="col-muted" title="启用 = 是否允许该群接收转发"><input type="checkbox" id="groupAllEnabled"></th>
-              <th style="width:11.2%">名称</th><th style="width:18%">账号</th><th style="width:13%">Group OpenID</th><th style="width:12%">QQ Bot</th><th style="width:3.5%"></th>
+              <th style="width:11.2%">名称</th><th style="width:18%">账号</th><th style="width:13%">Group OpenID</th><th style="width:3.5%"></th>
             </tr></thead>
             <tbody id="groupBody"></tbody>
           </table>

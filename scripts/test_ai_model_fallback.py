@@ -28,20 +28,27 @@ class FakeResponse:
 
 
 class FakeClient:
-    def __init__(self, blocked_model, blocked_status, blocked_message, models=None):
+    def __init__(self, blocked_model, blocked_status, blocked_message, models=None, blocked_models=None):
         self.post_models = []
         self.get_paths = []
         self.blocked_model = blocked_model
         self.blocked_status = blocked_status
         self.blocked_message = blocked_message
+        self.blocked_models = dict(blocked_models or {})
+        if blocked_model:
+            self.blocked_models.setdefault(
+                blocked_model, (blocked_status, blocked_message)
+            )
         self.models = list(models or ["DeepSeek-V4.1-Flash"])
 
     async def post(self, _url, *, json, **_kwargs):
         self.post_models.append(json["model"])
-        if json["model"] == self.blocked_model:
+        failure = self.blocked_models.get(json["model"])
+        if failure:
+            status_code, message = failure
             return FakeResponse(
-                self.blocked_status,
-                {"error": {"message": self.blocked_message}},
+                status_code,
+                {"error": {"message": message}},
             )
         return FakeResponse(200, {"choices": [{"message": {"content": "译文"}}]})
 
@@ -94,6 +101,42 @@ async def main():
             assert await ai_client.generate_text([{"role": "user", "content": "hello"}]) == "译文"
             assert client.post_models == ["DeepSeek-V4.1-Flash"]
             assert client.get_paths == []
+
+    client = FakeClient(
+        "configured-model",
+        400,
+        "Unsupported model: configured-model",
+        models=["DeepSeek-V4-Flash", "DeepSeek-V4.1-Flash", "Qwen3.8-Flash-Next"],
+        blocked_models={
+            "DeepSeek-V4-Flash": (503, "Service Unavailable: model overloaded"),
+        },
+    )
+    config = {
+        "base_url": "https://example.test/v1",
+        "model": "configured-model",
+        "api_key_env": "WRELAY_TEST_KEY",
+        "timeout_seconds": 5,
+        "max_output_tokens": 16,
+        "_profile_id": "profile-sequential",
+    }
+    ai_client._model_cache.clear()
+    ai_client._model_overrides.clear()
+    ai_client._model_recheck_at.clear()
+    with patch.object(ai_client, "_ai_client", client), patch.object(
+        ai_client, "get_ai_config", return_value=config
+    ), patch.dict(os.environ, {"WRELAY_TEST_KEY": "test-key"}, clear=False):
+        assert await ai_client.generate_text([{"role": "user", "content": "hello"}]) == "译文"
+        assert client.post_models == [
+            "configured-model",
+            "DeepSeek-V4-Flash",
+            "DeepSeek-V4.1-Flash",
+        ]
+        assert ai_client.get_last_used_model() == "DeepSeek-V4.1-Flash"
+        client.post_models.clear()
+        client.get_paths.clear()
+        assert await ai_client.generate_text([{"role": "user", "content": "hello"}]) == "译文"
+        assert client.post_models == ["DeepSeek-V4.1-Flash"]
+        assert client.get_paths == []
     client = FakeClient("quota-model", 429, "rate limit exceeded")
     config = {
         "base_url": "https://example.test/v1",
@@ -140,6 +183,7 @@ async def main():
         client.post_models.clear()
         client.get_paths.clear()
         client.blocked_model = None
+        client.blocked_models.pop("busy-model", None)
         client.models = ["busy-model", "DeepSeek-V4.1-Flash"]
         ai_client._model_recheck_at.clear()
         assert await ai_client.generate_text([{"role": "user", "content": "hello"}]) == "译文"

@@ -109,6 +109,27 @@ def main():
     assert panel._public_qq_bots(updated_bots) == [{"appid": "A"}, {"appid": "B"}]
     print("PASS - QQ Bot 多凭据保存保留旧 Secret 且不向前端泄露")
 
+    with tempfile.TemporaryDirectory(prefix="wrelay_group_bot_test_") as tmp:
+        old_data_dir = panel.DATA_DIR
+        try:
+            panel.DATA_DIR = tmp
+            (Path(tmp) / "qq_group_openids.json").write_text(
+                json.dumps({
+                    "group_openids": ["GROUP_A", "GROUP_B"],
+                    "group_bot_ids": {"GROUP_A": "BOT_A", "GROUP_B": "BOT_B"},
+                }),
+                encoding="utf-8",
+            )
+            settings = {"qq_group_openids": []}
+            assert panel.sync_discovered_groups(settings) == 2
+            assert settings["qq_group_openids"] == [
+                {"openid": "GROUP_A", "enabled": False, "remark": "自动发现，点击启用", "bot_id": "BOT_A"},
+                {"openid": "GROUP_B", "enabled": False, "remark": "自动发现，点击启用", "bot_id": "BOT_B"},
+            ]
+        finally:
+            panel.DATA_DIR = old_data_dir
+    print("PASS - 自动发现群保留 QQ Bot 归属")
+
     with tempfile.TemporaryDirectory(prefix="wrelay_panel_test_") as tmp:
         path = Path(tmp) / "settings.json"
         old = panel.SETTINGS_FILE

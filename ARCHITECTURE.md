@@ -176,13 +176,14 @@ plugins/translation.py
                     │
                     ├── 首次请求配置模型
                     ├── 模型不存在、模型并发受限，或明确的模型容量/节点不可用
-                    │   → 查询 /models，选择可用模型并自动重试
+                    │   → 查询 /models，按优先级逐个尝试可用模型
                     └── 成功后记录实际使用的模型
 ```
 
 AI 模型轮换只针对明确的模型级错误：400 模型不存在/不支持、包含模型并发限制的
 429，以及明确表示无可用 worker、服务不可用或模型过载的 500/503。普通网络超时、
-普通配额 429、空响应和未指向模型的服务端错误不会触发轮换。所有服务均失败时，
+普通配额 429、空响应和未指向模型的服务端错误不会触发轮换。候选模型逐个失败后，
+再视为本次 AI 服务失败；所有服务均失败时，
 翻译路由返回空结果，由调用方保留原文。
 
 `plugins/health_api.py` 提供最近一次真实翻译成功使用的服务和模型，管理面板据此显示
@@ -279,6 +280,15 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 
 ### 7.1 QQ 接收群
 
+多 QQ Bot 配置使用面板左上角的「当前 QQ Bot」作为工作区。Discord → QQ 和 X → QQ
+页面只展示当前 Bot 发现并归属的群，不再在每个群行单独绑定 Bot；同一个实体群可以因
+不同 Bot 使用不同的 `group_openid`，分别加入多个 Bot 工作区。新发现或注册审核通过的群
+记录发现它的 Bot；旧配置中 `bot_id` 为空的群继续兼容为第一个已连接 Bot。
+
+机器人状态接口同时返回整体 QQ 连接状态和已连接 Bot ID 列表。面板优先按当前工作区的
+逐 Bot 状态显示；单 Bot 在旧版健康接口下可回退到整体 QQ 状态，多 Bot 缺少逐 Bot 状态
+时显示「状态未知」，避免把其他 Bot 的连接状态误算过来。
+
 | 项目 | 说明 |
 |------|------|
 | 数据来源 | `settings.json → qq_group_openids` |
@@ -323,7 +333,7 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | `data/settings.json` | 面板（主要；保存时先轮转 `settings.json.bak` 备份）；bot（仅文件完全不存在时首次默认初始化） | bot（高频，带缓存；损坏/结构无效时内存降级，不覆盖原文件）、面板 | 启用的群/频道/用户列表、补发开关、模式预设 |
 | `data/settings.json.bak` | 面板（每次保存前轮转写入） | 面板 / 人工（配置损坏或误写时恢复） | 上一版 settings.json 的完整备份（仅保留最近一代） |
 | `data/discord_last.json` | bot | bot | 每个频道每个群最后成功转发的消息 ID（去重用） |
-| `data/qq_group_openids.json` | bot（自动发现）；面板（审核通过时补回缺失 openid） | 面板（同步预览、审核补回校验） | 机器人发现的所有群 openid（原始记录，非权限，不进同步名单） |
+| `data/qq_group_openids.json` | bot（自动发现）；面板（审核通过时补回缺失 openid） | 面板（同步预览、审核补回校验） | 机器人发现的所有群 openid 及 `group_bot_ids` 归属映射（原始记录，非权限，不进同步名单） |
 | `data/qq_user_openids.json` | bot（自动发现）；面板（审核通过时补回缺失 openid） | 面板（同步预览、审核补回校验） | 机器人发现的所有用户 openid（原始记录，非权限，不进同步名单） |
 | `data/qq_registrations.json` | bot（注册指令）；面板（审核通过/拒绝时移除申请并写回） | 面板（注册审核列表） | 待审核的注册申请：用户（QQ号/昵称）、群（群号/群名/操作人），非权限 |
 | `data/qq_identities.json` | bot（自动记录） | 面板（展示） | 用户昵称 / 群名 / 最后活动时间 / 管理员备注 |
@@ -369,9 +379,9 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | `plugins/identities.py` | OpenID 身份资料库（昵称/群名/备注） | 低 |
 | `plugins/stats.py` | 转发统计 | 低 |
 | `plugins/json_io.py` | JSON 原子读写工具 | 低 |
-| `plugins/health_api.py` | Bot 健康状态接口 | 低 |
+| `plugins/health_api.py` | Bot 健康状态接口（整体连接状态、逐 QQ Bot 连接列表、翻译运行状态） | 低 |
 | `panel/管理面板.pyw` | 面板主程序：FastAPI + 配置读写 + 进程管理 + 看门狗 | 高 |
-| `panel/web/app.js` | 面板前端逻辑 | 高 |
+| `panel/web/app.js` | 面板前端逻辑、QQ Bot 工作区切换与状态显示 | 高 |
 
 ---
 
@@ -447,7 +457,7 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | 条目 | 说明 |
 |------|------|
 | `qq_user_openids`（settings.json） | **私聊权限的唯一来源**。`enabled: true` 的用户才能使用 relay 和管理命令 |
-| `qq_group_openids`（settings.json） | **转发目标群的唯一来源**。`enabled: true` 的群才会收到转发消息；可选 `bot_id` 绑定创建该 `group_openid` 的 QQ Bot，空值兼容旧版并使用第一个已连接 Bot |
+| `qq_group_openids`（settings.json） | **转发目标群的唯一来源**。`enabled: true` 的群才会收到转发消息；新发现/审核通过的群自动记录创建该 `group_openid` 的 QQ Bot，面板按 Bot 工作区管理；空 `bot_id` 仅兼容旧配置并使用第一个已连接 Bot |
 | 自动发现不自动授权 | bot 发现新群/新用户后写入 `data/qq_group_openids.json` / `data/qq_user_openids.json`，但只记录不进同步名单，也不加入 settings |
 | 注册审核 | 主动注册（`register` / `register-group` 指令）后才出现在面板"注册审核"弹窗；通过 = 按现有同步流程加入 settings（默认 `enabled: false`）并把昵称/群名写入条目 `name`、QQ号/群号写入 `qq_id`（可选字段，旧条目/手动添加项没有时显示为空；`remark` 原样保留），拒绝 = 申请消失；同一 openid 同时只有一条注册记录（重新注册覆盖） |
 | `qq_registrations.json` | 注册申请存储，与白名单数据独立；**不参与任何权限判断**，审核通过 ≠ 自动启用 |

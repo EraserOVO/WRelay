@@ -1,12 +1,14 @@
 """验证 QQ 群按绑定 Bot 路由，且旧的未绑定配置保持可用。"""
 import asyncio
+import json
+import tempfile
 import unittest.mock as mock
 
 import nonebot
 
 nonebot.init()
 
-from plugins import sender
+from plugins import command, registration, sender
 from plugins.media import make_text
 
 
@@ -49,6 +51,21 @@ async def main():
         result = await sender.send_relay_message([make_text("x")], [], ["G1"])
     assert result == {"G1": True}
     assert sent == [("A", ("G1",))]
+
+    with tempfile.TemporaryDirectory(prefix="wrelay_multi_bot_") as tmp:
+        discovered = tmp + "/qq_group_openids.json"
+        registrations = tmp + "/qq_registrations.json"
+        with (
+            mock.patch.object(command, "OPENID_FILE", discovered),
+            mock.patch.object(registration, "REGISTRATIONS_FILE", registrations),
+        ):
+            command.save_group_openid("G1", "A")
+            command.save_group_openid("G2", "B")
+            registration.register_group("G2", "10002", "测试群", "USER", "B")
+        with open(discovered, "r", encoding="utf-8") as f:
+            assert json.load(f)["group_bot_ids"] == {"G1": "A", "G2": "B"}
+        with open(registrations, "r", encoding="utf-8") as f:
+            assert json.load(f)["groups"]["G2"]["bot_id"] == "B"
     print("PASS - QQ 群按绑定 Bot 投递，旧单 Bot 配置仍回退默认 Bot")
 
 

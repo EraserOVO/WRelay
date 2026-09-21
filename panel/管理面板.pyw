@@ -947,10 +947,29 @@ def _read_discovered(filename, key):
         return []
 
 
+def _read_discovered_group_bot_ids():
+    """读取自动发现群与 QQ Bot 的归属映射；旧文件安全回退为空映射。"""
+    path = os.path.join(DATA_DIR, "qq_group_openids.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        bindings = raw.get("group_bot_ids", {}) if isinstance(raw, dict) else {}
+        if not isinstance(bindings, dict):
+            return {}
+        return {
+            str(openid): str(bot_id).strip()
+            for openid, bot_id in bindings.items()
+            if str(openid).strip() and str(bot_id).strip()
+        }
+    except Exception:
+        return {}
+
+
 def sync_discovered_groups(data, openids=None):
     """把发现的群加入 settings；openids 指定时只添加这些（供勾选确认使用）"""
     groups = data.setdefault("qq_group_openids", [])
     known = {str(g.get("openid", "")) for g in groups}
+    bot_ids = _read_discovered_group_bot_ids()
     if openids is None:
         openids = _read_discovered("qq_group_openids.json", "group_openids")
     else:
@@ -962,7 +981,12 @@ def sync_discovered_groups(data, openids=None):
         if not openid or openid in known:
             continue
         groups.append(
-            {"openid": openid, "enabled": False, "remark": "自动发现，点击启用"}
+            {
+                "openid": openid,
+                "enabled": False,
+                "remark": "自动发现，点击启用",
+                "bot_id": bot_ids.get(openid, ""),
+            }
         )
         known.add(openid)
         added += 1
@@ -1596,7 +1620,7 @@ def _registration_items(kind):
         if not isinstance(entry, dict):
             continue
         item = {"openid": str(openid)}
-        for field in ("qq_id", "nickname", "group_name", "operator_openid", "time"):
+        for field in ("qq_id", "nickname", "group_name", "operator_openid", "bot_id", "time"):
             if field in entry:
                 item[field] = entry[field]
         items.append(item)
@@ -1614,7 +1638,7 @@ def api_registrations():
     }
 
 
-def _ensure_discovered(filename, key, openid):
+def _ensure_discovered(filename, key, openid, bot_id=""):
     """确保 openid 在自动发现记录中：注册必经真实消息事件（openid 已被
     自动发现过），若发现记录被清理则按注册申请补回，保证 sync_discovered_*
     能正常把该 openid 加入 settings。"""
@@ -1627,9 +1651,19 @@ def _ensure_discovered(filename, key, openid):
             openids = []
             data[key] = openids
         if str(openid) in openids:
-            return False
-        openids.append(str(openid))
-        return True
+            changed = False
+        else:
+            openids.append(str(openid))
+            changed = True
+        if key == "group_openids" and str(bot_id).strip():
+            bindings = data.setdefault("group_bot_ids", {})
+            if not isinstance(bindings, dict):
+                bindings = {}
+                data["group_bot_ids"] = bindings
+            if bindings.get(str(openid)) != str(bot_id).strip():
+                bindings[str(openid)] = str(bot_id).strip()
+                changed = True
+        return changed
 
     update_json(path, mutate, default={}, indent=4, write_if=bool)
 
@@ -1645,6 +1679,8 @@ def _fill_registration_info(data, list_key, openid, reg_entry):
         if isinstance(item, dict) and str(item.get("openid")) == str(openid):
             item["name"] = name
             item["qq_id"] = qq_id
+            if list_key == "qq_group_openids" and str(reg_entry.get("bot_id") or "").strip():
+                item["bot_id"] = str(reg_entry["bot_id"]).strip()
             return True
     return False
 
@@ -1685,7 +1721,12 @@ async def api_registrations_review(request: Request):
             added = sync_discovered_users(data, [openid])
             _fill_registration_info(data, "qq_user_openids", openid, entry)
         else:
-            _ensure_discovered("qq_group_openids.json", "group_openids", openid)
+            _ensure_discovered(
+                "qq_group_openids.json",
+                "group_openids",
+                openid,
+                entry.get("bot_id"),
+            )
             data, settings_revision = _load_settings_snapshot()
             added = sync_discovered_groups(data, [openid])
             _fill_registration_info(data, "qq_group_openids", openid, entry)

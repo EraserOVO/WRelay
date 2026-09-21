@@ -75,7 +75,11 @@ def register_user(user_openid, qq_id, nickname):
     return True
 
 
-def register_group(group_openid, qq_id, group_name, operator_openid):
+def _qq_bot_id(bot):
+    return str(getattr(bot, "self_id", "") or getattr(bot, "id", "") or "").strip()
+
+
+def register_group(group_openid, qq_id, group_name, operator_openid, bot_id=""):
     """提交/更新群注册申请，绑定当前 Group OpenID 与操作人 openid"""
     openid = str(group_openid or "").strip()
     if not openid:
@@ -90,6 +94,7 @@ def register_group(group_openid, qq_id, group_name, operator_openid):
             "qq_id": str(qq_id).strip(),
             "group_name": str(group_name).strip(),
             "operator_openid": str(operator_openid or "").strip(),
+            "bot_id": str(bot_id or "").strip(),
             "time": int(time.time()),
         }
         return True
@@ -241,14 +246,21 @@ async def _handle_group_register(bot: QQBot, event: GroupMessageCreateEvent, mes
         await bot.send(event, "仅白名单用户可提交群注册申请")
         return
 
-    register_group(event.group_openid, qq_id, group_name, operator_openid)
-
-    logger.info(
-        "[QQ 群注册] group_openid={} 群号={} 群名={} 操作人={}",
+    register_group(
         event.group_openid,
         qq_id,
         group_name,
         operator_openid,
+        _qq_bot_id(bot),
+    )
+
+    logger.info(
+        "[QQ 群注册] group_openid={} 群号={} 群名={} 操作人={} Bot={}",
+        event.group_openid,
+        qq_id,
+        group_name,
+        operator_openid,
+        _qq_bot_id(bot),
     )
 
     await bot.send(

@@ -66,21 +66,43 @@ OPENID_FILE = data_path("qq_group_openids.json")
 USER_OPENID_FILE = data_path("qq_user_openids.json")
 
 
-def save_group_openid(openid):
+def _qq_bot_id(bot):
+    return str(getattr(bot, "self_id", "") or getattr(bot, "id", "") or "").strip()
+
+
+def save_group_openid(openid, bot_id=""):
+    openid = str(openid or "").strip()
+    bot_id = str(bot_id or "").strip()
+    if not openid:
+        return
+
     def mutate(data):
         if not isinstance(data, dict):
             data = {}
         openids = data.setdefault("group_openids", [])
-        if openid in openids:
-            return False
-        openids.append(openid)
-        return True
+        if not isinstance(openids, list):
+            openids = []
+            data["group_openids"] = openids
+        changed = False
+        if openid not in openids:
+            openids.append(openid)
+            changed = True
+        if bot_id:
+            bindings = data.setdefault("group_bot_ids", {})
+            if not isinstance(bindings, dict):
+                bindings = {}
+                data["group_bot_ids"] = bindings
+            if bindings.get(openid) != bot_id:
+                bindings[openid] = bot_id
+                changed = True
+        return changed
 
     update_json(OPENID_FILE, mutate, default={}, indent=4, write_if=bool)
 
     logger.info(
-        "[QQ group_openid] {}",
-        openid
+        "[QQ group_openid] {}（Bot {}）",
+        openid,
+        bot_id or "未知",
     )
 
 
@@ -183,9 +205,7 @@ async def log_group_message_openid(
     ):
         return
 
-    save_group_openid(
-        event.group_openid
-    )
+    save_group_openid(event.group_openid, _qq_bot_id(bot))
 
     identities.record_group_identity(
         event.group_openid,
@@ -217,9 +237,7 @@ async def log_group_add_openid(
     ):
         return
 
-    save_group_openid(
-        event.group_openid
-    )
+    save_group_openid(event.group_openid, _qq_bot_id(bot))
 
     identities.record_group_identity(
         event.group_openid,

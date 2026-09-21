@@ -46,16 +46,21 @@ async def bot_api_token_guard(request: Request, call_next):
 async def api_health():
     """返回 Discord/QQ 实时连接状态（供面板显示真实运行状态）"""
     bots = get_bots()
+    qq_connected = any(isinstance(bot, QQBot) for bot in bots.values())
+    qq_bots = [
+        str(getattr(bot, "self_id", "") or getattr(bot, "id", "") or "").strip()
+        for bot in bots.values()
+        if isinstance(bot, QQBot)
+    ]
+    qq_bots = [bot_id for bot_id in qq_bots if bot_id]
     return {
         "ok": True,
         "discord": any(
             isinstance(b, DiscordBot)
             for b in bots.values()
         ),
-        "qq": any(
-            isinstance(b, QQBot)
-            for b in bots.values()
-        ),
+        "qq": qq_connected,
+        "qq_bots": qq_bots,
         "retry": get_retry_status(),
         "translation": get_translation_status(),
     }

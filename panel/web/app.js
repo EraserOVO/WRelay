@@ -309,28 +309,39 @@ document.getElementById("log").addEventListener("scroll", function () {
 
 function renderStatus(st) {
   const b = document.getElementById("badge");
+  const h = st.health;
+  qqAggregateStatusKnown = !!(h && typeof h.qq === "boolean");
+  qqAggregateConnected = qqAggregateStatusKnown && h.qq;
+  qqBotStatusKnown = !!(h && Array.isArray(h.qq_bots));
+  connectedQQBotIds = qqBotStatusKnown ? h.qq_bots.map(String) : [];
+  renderQQBotWorkspace();
   if (st.running) {
     document.getElementById("btnStart").disabled = true;
     document.getElementById("btnStop").disabled = false;
     document.getElementById("btnRestart").disabled = false;
-    const h = st.health;
+    const selectedBot = currentQQBotId();
+    const selectedBotConnected = selectedBot
+      ? (qqBotStatusKnown ? connectedQQBotIds.includes(selectedBot) : !!(h && h.qq))
+      : !!(h && h.qq);
     if (activePage === "x" || activePage === "qq") {
       // X → QQ / QQ → QQ 页面只关心 QQ 连接状态，不显示无关的 Discord 状态。
-      if (h && h.qq) {
+      if (h && selectedBotConnected) {
         b.textContent = "运行中";
         b.className = "badge on";
       } else if (h) {
-        b.textContent = "运行中（QQ 未连接）";
+        b.textContent = selectedBot ? "运行中（当前 QQ Bot 未连接）" : "运行中（QQ 未连接）";
         b.className = "badge warn";
       } else {
         b.textContent = "运行中（检测中…）";
         b.className = "badge warn";
       }
-    } else if (h && h.discord && h.qq) {
+    } else if (h && h.discord && selectedBotConnected) {
       b.textContent = "运行中";
       b.className = "badge on";
     } else if (h) {
-      b.textContent = h.discord ? "运行中（QQ 未连接）" : h.qq ? "运行中（Discord 未连接）" : "运行中（未连接）";
+      b.textContent = h.discord
+        ? (selectedBot ? "运行中（当前 QQ Bot 未连接）" : "运行中（QQ 未连接）")
+        : selectedBotConnected ? "运行中（Discord 未连接）" : "运行中（未连接）";
       b.className = "badge warn";
     } else {
       b.textContent = "运行中（检测中…）";
@@ -763,7 +774,7 @@ function fgCandidate(kind) {
   // kind → 已注册实体列表 / 条目 id / 展示文案（各转发组共用）
   if (kind === "group") {
     return {
-      all: settings.qq_group_openids,
+      all: settings.qq_group_openids.filter(groupInActiveQQBotWorkspace),
       idOf: function (g) { return String(g.openid); },
       labelOf: function (g) {
         const gname = g.name || g.remark || identityName("groups", g.openid) || "";
@@ -1087,20 +1098,60 @@ function startFgRename(ctx) {
 }
 
 let qqBotIds = [];
+let connectedQQBotIds = [];
+let qqBotStatusKnown = false;
+let qqAggregateStatusKnown = false;
+let qqAggregateConnected = false;
+const QQ_BOT_WORKSPACE_KEY = "wrelay_active_qq_bot";
+let activeQQBotId = "";
+try { activeQQBotId = localStorage.getItem(QQ_BOT_WORKSPACE_KEY) || ""; } catch (e) {}
 
-function qqBotSelect(group, index) {
-  const selected = String(group.bot_id || "");
-  const options = ['<option value="">第一个已连接 Bot</option>'].concat(qqBotIds.map(function (botId) {
-    return '<option value="' + escapeHtml(botId) + '"' + (selected === botId ? ' selected' : '') + '>' + escapeHtml(botId) + '</option>';
-  }));
-  if (selected && !qqBotIds.includes(selected)) {
-    options.push('<option value="' + escapeHtml(selected) + '" selected>未配置：' + escapeHtml(selected) + '</option>');
+function currentQQBotId() {
+  if (!qqBotIds.length) return "";
+  if (!qqBotIds.includes(activeQQBotId)) {
+    activeQQBotId = qqBotIds[0];
+    try { localStorage.setItem(QQ_BOT_WORKSPACE_KEY, activeQQBotId); } catch (e) {}
   }
-  return '<select data-kind="groupBot" data-i="' + index + '" title="绑定创建该群 OpenID 的 QQ Bot">' + options.join("") + '</select>';
+  return activeQQBotId;
 }
+
+function groupInActiveQQBotWorkspace(group) {
+  if (!group || !group.openid) return false;
+  const active = currentQQBotId();
+  const owner = String(group.bot_id || "");
+  // 旧配置没有 Bot 归属时，沿用原有“第一个 Bot”语义，显示在第一个工作区。
+  return owner === active || (!owner && active && active === qqBotIds[0]);
+}
+
+function renderQQBotWorkspace() {
+  const select = document.getElementById("qqBotWorkspace");
+  if (!select) return;
+  const active = currentQQBotId();
+  if (!qqBotIds.length) {
+    select.innerHTML = '<option value="">未配置 QQ Bot</option>';
+    select.disabled = true;
+    return;
+  }
+  select.innerHTML = qqBotIds.map(function (botId) {
+    const aggregateCanRepresentSingleBot = qqBotIds.length === 1 && qqAggregateStatusKnown;
+    const statusKnown = qqBotStatusKnown || aggregateCanRepresentSingleBot;
+    const connected = qqBotStatusKnown ? connectedQQBotIds.includes(botId) : qqAggregateConnected;
+    const state = !statusKnown ? "状态未知" : connected ? "已连接" : "未连接";
+    return '<option value="' + escapeHtml(botId) + '">' + escapeHtml(botId) + " · " + state + '</option>';
+  }).join("");
+  select.value = active;
+  select.disabled = qqBotIds.length < 2;
+}
+
+document.getElementById("qqBotWorkspace").addEventListener("change", function (event) {
+  activeQQBotId = String(event.target.value || "");
+  try { localStorage.setItem(QQ_BOT_WORKSPACE_KEY, activeQQBotId); } catch (e) {}
+  renderSettings();
+});
 
 function renderSettings() {
   renderAIControls();
+  renderQQBotWorkspace();
   renderFgTabs(FG_DISCORD);
   const activeFg = getActiveFg(FG_DISCORD);
   const gb = document.getElementById("groupBody");
@@ -1110,7 +1161,9 @@ function renderSettings() {
   if (activeFg) {
     (activeFg.groups || []).forEach(function (o) { memberGrps[String(o)] = true; });
   }
-  const grpRows = settings.qq_group_openids.filter(function (g) { return memberGrps[String(g.openid)]; });
+  const grpRows = settings.qq_group_openids.filter(function (g) {
+    return memberGrps[String(g.openid)] && groupInActiveQQBotWorkspace(g);
+  });
   if (!grpRows.length) {
     gb.innerHTML = '<tr class="fgempty-row"><td colspan="6" class="fgempty-msg">还未新增群，点击下方「新增」按钮来新增第一个群吧！</td></tr>';
   }
@@ -1130,7 +1183,6 @@ function renderSettings() {
       '</td>' +
       '<td style="font-size:12px;">' + escapeHtml(gacc) + '</td>' +
       '<td class="mono">' + escapeHtml(g.openid) + '</td>' +
-      '<td>' + qqBotSelect(g, gi) + '</td>' +
       '<td style="text-align:right"><button class="danger rowicon" data-kind="fgGroupRemove" data-id="' + escapeHtml(String(g.openid)) + '">' + SVG_TRASH + '</button></td>';
     gb.appendChild(tr);
   });
@@ -1435,7 +1487,9 @@ function renderXPage() {
   if (xfg) {
     (xfg.groups || []).forEach(function (o) { memberGrps[String(o)] = true; });
   }
-  const grpRows = allGroups.filter(function (g) { return memberGrps[String(g.openid)]; });
+  const grpRows = allGroups.filter(function (g) {
+    return memberGrps[String(g.openid)] && groupInActiveQQBotWorkspace(g);
+  });
   if (!grpRows.length) {
     xgBody.innerHTML = '<tr class="fgempty-row"><td colspan="6" class="fgempty-msg">还未新增群，点击下方「＋ 新增」来新增第一个群吧！</td></tr>';
   }
@@ -1835,11 +1889,26 @@ function applyDndOrder(bodyId, newIds) {
     if (!xfg) return false;
     const field = bodyId === "xSourceBody" ? "sources" : "groups";
     const members = (xfg[field] || []).map(String);
-    if (members.length !== newIds.length) return false;
+    const visibleMembers = bodyId === "xXGroupBody"
+      ? members.filter(function (id) {
+        const group = (settings.qq_group_openids || []).find(function (item) {
+          return String(item.openid) === id;
+        });
+        return groupInActiveQQBotWorkspace(group);
+      })
+      : members;
+    if (visibleMembers.length !== newIds.length) return false;
     const mset = {};
-    members.forEach(function (id) { mset[id] = true; });
+    visibleMembers.forEach(function (id) { mset[id] = true; });
     if (!newIds.every(function (id) { return mset[String(id)]; })) return false;
-    xfg[field] = newIds.map(String);
+    if (bodyId === "xXGroupBody") {
+      let index = 0;
+      xfg[field] = members.map(function (id) {
+        return mset[id] ? String(newIds[index++]) : id;
+      });
+    } else {
+      xfg[field] = newIds.map(String);
+    }
     return true;
   }
   if (bodyId === "chanBody") {
@@ -1847,7 +1916,13 @@ function applyDndOrder(bodyId, newIds) {
     memberSet = memberIdSet(getActiveFg(FG_DISCORD) && getActiveFg(FG_DISCORD).channels);
   } else if (bodyId === "groupBody") {
     arr = settings.qq_group_openids;
-    memberSet = memberIdSet(getActiveFg(FG_DISCORD) && getActiveFg(FG_DISCORD).groups);
+    memberSet = {};
+    (getActiveFg(FG_DISCORD) && getActiveFg(FG_DISCORD).groups || []).forEach(function (id) {
+      const group = (settings.qq_group_openids || []).find(function (item) {
+        return String(item.openid) === String(id);
+      });
+      if (groupInActiveQQBotWorkspace(group)) memberSet[String(id)] = true;
+    });
   } else if (bodyId === "userBody" || bodyId === "xUserBody") {
     // X → QQ 页的白名单表与 Discord 页共用同一份数组，全量排序
     arr = settings.qq_user_openids;
@@ -3796,12 +3871,6 @@ document.addEventListener("change", async function (e) {
   if (el.dataset.kind === "group") {
     settings.qq_group_openids[Number(el.dataset.i)].enabled = el.checked;
     await saveAndReload();
-  } else if (el.dataset.kind === "groupBot") {
-    const group = settings.qq_group_openids[Number(el.dataset.i)];
-    if (group) {
-      group.bot_id = el.value;
-      await saveAndReload();
-    }
   } else if (el.dataset.kind === "chan") {
     settings.discord_channels[Number(el.dataset.i)].enabled = el.checked;
     await saveAndReload();
