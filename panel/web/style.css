@@ -619,6 +619,38 @@
     content: ""; width: 6px; height: 6px; flex: none;
     border-radius: 50%; background: var(--muted);
   }
+  .translation-test-history {
+    margin: 0 0 12px; border: 1px solid var(--table-border);
+    border-radius: 6px; background: var(--field-bg);
+    color: var(--fg); font-size: 12px;
+  }
+  .translation-test-history summary {
+    cursor: pointer; padding: 7px 9px; color: var(--muted);
+    font-weight: 600; user-select: none;
+  }
+  .translation-test-history-list {
+    border-top: 1px solid var(--table-border); padding: 6px 9px;
+    max-height: 150px; overflow-y: auto;
+  }
+  .translation-test-batch-summary {
+    padding: 3px 0 6px; color: var(--fg); font-weight: 600;
+    border-bottom: 1px solid var(--table-border);
+  }
+  .translation-test-entry {
+    display: grid; grid-template-columns: 7px minmax(0, 1fr);
+    gap: 7px; padding: 5px 0; line-height: 1.45;
+  }
+  .translation-test-entry::before {
+    content: ""; width: 6px; height: 6px; margin-top: 5px;
+    border-radius: 50%; background: var(--danger);
+  }
+  .translation-test-entry.ok::before { background: var(--success); }
+  .translation-test-entry strong { font-weight: 600; }
+  .translation-test-entry small { display: block; color: var(--muted); }
+  .translation-test-entry .translation-test-diagnostic {
+    color: var(--fg); opacity: .78; line-height: 1.55;
+    word-break: break-word;
+  }
   .translation-config-section-title {
     margin: 14px 0 8px; font-size: 14px;
   }

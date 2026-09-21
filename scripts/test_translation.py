@@ -6,7 +6,7 @@ import nonebot
 
 nonebot.init()
 
-from plugins import translation
+from plugins import config as config_module, translation
 from plugins.media import make_text
 from plugins.settings_model import SettingsModel, validate_settings
 
@@ -93,7 +93,42 @@ async def main():
     settings["x_translation"] = {"enabled": "yes"}
     assert validate_settings(settings) == "x_translation.enabled 必须是布尔值"
 
-    print("PASS - 独立 X 翻译配置、统一文本段策略、缓存和关闭降级")
+    shared_route = {
+        "enabled": True,
+        "provider": "ai",
+        "fallback_provider": "tencent_tmt",
+        "target_language": "zh",
+        "append_original": False,
+        "only_non_chinese": True,
+    }
+    divergent_legacy_route = {
+        "enabled": True,
+        "provider": "tencent_tmt",
+        "fallback_provider": "ai",
+        "target_language": "en",
+        "append_original": True,
+        "only_non_chinese": False,
+    }
+    route_settings = {
+        "translation": shared_route,
+        "x_translation": divergent_legacy_route,
+        "x_rss_sources": [{"source": "IGN", "translation_enabled": True}],
+    }
+    with mock.patch.object(config_module, "_load_settings", return_value=route_settings):
+        assert config_module.get_x_translation_config()["provider"] == "ai"
+        x_route = config_module.get_x_source_translation_config("IGN")
+        assert x_route["provider"] == "ai"
+        assert x_route["fallback_provider"] == "tencent_tmt"
+
+    migrated = SettingsModel.from_data({
+        **SettingsModel.default().to_dict(),
+        "translation": shared_route,
+        "x_translation": divergent_legacy_route,
+    }).to_dict()
+    assert migrated["x_translation"]["provider"] == "ai"
+    assert migrated["x_translation"]["fallback_provider"] == "tencent_tmt"
+
+    print("PASS - Discord/X 共用翻译路由、统一文本段策略、缓存和关闭降级")
 
 
 if __name__ == "__main__":

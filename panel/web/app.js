@@ -374,7 +374,7 @@ function renderTranslationRuntimeStatus(st) {
   if (runtime.provider === "ai" && runtime.model) {
     text = "当前工作模型：" + runtime.model;
   } else if (runtime.provider === "tencent_tmt") {
-    text = "当前翻译服务：腾讯 TMT";
+    text = "当前工作模型：腾讯 TMT";
   }
   const el = document.getElementById("translationRuntimeStatus");
   if (el) el.textContent = text;
@@ -1265,11 +1265,12 @@ function saveAIControls() {
   settings.translation = settings.translation || {};
   settings.translation.provider = document.getElementById("translationProvider").value;
   settings.translation.fallback_provider = document.getElementById("translationFallback").value;
+  syncLegacyXTranslationConfig();
 }
 
 function renderXTranslationControls() {
   if (!settings) return;
-  const translation = settings.x_translation || {};
+  const translation = settings.translation || {};
   document.getElementById("xTranslationProvider").value = translation.provider || "tencent_tmt";
   document.getElementById("xTranslationFallback").value = translation.fallback_provider || "";
   syncTranslationFallback("xTranslationProvider", "xTranslationFallback");
@@ -1279,9 +1280,17 @@ function renderXTranslationControls() {
 }
 
 function saveXTranslationControls() {
-  settings.x_translation = settings.x_translation || {};
-  settings.x_translation.provider = document.getElementById("xTranslationProvider").value;
-  settings.x_translation.fallback_provider = document.getElementById("xTranslationFallback").value;
+  settings.translation = settings.translation || {};
+  settings.translation.provider = document.getElementById("xTranslationProvider").value;
+  settings.translation.fallback_provider = document.getElementById("xTranslationFallback").value;
+  syncLegacyXTranslationConfig();
+}
+
+function syncLegacyXTranslationConfig() {
+  settings.x_translation = Object.assign({}, settings.x_translation || {});
+  ["provider", "fallback_provider", "target_language", "append_original", "only_non_chinese"].forEach(function (key) {
+    if (settings.translation[key] !== undefined) settings.x_translation[key] = settings.translation[key];
+  });
 }
 
 // 次选方式不允许与首选方式重复；如果切换首选后原次选被排除，
@@ -2774,6 +2783,7 @@ function renderAiProfileEditor() {
   document.getElementById("aiApiKey").value = (aiProfileDraft.apiKeys || {})[String(profile.id)] || "";
   document.getElementById("aiProfileDelete").disabled = aiProfileDraft.profiles.length <= 1;
   document.getElementById("aiApiTestStatus").textContent = "";
+  renderAiTestHistory();
 }
 
 function captureAiApiKeyDraft() {
@@ -2784,28 +2794,206 @@ function captureAiApiKeyDraft() {
   aiProfileDraft.apiKeys[String(profile.id)] = input.value;
 }
 
+function captureAiProfileEditorFields(profile) {
+  if (!profile) return;
+  profile.name = document.getElementById("aiProfileName").value.trim();
+  profile.base_url = document.getElementById("aiBaseUrl").value.trim();
+  profile.model = document.getElementById("aiModel").value.trim();
+  profile.api_key_env = document.getElementById("aiApiKeyEnv").value.trim();
+  captureAiApiKeyDraft();
+}
+
+function aiProfileTestPayload(profile) {
+  return {
+    base_url: profile.base_url || "",
+    model: profile.model || "",
+    api_key_env: profile.api_key_env || "",
+    api_key: (aiProfileDraft.apiKeys || {})[String(profile.id)] || "",
+    timeout_seconds: profile.timeout_seconds,
+  };
+}
+
+function recordAiTestResult(profile, result, fallbackMessage) {
+  const model = String((result && result.model) || profile.model || "").trim();
+  const ok = !!(result && result.ok);
+  const message = ok
+    ? String(result.msg || ("AI API 检测成功（" + model + "）"))
+    : localizeUserError((result && result.msg) || fallbackMessage, "检测失败");
+  profile.last_test = {
+    ok: ok,
+    model: model,
+    message: message,
+    at: Date.now(),
+    diagnostic: result && result.diagnostic ? Object.assign({}, result.diagnostic) : null,
+  };
+  if (ok) profile.last_tested_model = model;
+  renderAiTestHistory();
+  return message;
+}
+
+function fallbackAiTestDiagnostic(profile, test) {
+  const message = String((test && test.message) || "");
+  if (message.includes("无法连接")) {
+    return {
+      category: "network",
+      detail: "无法连接 AI API",
+    };
+  }
+  if (message.includes("未返回检测结果")) {
+    return {
+      category: "empty_content",
+      detail: "AI API 返回内容为空",
+    };
+  }
+  return {
+    category: test && test.ok ? "success" : "unknown",
+    detail: test && test.ok ? "检测成功" : "检测失败",
+  };
+}
+
+function aiTestDiagnosticLabel(category) {
+  return {
+    success: "请求成功",
+    config: "配置错误",
+    network: "网络连接",
+    http: "HTTP 错误",
+    invalid_json: "响应 JSON",
+    response_format: "响应格式",
+    empty_content: "响应内容",
+    unknown: "未分类错误",
+  }[String(category || "unknown")] || "检测诊断";
+}
+
+function renderAiTestDiagnostic(profile, test) {
+  const diagnostic = test && test.diagnostic && typeof test.diagnostic === "object"
+    ? test.diagnostic
+    : fallbackAiTestDiagnostic(profile, test);
+  const detail = String(diagnostic.detail || "").trim();
+  const parts = ["类型：" + aiTestDiagnosticLabel(diagnostic.category)];
+  if (detail) parts.push("原因：" + detail);
+  return parts.map(function (part) { return escapeHtml(part); }).join(" · ");
+}
+
+function renderAiTestHistory() {
+  const summary = document.querySelector("#aiApiTestHistory > summary");
+  const list = document.getElementById("aiApiTestHistoryList");
+  if (!summary || !list || !aiProfileDraft) return;
+  const entries = aiProfileDraft.profiles
+    .map(function (profile) {
+      const legacyTest = profile.last_tested_model
+        ? {ok: true, model: profile.last_tested_model, message: "历史检测成功"}
+        : null;
+      return {profile: profile, test: profile.last_test || legacyTest};
+    })
+    .filter(function (item) { return item.test && typeof item.test === "object"; });
+  const successCount = entries.filter(function (item) { return item.test.ok === true; }).length;
+  const failureCount = entries.length - successCount;
+  summary.textContent = entries.length
+    ? "检测记录（成功 " + successCount + " · 失败 " + failureCount + "）"
+    : "检测记录（尚未检测）";
+  if (!entries.length) {
+    list.textContent = "尚未检测任何 AI API 配置。";
+    return;
+  }
+  const batch = aiProfileDraft.last_batch_test;
+  const batchSummary = batch
+    ? '<div class="translation-test-batch-summary">最近一次全部检测：成功 ' + Number(batch.success || 0) + "/" + Number(batch.total || 0) + '</div>'
+    : "";
+  list.innerHTML = batchSummary + entries.map(function (item) {
+    const profile = item.profile;
+    const test = item.test;
+    const model = String(test.model || profile.model || "未填写模型");
+    return '<div class="translation-test-entry' + (test.ok === true ? ' ok' : '') + '">' +
+      '<div><strong>' + escapeHtml(String(profile.name || profile.id)) + " · " + escapeHtml(model) + '</strong>' +
+      '<small class="translation-test-diagnostic">' + renderAiTestDiagnostic(profile, test) + '</small></div></div>';
+  }).join("");
+}
+
+async function persistAiTestRecord(profile) {
+  if (!profile || !profile.last_test) return false;
+  try {
+    const result = await jpost("/api/translation/ai-test-record", {
+      profile_id: String(profile.id || ""),
+      record: profile.last_test,
+    });
+    if (!result || !result.ok) return false;
+
+    // 检测记录单独保存后，同步当前页面的 settings。否则关闭弹窗再打开时，
+    // cloneAiProfileDraft() 会从保存前的旧内存快照复制，误显示为“尚未检测”。
+    settings = settings || {};
+    if (!Array.isArray(settings.ai_profiles)) settings.ai_profiles = [];
+    let savedProfile = settings.ai_profiles.find(function (item) {
+      return item && String(item.id || "") === String(profile.id || "");
+    });
+    if (!savedProfile && String(profile.id || "") === "default" && !settings.ai_profiles.length) {
+      savedProfile = Object.assign({}, profile);
+      settings.ai_profiles.push(savedProfile);
+      settings.ai_active_profile = settings.ai_active_profile || "default";
+    }
+    if (savedProfile) {
+      savedProfile.last_test = Object.assign({}, profile.last_test);
+      if (profile.last_test.ok) savedProfile.last_tested_model = profile.last_test.model || "";
+    }
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+async function testAiProfile(profile) {
+  try {
+    const result = await jpost("/api/translation/ai-test", aiProfileTestPayload(profile));
+    const message = recordAiTestResult(profile, result, "检测失败");
+    const persisted = await persistAiTestRecord(profile);
+    return {result: result, message: message, persisted: persisted};
+  } catch (err) {
+    const result = {ok: false, msg: "检测请求失败"};
+    const message = recordAiTestResult(profile, result, "检测请求失败");
+    const persisted = await persistAiTestRecord(profile);
+    return {result: result, message: message, persisted: persisted};
+  }
+}
+
 async function testAiApi() {
   const button = document.getElementById("aiApiTest");
+  const allButton = document.getElementById("aiApiTestAll");
   const status = document.getElementById("aiApiTestStatus");
   const profile = activeAiDraftProfile();
   if (!button || !status || !profile) return;
-  captureAiApiKeyDraft();
+  captureAiProfileEditorFields(profile);
   button.disabled = true;
+  if (allButton) allButton.disabled = true;
   status.textContent = "检测中…";
-  try {
-    const result = await jpost("/api/translation/ai-test", {
-      base_url: document.getElementById("aiBaseUrl").value.trim(),
-      model: document.getElementById("aiModel").value.trim(),
-      api_key_env: document.getElementById("aiApiKeyEnv").value.trim(),
-      api_key: (aiProfileDraft.apiKeys || {})[String(profile.id)] || "",
-      timeout_seconds: profile.timeout_seconds,
-    });
-    status.textContent = result.ok ? result.msg : localizeUserError(result.msg, "检测失败");
-  } catch (err) {
-    status.textContent = "检测请求失败";
-  } finally {
-    button.disabled = false;
+  const result = await testAiProfile(profile);
+  status.textContent = result.message;
+  button.disabled = false;
+  if (allButton) allButton.disabled = false;
+}
+
+async function testAllAiApis() {
+  const button = document.getElementById("aiApiTestAll");
+  const currentButton = document.getElementById("aiApiTest");
+  const status = document.getElementById("aiApiTestStatus");
+  if (!button || !status || !aiProfileDraft) return;
+  captureAiProfileEditorFields(activeAiDraftProfile());
+  button.disabled = true;
+  if (currentButton) currentButton.disabled = true;
+  const profiles = aiProfileDraft.profiles.slice();
+  let successCount = 0;
+  for (let i = 0; i < profiles.length; i += 1) {
+    status.textContent = "正在检测全部 API（" + (i + 1) + "/" + profiles.length + "）…";
+    const result = await testAiProfile(profiles[i]);
+    if (result.result && result.result.ok) successCount += 1;
   }
+  aiProfileDraft.last_batch_test = {
+    success: successCount,
+    total: profiles.length,
+    at: Date.now(),
+  };
+  renderAiTestHistory();
+  status.textContent = "";
+  button.disabled = false;
+  if (currentButton) currentButton.disabled = false;
 }
 
 async function openTranslationConfigModal() {
@@ -2832,10 +3020,14 @@ async function openTranslationConfigModal() {
 async function saveTranslationConfig() {
   const profile = activeAiDraftProfile();
   if (!profile) { showAlert("保存失败", "请先新增或选择一个 AI 配置"); return; }
+  const previousModel = String(profile.model || "").trim();
   profile.name = document.getElementById("aiProfileName").value.trim();
   profile.base_url = document.getElementById("aiBaseUrl").value.trim();
   profile.model = document.getElementById("aiModel").value.trim();
   profile.api_key_env = document.getElementById("aiApiKeyEnv").value.trim();
+  if (profile.last_tested_model && profile.model !== previousModel) {
+    profile.last_tested_model = "";
+  }
   captureAiApiKeyDraft();
   const apiKey = (aiProfileDraft.apiKeys || {})[String(profile.id)] || "";
   if (!profile.name) { showAlert("保存失败", "配置名称不能为空"); return; }
@@ -2993,12 +3185,17 @@ document.addEventListener("click", async function (e) {
     });
     aiProfileDraft.apiKeys = aiProfileDraft.apiKeys || {};
     aiProfileDraft.apiKeys[id] = "";
+    aiProfileDraft.last_batch_test = null;
     aiProfileDraft.active = id;
     renderAiProfileEditor();
     return;
   }
   if (btn.id === "aiApiTest") {
     await testAiApi();
+    return;
+  }
+  if (btn.id === "aiApiTestAll") {
+    await testAllAiApis();
     return;
   }
   if (btn.id === "aiProfileDelete") {
@@ -3008,6 +3205,7 @@ document.addEventListener("click", async function (e) {
     });
     if (index >= 0) aiProfileDraft.profiles.splice(index, 1);
     if (aiProfileDraft.apiKeys) delete aiProfileDraft.apiKeys[String(aiProfileDraft.active)];
+    aiProfileDraft.last_batch_test = null;
     aiProfileDraft.active = String((aiProfileDraft.profiles[Math.max(0, index - 1)] || aiProfileDraft.profiles[0]).id);
     renderAiProfileEditor();
     return;

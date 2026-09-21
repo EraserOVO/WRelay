@@ -188,7 +188,7 @@
       </div>
     </div>
     <div class="row auto-translation-actions">
-      <div class="hint" id="hint-auto-translation" style="display:none">左侧开关可一次启用或关闭全部 Discord 转发频道的翻译；每个频道可通过表格中的翻译图标单独设置，保留原文在其漏斗按钮内配置。</div>
+      <div class="hint" id="hint-auto-translation" style="display:none">Discord 和 X 共用这里选择的翻译服务路由；左侧开关可一次启用或关闭全部 Discord 转发频道的翻译，每个频道可通过表格中的翻译图标单独设置。</div>
       <button id="btnTranslationToggle" class="sec translation-toggle" type="button"><span>启用翻译</span></button>
       <span class="auto-translation-action-buttons">
         <button id="btnTranslationConfig" class="sec iconbtn" title="翻译服务配置" aria-label="翻译服务配置"><svg width="20" height="20" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10.5" cy="17.5" r="7" stroke="currentColor" stroke-width="2.1"/><line x1="15.9834" y1="11.9145" x2="24.398" y2="3.49992" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="23.5054" y1="5.83398" x2="26.1453" y2="8.47385" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="20.5894" y1="8.75" x2="22.5693" y2="10.7299" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg></button>
@@ -303,7 +303,7 @@
       </div>
     </div>
     <div class="card">
-      <h2 style="display:flex;align-items:center;gap:6px;">X 自动翻译 <button class="hintbtn" data-hint="hint-x-auto-translation" data-title="X 自动翻译">?</button></h2>
+      <h2 style="display:flex;align-items:center;gap:6px;">自动翻译 <button class="hintbtn" data-hint="hint-x-auto-translation" data-title="自动翻译">?</button></h2>
       <div class="auto-translation-section">
         <div class="row auto-translation-fields">
         <label class="auto-translation-field"><span>首选方式</span><select id="xTranslationProvider"><option value="tencent_tmt">腾讯 TMT</option><option value="ai">AI API</option></select></label>
@@ -311,7 +311,7 @@
         </div>
       </div>
       <div class="row auto-translation-actions">
-        <div class="hint" id="hint-x-auto-translation" style="display:none">左侧开关可一次启用或关闭全部 X 转发账号的翻译；每个账号可通过表格中的翻译图标单独设置，保留原文在其漏斗按钮内配置。</div>
+        <div class="hint" id="hint-x-auto-translation" style="display:none">这里与上方“自动翻译”共用首选/次选服务；左侧开关可一次启用或关闭全部 X 转发账号的翻译，每个账号可通过表格中的翻译图标单独设置。</div>
         <button id="btnXTranslationToggle" class="sec translation-toggle" type="button"><span>启用翻译</span></button>
         <span class="auto-translation-action-buttons">
           <button id="btnXTranslationConfig" class="sec iconbtn" title="翻译服务配置（共享）" aria-label="翻译服务配置（共享）"><svg width="20" height="20" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10.5" cy="17.5" r="7" stroke="currentColor" stroke-width="2.1"/><line x1="15.9834" y1="11.9145" x2="24.398" y2="3.49992" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="23.5054" y1="5.83398" x2="26.1453" y2="8.47385" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="20.5894" y1="8.75" x2="22.5693" y2="10.7299" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg></button>
@@ -523,8 +523,8 @@
     <div class="ai-profile-toolbar">
       <label for="aiProfileSelect">已保存配置</label>
       <select id="aiProfileSelect" aria-label="已保存的 AI API 配置"></select>
-      <button id="aiProfileAdd" class="sec" type="button">新增</button>
-      <button id="aiProfileDelete" class="danger" type="button">删除</button>
+      <button id="aiProfileAdd" class="sec iconbtn" type="button" title="新增 AI 配置" aria-label="新增 AI 配置"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+      <button id="aiProfileDelete" class="danger iconbtn" type="button" title="删除当前 AI 配置" aria-label="删除当前 AI 配置"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><path d="M10 11v6M14 11v6"/></svg></button>
     </div>
     <label for="aiProfileName" class="translation-config-label">配置名称</label>
     <input type="text" id="aiProfileName" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
@@ -538,8 +538,13 @@
     <input type="password" id="aiApiKey" autocomplete="new-password" spellcheck="false" placeholder="留空表示保持已保存的密钥" style="width:100%;box-sizing:border-box;">
     <div style="display:flex;align-items:center;gap:10px;margin-top:10px;">
       <button id="aiApiTest" class="sec" type="button">检测当前 API</button>
+      <button id="aiApiTestAll" class="sec" type="button">检测全部 API</button>
       <span id="aiApiTestStatus" style="font-size:12px;color:var(--muted);" aria-live="polite"></span>
     </div>
+    <details id="aiApiTestHistory" class="translation-test-history">
+      <summary>检测记录（尚未检测）</summary>
+      <div id="aiApiTestHistoryList" class="translation-test-history-list">尚未检测任何 AI API 配置。</div>
+    </details>
     <h4 class="translation-config-section-title">腾讯 TMT</h4>
     <label for="tencentSecretId" class="translation-config-label">SecretId</label>
     <input type="text" id="tencentSecretId" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">

@@ -203,7 +203,7 @@ class SettingsModel(dict):
                 "append_original": True,
                 "only_non_chinese": True,
             },
-            # X RSS 使用独立服务路由；服务凭据与 AI/TMT 配置共享。
+            # X RSS 沿用 translation 的服务路由；保留该字段仅为旧配置兼容。
             "x_translation": {
                 "enabled": False,
                 "provider": "tencent_tmt",
@@ -256,9 +256,24 @@ class SettingsModel(dict):
         for key, value in defaults.items():
             if key not in result:
                 result[key] = deepcopy(value)
+        # Discord/X 共用服务路由。将旧的 x_translation 路由字段同步为
+        # translation 的值，保留字段本身以兼容旧配置格式。
+        shared_translation = result.get("translation")
+        legacy_x_translation = result.get("x_translation")
+        if isinstance(shared_translation, dict) and isinstance(legacy_x_translation, dict):
+            for key in (
+                "provider",
+                "fallback_provider",
+                "target_language",
+                "append_original",
+                "only_non_chinese",
+            ):
+                if key in shared_translation:
+                    legacy_x_translation[key] = deepcopy(shared_translation[key])
+
         # 自动翻译原为 Discord/X 各一组全局开关。迁移到来源条目时，
-        # 未单独设置过的频道/账号继承旧值，避免升级后转发内容突变。
-        for item_key, config_key in (("discord_channels", "translation"), ("x_rss_sources", "x_translation")):
+        # 未单独设置过的频道/账号继承共享 translation 的旧值，避免升级后转发内容突变。
+        for item_key, config_key in (("discord_channels", "translation"), ("x_rss_sources", "translation")):
             translation = result.get(config_key)
             if not isinstance(translation, dict):
                 continue

@@ -1965,6 +1965,25 @@ def _fetch_ai_models(base_url, api_key, timeout):
     return model_ids[:20]
 
 
+class AiProbeError(RuntimeError):
+    """可安全展示给面板的 AI 检测错误。"""
+
+    def __init__(self, message, category="unknown", detail="", http_status=None):
+        super().__init__(message)
+        self.category = str(category or "unknown")
+        self.detail = str(detail or "").strip()
+        self.http_status = http_status
+
+
+def _ai_probe_diagnostic(category, detail=""):
+    """构造可持久化的检测诊断，不包含 API 密钥。"""
+    detail = localize_user_error(detail, "未提供更详细的服务端说明")
+    return {
+        "category": str(category or "unknown")[:40],
+        "detail": str(detail or "")[:500],
+    }
+
+
 def _probe_ai_api(config):
     """用最小 OpenAI 兼容请求验证配置；不返回模型回复或密钥。"""
     import urllib.error
@@ -2037,17 +2056,47 @@ def _probe_ai_api(config):
                 available_models = []
             if available_models:
                 message += "；当前可用模型：" + ", ".join(available_models)
-        raise RuntimeError(message) from exc
+        raise AiProbeError(
+            message,
+            category="http",
+            detail=detail or "服务商未提供具体说明",
+            http_status=exc.code,
+        ) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise RuntimeError("无法连接 AI API") from exc
+        reason = str(getattr(exc, "reason", "") or exc).lower()
+        if "timed out" in reason or "timeout" in reason:
+            detail = "连接超时"
+        elif "name or service not known" in reason or "getaddrinfo failed" in reason:
+            detail = "无法解析服务器地址"
+        elif "certificate" in reason or "ssl" in reason:
+            detail = "TLS/证书验证失败"
+        elif "refused" in reason:
+            detail = "连接被服务器拒绝"
+        elif "reset" in reason:
+            detail = "连接被服务器重置"
+        else:
+            detail = "网络连接错误"
+        raise AiProbeError("无法连接 AI API", category="network", detail=detail) from exc
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise RuntimeError("AI API 返回了无效响应") from exc
+        raise AiProbeError(
+            "AI API 返回了无效响应",
+            category="invalid_json",
+            detail="响应内容不是有效 JSON",
+        ) from exc
     try:
         content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError("AI API 响应格式不兼容") from exc
+        raise AiProbeError(
+            "AI API 响应格式不兼容",
+            category="response_format",
+            detail="缺少 choices[0].message.content 字段",
+        ) from exc
     if not str(content or "").strip():
-        raise RuntimeError("AI API 未返回检测结果")
+        raise AiProbeError(
+            "AI API 未返回检测结果",
+            category="empty_content",
+            detail="choices[0].message.content 为空",
+        )
     return model
 
 
@@ -2261,14 +2310,126 @@ async def api_translation_ai_test(request: Request):
     try:
         model = await asyncio.to_thread(_probe_ai_api, config)
     except ValueError as exc:
-        return JSONResponse({"ok": False, "msg": localize_user_error(exc)}, status_code=400)
+        return JSONResponse(
+            {
+                "ok": False,
+                "model": str(config.get("model") or "").strip(),
+                "msg": localize_user_error(exc),
+                "diagnostic": _ai_probe_diagnostic("config", str(exc)),
+            },
+            status_code=400,
+        )
+    except AiProbeError as exc:
+        return JSONResponse(
+            {
+                "ok": False,
+                "model": str(config.get("model") or "").strip(),
+                "msg": localize_user_error(exc, "AI API 检测失败"),
+                "diagnostic": _ai_probe_diagnostic(exc.category, exc.detail or str(exc)),
+            },
+            status_code=502,
+        )
     except RuntimeError as exc:
         _log("AI API 检测失败: %s" % type(exc).__name__)
-        return JSONResponse({"ok": False, "msg": localize_user_error(exc, "AI API 检测失败")}, status_code=502)
+        return JSONResponse(
+            {
+                "ok": False,
+                "model": str(config.get("model") or "").strip(),
+                "msg": localize_user_error(exc, "AI API 检测失败"),
+                "diagnostic": _ai_probe_diagnostic("unknown", type(exc).__name__),
+            },
+            status_code=502,
+        )
     except Exception:
         _log("AI API 检测异常")
-        return JSONResponse({"ok": False, "msg": "AI API 检测失败"}, status_code=502)
-    return {"ok": True, "msg": "AI API 检测成功（%s）" % model}
+        return JSONResponse(
+            {
+                "ok": False,
+                "model": str(config.get("model") or "").strip(),
+                "msg": "AI API 检测失败",
+                "diagnostic": _ai_probe_diagnostic("unknown", "检测过程发生未分类异常"),
+            },
+            status_code=502,
+        )
+    return {
+        "ok": True,
+        "model": model,
+        "msg": "AI API 检测成功（%s）" % model,
+        "diagnostic": _ai_probe_diagnostic("success", "接口返回了有效内容"),
+    }
+
+
+@app.post("/api/translation/ai-test-record")
+async def api_translation_ai_test_record(request: Request):
+    """只持久化 AI API 检测结果，不保存密钥或编辑中的其他字段。"""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "msg": "检测记录格式错误"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "msg": "检测记录格式错误"}, status_code=400)
+
+    profile_id = str(body.get("profile_id") or "").strip()
+    record = body.get("record")
+    if not profile_id or not isinstance(record, dict):
+        return JSONResponse({"ok": False, "msg": "检测记录格式错误"}, status_code=400)
+
+    model = str(record.get("model") or "").strip()[:240]
+    message = str(record.get("message") or "").strip()[:500]
+    at = record.get("at")
+    try:
+        at = int(at)
+    except (TypeError, ValueError):
+        at = int(time.time() * 1000)
+    safe_record = {
+        "ok": record.get("ok") is True,
+        "model": model,
+        "message": message,
+        "at": at,
+    }
+    diagnostic = record.get("diagnostic")
+    if isinstance(diagnostic, dict):
+        safe_record["diagnostic"] = {
+            "category": str(diagnostic.get("category") or "unknown")[:40],
+            "detail": str(diagnostic.get("detail") or "").strip()[:500],
+        }
+
+    data, revision = _load_settings_snapshot()
+    profiles = data.get("ai_profiles")
+    if not isinstance(profiles, list):
+        profiles = []
+        data["ai_profiles"] = profiles
+    profile = next(
+        (item for item in profiles if isinstance(item, dict) and str(item.get("id") or "") == profile_id),
+        None,
+    )
+    if profile is None and profile_id == "default" and not profiles:
+        legacy_ai = data.get("ai") if isinstance(data.get("ai"), dict) else {}
+        profile = {
+            "id": "default",
+            "name": "默认 AI",
+            "base_url": str(legacy_ai.get("base_url") or ""),
+            "model": str(legacy_ai.get("model") or ""),
+            "api_key_env": str(legacy_ai.get("api_key_env") or "WRELAY_AI_API_KEY"),
+            "timeout_seconds": int(legacy_ai.get("timeout_seconds") or 25),
+            "max_output_tokens": int(legacy_ai.get("max_output_tokens") or 800),
+        }
+        profiles.append(profile)
+        data["ai_active_profile"] = "default"
+    if profile is None:
+        return JSONResponse({"ok": False, "msg": "该 AI 配置尚未保存，请先保存配置"}, status_code=409)
+
+    profile["last_test"] = safe_record
+    if safe_record["ok"]:
+        profile["last_tested_model"] = model
+    err = _validate_settings(data)
+    if err:
+        return JSONResponse({"ok": False, "msg": "检测记录保存失败: " + err}, status_code=400)
+    try:
+        save_settings(data, expected_revision=revision)
+    except ConcurrentWriteError:
+        return JSONResponse({"ok": False, "conflict": True, "msg": "配置已被其他操作修改，请稍后重试"}, status_code=409)
+    return {"ok": True}
 
 
 @app.post("/api/translation/ai-env")

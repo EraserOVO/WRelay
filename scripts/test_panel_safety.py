@@ -67,6 +67,7 @@ def main():
         "/api/backup/export",
         "/api/backup/restore",
         "/api/translation/ai-test",
+        "/api/translation/ai-test-record",
         "/api/translation/ai-env",
     ):
         assert check_guard(path, {}).status_code == 401
@@ -131,6 +132,79 @@ def main():
             "api_key_env": "WRELAY_TEST_KEY",
             "timeout_seconds": 5,
         }) == "test-model"
+    # 面板 API 需要把检测成功的模型名称返回给二级配置窗口，供其显示。
+    class JsonRequest:
+        def __init__(self, payload):
+            self.payload = payload
+
+        async def json(self):
+            return self.payload
+
+    with patch.object(panel, "_probe_ai_api", return_value="verified-model"):
+        response = asyncio.run(panel.api_translation_ai_test(JsonRequest({
+            "base_url": "https://example.test/v1",
+            "model": "verified-model",
+        })))
+        assert response["model"] == "verified-model"
+        assert response["diagnostic"]["category"] == "success"
+        assert response["diagnostic"]["detail"] == "接口返回了有效内容"
+        assert "endpoint" not in response["diagnostic"]
+        assert "http_status" not in response["diagnostic"]
+
+    with patch.object(
+        panel,
+        "_probe_ai_api",
+        side_effect=panel.AiProbeError(
+            "AI API 返回 HTTP 503：服务不可用",
+            category="http",
+            detail="服务不可用",
+            http_status=503,
+        ),
+    ):
+        response = asyncio.run(panel.api_translation_ai_test(JsonRequest({
+            "base_url": "https://example.test/v1",
+            "model": "failed-model",
+        })))
+        payload = json.loads(response.body)
+        assert payload["diagnostic"]["category"] == "http"
+        assert payload["diagnostic"]["detail"] == "服务不可用"
+        assert "endpoint" not in payload["diagnostic"]
+        assert "http_status" not in payload["diagnostic"]
+
+    record_settings = panel.get_default_settings()
+    record_settings["ai_profiles"] = [{
+        "id": "profile-1",
+        "name": "测试配置",
+        "base_url": "https://example.test/v1",
+        "model": "test-model",
+        "api_key_env": "WRELAY_TEST_KEY",
+        "timeout_seconds": 5,
+        "max_output_tokens": 8,
+    }]
+    with patch.object(panel, "_load_settings_snapshot", return_value=(record_settings, "revision")), \
+         patch.object(panel, "_settings_revision", return_value="revision"), \
+         patch.object(panel, "save_settings") as save_settings:
+        response = asyncio.run(panel.api_translation_ai_test_record(JsonRequest({
+            "profile_id": "profile-1",
+            "record": {
+                "ok": False,
+                "model": "test-model",
+                "message": "检测失败",
+                "at": 123,
+                "diagnostic": {
+                    "category": "empty_content",
+                    "endpoint": "https://example.test/v1/chat/completions?token=hidden",
+                    "http_status": 503,
+                    "detail": "choices[0].message.content 为空",
+                },
+            },
+        })))
+        assert response["ok"] is True
+        assert record_settings["ai_profiles"][0]["last_test"]["ok"] is False
+        assert record_settings["ai_profiles"][0]["last_test"]["diagnostic"]["category"] == "empty_content"
+        assert "endpoint" not in record_settings["ai_profiles"][0]["last_test"]["diagnostic"]
+        assert "http_status" not in record_settings["ai_profiles"][0]["last_test"]["diagnostic"]
+        save_settings.assert_called_once()
     with patch.object(panel, "_read_env_secret", return_value=""), patch(
         "urllib.request.urlopen", return_value=FakeResponse()
     ):
@@ -163,6 +237,9 @@ def main():
             })
         except RuntimeError as exc:
             assert str(exc) == "AI API 返回 HTTP 400：model is not supported；当前可用模型：DeepSeek-V4.1-Flash"
+            assert exc.category == "http"
+            assert exc.http_status == 400
+            assert exc.detail == "model is not supported"
         else:
             raise AssertionError("HTTP 错误应包含服务端返回的安全说明")
     try:

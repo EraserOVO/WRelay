@@ -161,6 +161,36 @@ X RSS 与 Discord 使用独立的转发组配置。RSSHub 不可用、解析失�
 
 ---
 
+## 4.2 统一翻译路由与 AI 模型轮换
+
+Discord、X RSS 和 QQ 手动转发在完成消息渲染后，统一通过 `plugins/translation.py`
+按当前链路配置尝试首选服务和后备服务：
+
+```
+消息正文
+    │
+    ▼
+plugins/translation.py
+    ├── 腾讯 TMT → plugins/tencent_tmt.py
+    └── AI API  → plugins/ai_client.py
+                    │
+                    ├── 首次请求配置模型
+                    ├── 模型不存在、模型并发受限，或明确的模型容量/节点不可用
+                    │   → 查询 /models，选择可用模型并自动重试
+                    └── 成功后记录实际使用的模型
+```
+
+AI 模型轮换只针对明确的模型级错误：400 模型不存在/不支持、包含模型并发限制的
+429，以及明确表示无可用 worker、服务不可用或模型过载的 500/503。普通网络超时、
+普通配额 429、空响应和未指向模型的服务端错误不会触发轮换。所有服务均失败时，
+翻译路由返回空结果，由调用方保留原文。
+
+`plugins/health_api.py` 提供最近一次真实翻译成功使用的服务和模型，管理面板据此显示
+“当前工作模型”。面板中的 AI API 检测是对每个配置的独立直连检测，不触发运行时模型
+轮换；检测记录保存在 `settings.json`，与运行中的工作模型状态相互独立。
+
+---
+
 ## 5. QQ 私聊命令与手动转发流程
 
 ```
@@ -325,6 +355,9 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | `plugins/message_trace.py` | 投递结果追踪与持久化 | 低 |
 | `plugins/failure_notification.py` | 管理员失败通知与冷却 | 低 |
 | `plugins/x_rss.py` | X RSS 轮询、游标和投递 | 中 |
+| `plugins/translation.py` | 统一翻译路由、后备服务和最近成功服务状态 | 中 |
+| `plugins/ai_client.py` | OpenAI 兼容 AI 请求、模型可用性检查和自动轮换 | 中 |
+| `plugins/tencent_tmt.py` | 腾讯 TMT 请求适配和错误转换 | 低 |
 | `plugins/scheduled_message.py` | 按显式目标群名单和日历计划进行 QQ 定时消息投递 | 中 |
 | `plugins/x_rss_parser.py` | RSS 条目解析 | 中 |
 | `plugins/media.py` | 文本美化（Markdown → 纯文本）+ Emoji 提取 + 媒体下载 | 低 |
@@ -352,6 +385,7 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | **修改补发逻辑** | `plugins/backfill.py`（自动补发）+ `plugins/backfill_api.py`（手动触发接口） |
 | **修改失败重试逻辑** | `plugins/retry.py`（队列/恢复/退避）+ `plugins/sender.py`（发送返回值） |
 | **修改 X RSS 转发** | `plugins/x_rss.py`（轮询/游标）+ `plugins/x_rss_parser.py`（解析） |
+| **修改自动翻译或 AI 模型轮换** | `plugins/translation.py`（服务路由）+ `plugins/ai_client.py`（AI 请求/轮换）+ `plugins/tencent_tmt.py`（TMT） |
 | **修改 OpenID 自动发现** | `plugins/command.py`（`save_group_openid` / `save_user_openid`） |
 | **修改注册/审核机制** | `plugins/registration.py`（指令 + 存储）+ `panel/管理面板.pyw`（`/api/registrations*`）+ `panel/web/app.js`（审核弹窗） |
 | **修改身份资料库** | `plugins/identities.py` |

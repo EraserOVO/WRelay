@@ -97,8 +97,12 @@ def get_translation_config():
 
 
 def get_x_translation_config():
-    """返回 X RSS 专属翻译服务路由。"""
-    return _setting_object("x_translation")
+    """返回 Discord/X 共用的翻译服务路由。
+
+    ``x_translation`` 仅作为旧配置兼容字段保留，新的 X 转发不再使用
+    独立服务路由，避免面板两处选择不一致。
+    """
+    return _setting_object("translation")
 
 
 def _translation_config_for_item(config_name, items_name, item_id):
@@ -126,7 +130,7 @@ def get_channel_translation_config(channel_id):
 
 
 def get_x_source_translation_config(source_key):
-    return _translation_config_for_item("x_translation", "x_rss_sources", source_key)
+    return _translation_config_for_item("translation", "x_rss_sources", source_key)
 
 
 def get_x_source_filter(source_key):
