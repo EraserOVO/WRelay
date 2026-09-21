@@ -501,7 +501,7 @@ function scheduledOptionMarkup(message, index) {
   const weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
   return '<div class="scheduled-message-entry" data-index="' + index + '">' +
     '<div class="scheduled-message-entry-header"><strong>消息 ' + (index + 1) + '</strong>' +
-    '<button type="button" class="rowicon sec scheduled-message-remove" title="删除消息" aria-label="删除消息">×</button></div>' +
+    '<button type="button" class="rowicon sec scheduled-message-remove" title="删除消息" aria-label="删除消息">' + SVG_ORIGINAL_OFF + '</button></div>' +
     '<label class="scheduled-message-entry-label">消息正文' +
     '<textarea class="scheduled-message-entry-content" data-field="content" maxlength="20000" placeholder="输入消息正文"></textarea></label>' +
     '<div class="scheduled-message-entry-row">' +
@@ -2097,10 +2097,11 @@ function showConfirmSelect(title, items, labelFn, onOkSelected, opts) {
       // 「×」删除按钮：贴近窗口右边缘，删除该条目的注册记录
       const del = document.createElement("button");
       del.type = "button";
-      del.textContent = "×";
+      del.innerHTML = SVG_ORIGINAL_OFF;
       del.className = "danger rowicon";
       del.style.flex = "none";
       del.title = "删除注册记录";
+      del.setAttribute("aria-label", "删除注册记录");
       del.addEventListener("click", function (e) {
         e.preventDefault();
         e.stopPropagation();
@@ -2193,13 +2194,17 @@ function renderRegistrationReview(data) {
       '<div class="mono" style="font-size:11px;color:var(--muted);word-break:break-all;">' + escapeHtml(it.openid) + '</div>';
     row.appendChild(info);
     const ok = document.createElement("button");
-    ok.className = "sec";
-    ok.textContent = "√";
+    ok.className = "sec rowicon";
+    ok.innerHTML = SVG_ORIGINAL_ON;
+    ok.title = "通过审核";
+    ok.setAttribute("aria-label", "通过审核");
     ok.style.cssText = "color:var(--name-green);border-color:var(--ok-border);";
     ok.addEventListener("click", function () { reviewRegistration(it.openid, "approve"); });
     const no = document.createElement("button");
-    no.className = "danger";
-    no.textContent = "×";
+    no.className = "danger rowicon";
+    no.innerHTML = SVG_ORIGINAL_OFF;
+    no.title = "拒绝审核";
+    no.setAttribute("aria-label", "拒绝审核");
     no.addEventListener("click", function () { reviewRegistration(it.openid, "reject"); });
     row.appendChild(ok);
     row.appendChild(no);
@@ -2266,8 +2271,9 @@ function renderFilterList(kind) {
     const del = document.createElement("button");
     del.type = "button";
     del.className = "flt-chip-x";
-    del.textContent = "×";
+    del.innerHTML = SVG_ORIGINAL_OFF;
     del.title = "删除";
+    del.setAttribute("aria-label", "删除");
     del.addEventListener("click", function () {
       items.splice(i, 1);
       renderFilterList(kind);
