@@ -1851,6 +1851,60 @@ def _read_qq_bots():
     return _read_bots("QQ_BOTS")
 
 
+def _public_qq_bots(bots):
+    """把 QQ Bot 凭据转换为可安全返回给浏览器的 AppID 列表。"""
+    return [
+        {"appid": str(bot.get("id") or bot.get("token") or "").strip()}
+        for bot in bots
+        if isinstance(bot, dict) and str(bot.get("id") or bot.get("token") or "").strip()
+    ]
+
+
+def _prepare_qq_bots(payload, existing_bots):
+    """校验并构造待写入 QQ_BOTS，绝不返回或记录 Secret。"""
+    if not isinstance(payload, list) or not payload:
+        raise ValueError("至少保留一个 QQ Bot")
+    if len(payload) > 20:
+        raise ValueError("QQ Bot 数量不能超过 20 个")
+    existing = {
+        str(bot.get("id") or bot.get("token") or "").strip(): dict(bot)
+        for bot in existing_bots if isinstance(bot, dict)
+    }
+    result = []
+    seen = set()
+    for item in payload:
+        if not isinstance(item, dict):
+            raise ValueError("QQ Bot 配置格式不正确")
+        appid = str(item.get("appid") or "").strip()
+        secret = str(item.get("secret") or "").strip()
+        if not appid:
+            raise ValueError("AppID 不能为空")
+        if appid in seen:
+            raise ValueError("AppID 不能重复")
+        seen.add(appid)
+        bot = existing.get(appid)
+        if bot is None:
+            if not secret:
+                raise ValueError("新增 QQ Bot 必须填写 AppSecret")
+            bot = {"id": appid, "token": appid, "secret": secret}
+        else:
+            bot["id"] = appid
+            bot["token"] = appid
+            if secret:
+                bot["secret"] = secret
+        result.append(bot)
+    return result
+
+
+def _bound_qq_bot_ids():
+    """读取当前群绑定，删除仍在使用的 Bot 前必须先解绑或改绑。"""
+    return {
+        str(item.get("bot_id") or "").strip()
+        for item in load_settings().get("qq_group_openids", [])
+        if isinstance(item, dict) and str(item.get("bot_id") or "").strip()
+    }
+
+
 def _write_qq_bots(bots, lines, line_idx, end_idx):
     """把新 QQ_BOTS 序列化回首行（保留该行原换行符），其余行原样写回。"""
     _write_bots("QQ_BOTS", bots, lines, line_idx, end_idx)
@@ -2457,45 +2511,55 @@ async def api_translation_ai_env_save(request: Request):
 
 @app.get("/api/bot/qq-config")
 def api_bot_qq_config():
-    """返回当前 QQ Bot 的 AppID（从 .env.prod 读取真实配置）。
-
-    绝不返回 AppSecret；未配置时 appid 为空字符串。"""
+    """返回 QQ Bot 的 AppID 列表，绝不返回 AppSecret。"""
     parsed = _read_qq_bots()
     if parsed is None:
         return {"ok": False, "msg": "无法读取 .env.prod 的 QQ_BOTS 配置"}
     bots, _line_idx, _lines, _end = parsed
-    bot0 = bots[0]
-    appid = str(bot0.get("id") or bot0.get("token") or "").strip()
-    return {"ok": True, "appid": appid}
+    public_bots = _public_qq_bots(bots)
+    return {
+        "ok": True,
+        "appid": public_bots[0]["appid"] if public_bots else "",
+        "bot_ids": [item["appid"] for item in public_bots],
+        "bots": public_bots,
+    }
 
 
 @app.post("/api/bot/qq-config")
 async def api_bot_qq_config_save(request: Request):
-    """保存新的 AppID / AppSecret 到 .env.prod。
-
-    请求体 {appid, secret}：secret 为空串表示保持原值。失败时绝不落盘，
-    磁盘上现有 .env.prod 保持原样。成功返回 appid，不返回 secret。"""
+    """保存 QQ Bot 列表到 .env.prod，绝不返回或记录 AppSecret。"""
     try:
         data = await request.json()
     except Exception:
         return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
-    new_appid = str(data.get("appid") or "").strip()
-    new_secret = str(data.get("secret") or "").strip()
-    if not new_appid:
-        return JSONResponse({"ok": False, "msg": "AppID 不能为空"}, status_code=400)
+    if not isinstance(data, dict):
+        return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
     parsed = _read_qq_bots()
     if parsed is None:
         return JSONResponse({"ok": False, "msg": "无法读取 .env.prod 的 QQ_BOTS 配置"}, status_code=400)
     bots, line_idx, lines, end_idx = parsed
-    bot0 = bots[0]
-    bot0["id"] = new_appid
-    bot0["token"] = new_appid
-    if new_secret:
-        bot0["secret"] = new_secret
+    # 兼容旧版单 Bot 请求体，避免旧页面或自动化调用升级后失效。
+    payload_bots = data.get("bots")
+    if payload_bots is None:
+        payload_bots = [{"appid": data.get("appid"), "secret": data.get("secret")}]
+    try:
+        new_bots = _prepare_qq_bots(payload_bots, bots)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "msg": str(exc)}, status_code=400)
+    removed_ids = {
+        str(bot.get("id") or bot.get("token") or "").strip()
+        for bot in bots if isinstance(bot, dict)
+    } - {
+        str(bot.get("id") or bot.get("token") or "").strip()
+        for bot in new_bots
+    }
+    still_bound = sorted(removed_ids & _bound_qq_bot_ids())
+    if still_bound:
+        return JSONResponse({"ok": False, "msg": "仍有 QQ 群绑定以下 Bot，请先改绑：" + "、".join(still_bound)}, status_code=400)
     # 原子写回 .env.prod；绝不创建含 AppSecret 的持久化备份。
     # 失败时清理 .tmp 并返回失败（不重启 Bot），磁盘上旧 .env.prod 保持不变。
     try:
-        _write_qq_bots(bots, lines, line_idx, end_idx)
+        _write_qq_bots(new_bots, lines, line_idx, end_idx)
     except Exception as exc:
         _log("写入 .env.prod 失败: %s" % exc)
         try:
@@ -2504,8 +2568,9 @@ async def api_bot_qq_config_save(request: Request):
         except Exception:
             pass
         return JSONResponse({"ok": False, "msg": "保存 QQ Bot 配置失败"}, status_code=500)
-    _log("QQ Bot 配置已更新（AppID=%s）" % new_appid)
-    return {"ok": True, "appid": new_appid}
+    _log("QQ Bot 配置已更新（数量=%s）" % len(new_bots))
+    public_bots = _public_qq_bots(new_bots)
+    return {"ok": True, "appid": public_bots[0]["appid"], "bot_ids": [item["appid"] for item in public_bots]}
 
 
 @app.get("/api/bot/discord-config")

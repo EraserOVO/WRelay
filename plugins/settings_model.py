@@ -149,7 +149,7 @@ class SettingsModel(dict):
             for key, value in (discord_channels or {}).items()
         ]
         groups = [
-            {"openid": str(openid), "enabled": True, "remark": ""}
+            {"openid": str(openid), "enabled": True, "remark": "", "bot_id": ""}
             for openid in (qq_group_openids or [])
         ]
         return cls({
@@ -293,6 +293,11 @@ class SettingsModel(dict):
                     if isinstance(item, dict) and item.get("openid") and item.get("enabled")
                 ],
             )
+        # bot_id 为空表示沿用第一个已连接 QQ Bot。旧配置补上空值，
+        # 以保持原有单 Bot 投递行为不变。
+        for item in result.get("qq_group_openids", []):
+            if isinstance(item, dict):
+                item.setdefault("bot_id", "")
         # 定时消息配置曾只有 enabled/content/interval 三个字段；新增
         # 周期字段时只补缺失的嵌套字段，旧配置安全迁移为每日计划。
         scheduled = result.get("scheduled_message")
@@ -334,6 +339,10 @@ def validate_settings(
             ):
                 if translation_key in item and not isinstance(item[translation_key], bool):
                     return "%s.%s 必须是布尔值" % (key, translation_key)
+            if key == "qq_group_openids" and (
+                not isinstance(item.get("bot_id", ""), str)
+            ):
+                return "qq_group_openids.bot_id 必须是字符串"
 
     x_sources = data.get("x_rss_sources")
     if not isinstance(x_sources, list):

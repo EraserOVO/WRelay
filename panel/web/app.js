@@ -1086,6 +1086,19 @@ function startFgRename(ctx) {
   input.addEventListener("blur", function () { finish(true); });
 }
 
+let qqBotIds = [];
+
+function qqBotSelect(group, index) {
+  const selected = String(group.bot_id || "");
+  const options = ['<option value="">第一个已连接 Bot</option>'].concat(qqBotIds.map(function (botId) {
+    return '<option value="' + escapeHtml(botId) + '"' + (selected === botId ? ' selected' : '') + '>' + escapeHtml(botId) + '</option>';
+  }));
+  if (selected && !qqBotIds.includes(selected)) {
+    options.push('<option value="' + escapeHtml(selected) + '" selected>未配置：' + escapeHtml(selected) + '</option>');
+  }
+  return '<select data-kind="groupBot" data-i="' + index + '" title="绑定创建该群 OpenID 的 QQ Bot">' + options.join("") + '</select>';
+}
+
 function renderSettings() {
   renderAIControls();
   renderFgTabs(FG_DISCORD);
@@ -1117,6 +1130,7 @@ function renderSettings() {
       '</td>' +
       '<td style="font-size:12px;">' + escapeHtml(gacc) + '</td>' +
       '<td class="mono">' + escapeHtml(g.openid) + '</td>' +
+      '<td>' + qqBotSelect(g, gi) + '</td>' +
       '<td style="text-align:right"><button class="danger rowicon" data-kind="fgGroupRemove" data-id="' + escapeHtml(String(g.openid)) + '">' + SVG_TRASH + '</button></td>';
     gb.appendChild(tr);
   });
@@ -2693,34 +2707,59 @@ async function saveAndReload() {
 }
 
 // ---------- QQ Bot 配置弹窗 ----------
+let qqBotDraft = [];
+
 function closeQQConfigModal() {
   document.getElementById("qqConfigModal").style.display = "none";
 }
+function renderQQBotRows() {
+  const body = document.getElementById("qqConfigBots");
+  body.innerHTML = qqBotDraft.map(function (bot, index) {
+    return '<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-top:8px;align-items:end;">' +
+      '<label style="font-size:13px;color:var(--muted);">AppID<input class="qq-bot-appid" data-i="' + index + '" value="' + escapeHtml(bot.appid || "") + '" autocomplete="off" spellcheck="false" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;"></label>' +
+      '<label style="font-size:13px;color:var(--muted);">AppSecret<input class="qq-bot-secret" data-i="' + index + '" type="password" autocomplete="new-password" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;"></label>' +
+      '<button type="button" class="danger qq-bot-remove" data-i="' + index + '" ' + (qqBotDraft.length === 1 ? 'disabled title="至少保留一个 Bot"' : 'title="删除此 Bot"') + '>删除</button></div>';
+  }).join("");
+  body.querySelectorAll(".qq-bot-remove").forEach(function (button) {
+    button.addEventListener("click", function () {
+      qqBotDraft.splice(Number(button.dataset.i), 1);
+      renderQQBotRows();
+    });
+  });
+}
+document.getElementById("qqConfigAddBot").addEventListener("click", function () {
+  qqBotDraft.push({appid: ""});
+  renderQQBotRows();
+});
 async function openQQConfigModal() {
-  document.getElementById("qqConfigAppid").value = "";
-  document.getElementById("qqConfigSecret").value = "";
+  qqBotDraft = [];
   document.getElementById("qqConfigModal").style.display = "flex";
   let r;
   try {
     r = await jget("/api/bot/qq-config");
   } catch (e) { r = null; }
   if (r && r.ok) {
-    document.getElementById("qqConfigAppid").value = r.appid || "";
+    qqBotDraft = (r.bots || []).map(function (bot) { return {appid: bot.appid || ""}; });
+    if (!qqBotDraft.length) qqBotDraft = [{appid: ""}];
+    renderQQBotRows();
   } else {
     showAlert("读取配置失败", (r && r.msg) || "无法读取当前 QQ Bot 配置");
   }
 }
 async function saveQQConfig() {
-  const appid = document.getElementById("qqConfigAppid").value.trim();
-  const secret = document.getElementById("qqConfigSecret").value;
-  if (!appid) { showAlert("QQ Bot 配置", "AppID 不能为空"); return; }
+  const bots = qqBotDraft.map(function (bot, index) {
+    const appid = document.querySelector('.qq-bot-appid[data-i="' + index + '"]').value.trim();
+    const secret = document.querySelector('.qq-bot-secret[data-i="' + index + '"]').value;
+    return {appid: appid, secret: secret};
+  });
+  if (bots.some(function (bot) { return !bot.appid; })) { showAlert("QQ Bot 配置", "AppID 不能为空"); return; }
   const saveBtn = document.getElementById("qqConfigSave");
   const cancelBtn = document.getElementById("qqConfigCancel");
   saveBtn.disabled = true;
   cancelBtn.disabled = true;
   let r;
   try {
-    r = await jpost("/api/bot/qq-config", { appid: appid, secret: secret });
+    r = await jpost("/api/bot/qq-config", {bots: bots});
   } catch (e) { r = { ok: false, msg: "保存失败，请重试" }; }
   if (!r || !r.ok) {
     saveBtn.disabled = false;
@@ -2740,6 +2779,8 @@ async function saveQQConfig() {
     return;
   }
   closeQQConfigModal();
+  qqBotIds = (r.bot_ids || []).map(String);
+  renderSettings();
   await refreshStatus();
 }
 
@@ -3755,6 +3796,12 @@ document.addEventListener("change", async function (e) {
   if (el.dataset.kind === "group") {
     settings.qq_group_openids[Number(el.dataset.i)].enabled = el.checked;
     await saveAndReload();
+  } else if (el.dataset.kind === "groupBot") {
+    const group = settings.qq_group_openids[Number(el.dataset.i)];
+    if (group) {
+      group.bot_id = el.value;
+      await saveAndReload();
+    }
   } else if (el.dataset.kind === "chan") {
     settings.discord_channels[Number(el.dataset.i)].enabled = el.checked;
     await saveAndReload();
@@ -3918,6 +3965,8 @@ async function init() {
   setActivePage(activePage);
   try {
     settings = await jget("/api/settings");
+    const qqConfig = await jget("/api/bot/qq-config");
+    qqBotIds = qqConfig && qqConfig.ok && Array.isArray(qqConfig.bot_ids) ? qqConfig.bot_ids.map(String) : [];
     renderSettings();
   } catch (err) { /* ignore */ }
   await refreshChannelNames();

@@ -316,6 +316,26 @@ def get_active_groups():
     return list(QQ_GROUP_OPENIDS)
 
 
+def get_group_bot_ids(group_openids):
+    """返回目标群绑定的 QQ Bot AppID。
+
+    空字符串表示使用第一个已连接 Bot，兼容所有旧版单 Bot 配置。调用方
+    只传本轮目标群，因此不把未参与投递的群带入路由判断。
+    """
+    requested = {str(value) for value in group_openids if str(value).strip()}
+    if not requested:
+        return {}
+    result = {openid: "" for openid in requested}
+    data = _load_settings()
+    for item in data.get("qq_group_openids", []):
+        if not isinstance(item, dict):
+            continue
+        openid = str(item.get("openid") or "").strip()
+        if openid in result:
+            result[openid] = str(item.get("bot_id") or "").strip()
+    return result
+
+
 # =====================================================
 # 转发组路由
 #

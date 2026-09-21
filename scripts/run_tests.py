@@ -17,6 +17,7 @@ TESTS = (
     "test_startup_relay_race.py",
     "test_send_failure_logs.py",
     "test_failure_notification.py",
+    "test_multi_qq_bot_routing.py",
     "test_message_trace.py",
     "test_x_forwarding_groups.py",
     "test_x_poll_concurrency.py",

@@ -109,7 +109,7 @@
         <button type="button" class="fgtab active" data-kind="fgTab" data-id="default">转发组1</button>
         <button type="button" class="fgtab-add" id="btnAddFg">＋ 添加转发组</button>
       </div>
-      <div class="hint" id="hint-fg" style="display:none">转发组决定「Discord 频道 → QQ 群」的路由。成员的加入/移出只影响当前组；频道和群的「启用」状态决定是否实际转发。暂停转发组后，该组不再转发；频道和群可以属于多个组。注册与入组分开，注册后还需加入转发组。</div>
+      <div class="hint" id="hint-fg" style="display:none">转发组决定「Discord 频道 → QQ 群」的路由。成员的加入/移出只影响当前组；频道和群的「启用」状态决定是否实际转发。每个接收群可绑定创建它的 QQ Bot；未绑定沿用第一个 Bot。暂停转发组后，该组不再转发；频道和群可以属于多个组。注册与入组分开，注册后还需加入转发组。</div>
 
       <div class="fgsection">
         <h3 class="fgh3" style="display:flex;justify-content:space-between;align-items:center;"><span>Discord 转发频道</span> <button class="foldbtn" data-fold="chanList" aria-label="展开/折叠"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 5l8 14H4z"/></svg></button></h3>
@@ -139,7 +139,7 @@
             <thead><tr>
               <th style="width:1.6%"></th>
               <th style="width:2.3%;text-align:center" class="col-muted" title="启用 = 是否允许该群接收转发"><input type="checkbox" id="groupAllEnabled"></th>
-              <th style="width:11.2%">名称</th><th style="width:18%">账号</th><th style="width:13%">Group OpenID</th><th style="width:3.5%"></th>
+              <th style="width:11.2%">名称</th><th style="width:18%">账号</th><th style="width:13%">Group OpenID</th><th style="width:12%">QQ Bot</th><th style="width:3.5%"></th>
             </tr></thead>
             <tbody id="groupBody"></tbody>
           </table>
@@ -559,16 +559,12 @@
   </div>
 </div>
 <div id="qqConfigModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;align-items:center;justify-content:center;">
-  <div style="position:relative;background:var(--modal-bg);border:1px solid var(--modal-border);border-radius:10px;padding:18px;max-width:400px;width:92%;display:flex;flex-direction:column;">
+  <div style="position:relative;background:var(--modal-bg);border:1px solid var(--modal-border);border-radius:10px;padding:18px;max-width:620px;width:92%;display:flex;flex-direction:column;">
     <button type="button" class="modal-x" data-close="qqConfigModal" aria-label="关闭">×</button>
     <h3 style="margin:0 0 14px;">QQ Bot 配置</h3>
-    <label for="qqConfigAppid" style="font-size:13px;color:var(--muted);margin-bottom:4px;">AppID</label>
-    <input type="text" id="qqConfigAppid" autocomplete="off" spellcheck="false" style="flex:1;min-width:0;">
-    <label for="qqConfigSecret" style="font-size:13px;color:var(--muted);margin:14px 0 4px;">AppSecret</label>
-    <div style="display:flex;gap:8px;align-items:center;">
-      <input type="password" id="qqConfigSecret" autocomplete="new-password" spellcheck="false" style="flex:1;min-width:0;">
-    </div>
-    <p style="font-size:12px;color:var(--muted);margin:14px 0 0;line-height:1.6;">AppSecret 留空表示不修改。保存后机器人会自动重启。</p>
+    <div id="qqConfigBots"></div>
+    <div style="margin-top:12px;"><button type="button" id="qqConfigAddBot" class="sec">＋ 添加 QQ Bot</button></div>
+    <p style="font-size:12px;color:var(--muted);margin:14px 0 0;line-height:1.6;">已有 Bot 的 AppSecret 留空表示不修改；新增 Bot 必须填写。删除前请先解除相关群的绑定。保存后机器人会自动重启。</p>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
       <button id="qqConfigCancel" class="sec">取消</button>
       <button id="qqConfigSave">保存</button>

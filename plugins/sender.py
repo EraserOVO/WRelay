@@ -8,7 +8,7 @@ from nonebot.adapters.qq import Bot as QQBot
 from nonebot.adapters.qq import Message as QQMessage
 from nonebot.adapters.qq import MessageSegment as QQMessageSegment
 
-from plugins.config import get_active_groups
+from plugins.config import get_active_groups, get_group_bot_ids
 from plugins.failure_notification import notify_delivery_failure
 from plugins.media import make_text, make_media_link
 from plugins.message_trace import record_delivery
@@ -54,6 +54,22 @@ def get_qq_bot():
             return b
 
     return None
+
+
+def _qq_bot_id(bot):
+    """取得适配器公开的 Bot AppID；不可识别时返回空字符串。"""
+    return str(getattr(bot, "self_id", "") or getattr(bot, "id", "") or "").strip()
+
+
+def get_qq_bots():
+    """返回当前已连接的 QQ Bot（AppID -> Bot）。"""
+    result = {}
+    for bot in get_bots().values():
+        if isinstance(bot, QQBot):
+            bot_id = _qq_bot_id(bot)
+            if bot_id:
+                result[bot_id] = bot
+    return result
 
 
 async def _record_trace(
@@ -512,31 +528,40 @@ async def send_relay_message(text_parts, media_items, groups=None, channel_id=""
         )
         return {}
 
-    ok_map = {group: True for group in groups}
+    # 一个 group_openid 只对创建它的 QQ Bot 有效。按绑定 Bot 分组后再发送，
+    # 避免多 Bot 时因“取第一个 Bot”而投递到错误会话。未绑定的旧群保持
+    # 使用第一个已连接 Bot。
+    connected = get_qq_bots()
+    default_id = _qq_bot_id(qq_bot)
+    if default_id:
+        connected.setdefault(default_id, qq_bot)
+    bot_ids = get_group_bot_ids(groups)
+    grouped = {}
+    unavailable = []
+    for group in groups:
+        bot_id = bot_ids.get(str(group), "")
+        selected = qq_bot if not bot_id else connected.get(bot_id)
+        if selected is None:
+            unavailable.append(group)
+            logger.error("QQ Bot {} 未连接，群 {} 本次未发送", bot_id, group)
+            continue
+        grouped.setdefault(id(selected), [selected, []])[1].append(group)
 
-    if text_parts:
+    async def send_for_bot(bot, target_groups):
+        result = {group: True for group in target_groups}
+        if text_parts:
+            text_ok = await send_text_parts(bot, target_groups, text_parts, channel_id=channel_id, message_id=message_id)
+            for group, ok in text_ok.items():
+                result[group] = result[group] and ok
+        media_ok = await send_media_items(bot, target_groups, media_items, channel_id=channel_id, message_id=message_id)
+        for group, ok in media_ok.items():
+            result[group] = result[group] and ok
+        return result
 
-        text_ok = await send_text_parts(
-            qq_bot,
-            groups,
-            text_parts,
-            channel_id=channel_id,
-            message_id=message_id,
-        )
-
-        for group, ok in text_ok.items():
-            ok_map[group] = ok_map[group] and ok
-
-    media_ok = await send_media_items(
-        qq_bot,
-        groups,
-        media_items,
-        channel_id=channel_id,
-        message_id=message_id,
-    )
-
-    for group, ok in media_ok.items():
-        ok_map[group] = ok_map[group] and ok
+    results = await asyncio.gather(*(send_for_bot(bot, target_groups) for bot, target_groups in grouped.values()))
+    ok_map = {group: False for group in unavailable}
+    for result in results:
+        ok_map.update(result)
 
     await _record_trace(
         channel_id, message_id, text_parts, media_items, groups, ok_map,

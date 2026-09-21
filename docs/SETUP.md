@@ -42,7 +42,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_installer.ps1
 ```
 
 脚本会检查 `.runtime\python`、`requirements-lock.txt` 等构建输入，自动查找
-`ISCC.exe`，编译 `WRelay.iss`，并输出安装包大小和 SHA256。若编译器不在常见安装目录，
+`ISCC.exe`，并在编译前验证内置运行时可导入 WRelay 所需依赖（包括 Pillow）。验证通过后
+才会编译 `WRelay.iss`，并输出安装包大小和 SHA256。若编译器不在常见安装目录，
 可以先设置 `INNO_SETUP_ISCC` 为 `ISCC.exe` 的完整路径。
 
 `pyproject.toml` 也提供标准 Python 构建元数据，可用于构建插件依赖包；它不是完整的桌面应用安装方式。
@@ -53,6 +54,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_installer.ps1
 ```powershell
 Get-FileHash .\WRelay-Setup.exe -Algorithm SHA256
 ```
+
+构建完成后，可在不覆盖现有安装的前提下执行 Windows 安装包冒烟验证：
+
+```powershell
+.\scripts\test_installer_smoke.ps1
+```
+
+脚本会在项目目录下的独立临时子目录安装一次新包，检查安装文件、Pillow 的图像运行时，
+以及首次配置未完成时机器人会安全退出而不连接外部服务；完成后自动删除测试目录。
+传入 `-KeepInstallDir` 可保留该目录用于排查。
 
 发布包中不得包含 `.env.prod`、`data/` 运行数据或其他真实凭据。当前项目未配置代码签名证书，
 因此不能把“文件未被篡改”仅建立在 Windows 发布者名称上；应同时提供 SHA256，并从可信渠道分发校验值。
@@ -95,6 +106,12 @@ Get-FileHash .\WRelay-Setup.exe -Algorithm SHA256
 3. 把机器人拉进目标 QQ 群，在群里 @机器人 发一条消息。
 4. 控制台会出现 `[QQ group_openid] ...`，同时写入 `data/qq_group_openids.json`。
 5. 打开管理面板 →「QQ 接收群」→ 点「同步自动发现的群」，勾选启用该群。
+
+多个 QQ Bot 时，打开管理面板的「QQ Bot 配置」，点「添加 QQ Bot」并填写新的
+AppID / AppSecret。每个目标群只能绑定创建该 `group_openid` 的 Bot；进入
+「Discord → QQ」页，在群行的「QQ Bot」列选择对应 AppID。留空则兼容旧配置，
+使用第一个已连接 Bot。保存凭据后面板会自动重启机器人；删除仍被群绑定的 Bot 前，
+必须先在群行改绑或清除绑定。
 
 > 说明：
 > - QQ 官方机器人使用 **group_openid**（不是群号），每个机器人的 openid 不同，无法推算，只能靠入群后自动发现。

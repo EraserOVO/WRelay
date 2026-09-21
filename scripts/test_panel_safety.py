@@ -92,6 +92,23 @@ def main():
     })
     print("PASS - 配置结构校验拒绝非法载荷")
 
+    existing_bots = [{"id": "A", "token": "A", "secret": "old-secret", "sandbox": False}]
+    updated_bots = panel._prepare_qq_bots([
+        {"appid": "A", "secret": ""},
+        {"appid": "B", "secret": "new-secret"},
+    ], existing_bots)
+    assert [bot["id"] for bot in updated_bots] == ["A", "B"]
+    assert updated_bots[0]["secret"] == "old-secret"
+    assert updated_bots[0]["sandbox"] is False
+    assert updated_bots[1]["secret"] == "new-secret"
+    try:
+        panel._prepare_qq_bots([{"appid": "B", "secret": ""}], existing_bots)
+        raise AssertionError("新增 Bot 缺少 Secret 应被拒绝")
+    except ValueError:
+        pass
+    assert panel._public_qq_bots(updated_bots) == [{"appid": "A"}, {"appid": "B"}]
+    print("PASS - QQ Bot 多凭据保存保留旧 Secret 且不向前端泄露")
+
     with tempfile.TemporaryDirectory(prefix="wrelay_panel_test_") as tmp:
         path = Path(tmp) / "settings.json"
         old = panel.SETTINGS_FILE
