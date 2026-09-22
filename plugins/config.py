@@ -1,5 +1,6 @@
 import os
 import re
+from urllib.parse import quote
 
 # Discord频道列表（可分发版本：不内置默认频道；
 # 首次运行时自动生成空配置，由用户在管理面板添加）
@@ -69,6 +70,7 @@ from plugins.json_io import (
 )
 from plugins.settings_model import SettingsModel, validate_settings
 from plugins.paths import data_path
+from plugins.bilibili_rate_limit import normalize_protection_config, normalize_string_list
 
 SETTINGS_FILE = data_path("settings.json")
 
@@ -113,6 +115,11 @@ def _translation_config_for_item(config_name, items_name, item_id):
         if not isinstance(item, dict):
             continue
         candidate = item.get("source") if items_name == "x_rss_sources" else item.get("id")
+        if items_name == "bilibili_sources" and not candidate:
+            candidate = _bilibili_source_id(
+                str(item.get("kind") or "up").strip().lower(),
+                str(item.get("value") or item.get("uid") or "").strip(),
+            )
         candidate_id = _x_source_key(str(candidate or "")) if items_name == "x_rss_sources" else str(candidate or "")
         if candidate_id == str(item_id):
             config["enabled"] = item.get("translation_enabled") is True
@@ -133,6 +140,10 @@ def get_x_source_translation_config(source_key):
     return _translation_config_for_item("translation", "x_rss_sources", source_key)
 
 
+def get_bilibili_source_translation_config(source_id):
+    return _translation_config_for_item("translation", "bilibili_sources", source_id)
+
+
 def get_x_source_filter(source_key):
     """返回指定 X RSS 账号的消息筛选配置。"""
     data = _load_settings()
@@ -150,6 +161,55 @@ def get_x_source_filter(source_key):
             "filter_post_types": item.get("filter_post_types"),
         }
     return {"filter_keywords": [], "filter_post_types": None}
+
+
+def get_bilibili_source_filter(source_id):
+    """返回指定 Bilibili 来源的标签、关键词、标题和作者筛选配置。"""
+    data = _load_settings()
+    for item in data.get("bilibili_sources") or []:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "up")
+        value = str(item.get("value") or item.get("uid") or "").strip()
+        candidate_id = str(item.get("id") or _bilibili_source_id(kind, value)).strip()
+        if candidate_id != str(source_id):
+            continue
+        tags = [
+            str(tag).strip()
+            for tag in (item.get("filter_tags") or [])
+            if str(tag).strip()
+        ]
+        keywords = [
+            str(keyword).strip()
+            for keyword in (item.get("filter_keywords") or [])
+            if str(keyword).strip()
+        ]
+        title_keywords = normalize_string_list(item.get("filter_title_keywords"))
+        exclude_keywords = normalize_string_list(item.get("filter_exclude_keywords"))
+        authors = normalize_string_list(item.get("filter_authors"))
+        if kind == "tag" and value and value not in tags:
+            tags.insert(0, value)
+        if kind == "keyword" and value and value not in keywords:
+            keywords.insert(0, value)
+        return {
+            "filter_tags": tags,
+            "filter_keywords": keywords,
+            "filter_title_keywords": title_keywords,
+            "filter_exclude_keywords": exclude_keywords,
+            "filter_authors": authors,
+        }
+    return {
+        "filter_tags": [],
+        "filter_keywords": [],
+        "filter_title_keywords": [],
+        "filter_exclude_keywords": [],
+        "filter_authors": [],
+    }
+
+
+def get_bilibili_protection():
+    """返回 Bilibili → QQ 全局限速与积压保护配置。"""
+    return normalize_protection_config(_load_settings().get("bilibili_protection"))
 
 
 def get_ai_config():
@@ -1065,3 +1125,157 @@ def get_x_groups_for_source(source_key):
         for group in enabled_groups
         if group in targets
     ]
+
+
+# =====================================================
+# Bilibili 投稿路由（独立于 Discord/X）
+#
+# source kind:
+#   - up      : RSSHub /bilibili/user/video/{uid}
+#   - tag     : RSSHub /bilibili/vsearch/{tag}/pubdate/0
+#   - keyword : RSSHub /bilibili/vsearch/{keyword}/pubdate/0
+# =====================================================
+
+BILIBILI_FORWARDING_GROUP_DEFAULT_ID = "bilibili_default"
+BILIBILI_FORWARDING_GROUP_DEFAULT_NAME = "转发组1"
+
+
+def _bilibili_source_id(kind, value):
+    return "%s:%s" % (str(kind or "up").strip(), str(value or "").strip())
+
+
+def get_bilibili_rsshub_base():
+    """Bilibili RSSHub 地址。"""
+    data = _load_settings()
+    base = str(data.get("bilibili_rsshub_base") or "").strip()
+    return (base or "http://localhost:1200").rstrip("/")
+
+
+def get_bilibili_poll_interval():
+    """Bilibili 轮询间隔，最短 30 秒。"""
+    data = _load_settings()
+    try:
+        value = int(data.get("bilibili_poll_interval") or 300)
+    except (TypeError, ValueError):
+        return 300
+    return value if value >= 30 else 300
+
+
+def get_bilibili_sources():
+    """返回归一化 Bilibili 来源列表。"""
+    data = _load_settings()
+    base = get_bilibili_rsshub_base()
+    items = data.get("bilibili_sources")
+    sources = []
+    if not isinstance(items, list):
+        return sources
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "up").strip().lower()
+        value = str(item.get("value") or item.get("uid") or "").strip()
+        if kind not in {"up", "tag", "keyword"} or not value:
+            continue
+        source_id = str(item.get("id") or _bilibili_source_id(kind, value)).strip()
+        if not source_id:
+            continue
+        encoded = quote(value, safe="")
+        if kind == "up":
+            path = "/bilibili/user/video/" + encoded
+        else:
+            path = "/bilibili/vsearch/" + encoded + "/pubdate/0"
+        sources.append({
+            "id": source_id,
+            "kind": kind,
+            "value": value,
+            "url": base + path,
+            "name": str(item.get("name") or value).strip() or value,
+            "enabled": item.get("enabled") is True,
+        })
+    return sources
+
+
+def _bilibili_source_ids(data, only_enabled=False):
+    ids = set()
+    for item in data.get("bilibili_sources") or []:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "up").strip().lower()
+        value = str(item.get("value") or item.get("uid") or "").strip()
+        if kind not in {"up", "tag", "keyword"} or not value:
+            continue
+        if only_enabled and item.get("enabled") is not True:
+            continue
+        ids.add(str(item.get("id") or _bilibili_source_id(kind, value)).strip())
+    return ids
+
+
+def _ensure_bilibili_forwarding_groups(data):
+    """Bilibili 转发组内存归一化，不在读取时写盘。"""
+    raw_groups = data.get("bilibili_forwarding_groups")
+    groups = raw_groups if isinstance(raw_groups, list) else []
+    valid_sources = _bilibili_source_ids(data)
+    valid_groups = {
+        str(item["openid"])
+        for item in data.get("qq_group_openids", [])
+        if isinstance(item, dict) and item.get("openid")
+    }
+    normalized = []
+    seen_ids = set()
+    for item in groups:
+        if not isinstance(item, dict):
+            continue
+        group_id = str(item.get("id") or "").strip()
+        if not group_id or group_id in seen_ids:
+            continue
+        seen_ids.add(group_id)
+        sources = []
+        for source_id in item.get("sources") or []:
+            source_id = str(source_id).strip()
+            if source_id and source_id in valid_sources and source_id not in sources:
+                sources.append(source_id)
+        target_groups = []
+        for openid in item.get("groups") or []:
+            openid = str(openid).strip()
+            if openid and openid in valid_groups and openid not in target_groups:
+                target_groups.append(openid)
+        normalized.append({
+            "id": group_id,
+            "name": str(item.get("name") or "").strip() or group_id,
+            "enabled": item.get("enabled", True) is not False,
+            "sources": sources,
+            "groups": target_groups,
+        })
+
+    if not normalized:
+        normalized = [{
+            "id": BILIBILI_FORWARDING_GROUP_DEFAULT_ID,
+            "name": BILIBILI_FORWARDING_GROUP_DEFAULT_NAME,
+            "enabled": True,
+            "sources": sorted(_bilibili_source_ids(data, only_enabled=True)),
+            "groups": _enabled_group_openids(data),
+        }]
+    data["bilibili_forwarding_groups"] = normalized
+    return normalized
+
+
+def get_bilibili_forwarding_groups():
+    return _ensure_bilibili_forwarding_groups(_load_settings())
+
+
+def get_bilibili_groups_for_source(source_id):
+    """Bilibili 来源 → QQ 目标群的唯一路由入口。"""
+    data = _load_settings()
+    source_id = str(source_id or "").strip()
+    if not source_id or source_id not in _bilibili_source_ids(data, only_enabled=True):
+        return []
+    enabled_groups = _enabled_group_openids(data)
+    if not enabled_groups:
+        return []
+    targets = set()
+    for forwarding_group in _ensure_bilibili_forwarding_groups(data):
+        if forwarding_group.get("enabled", True) is False:
+            continue
+        if source_id in forwarding_group["sources"]:
+            targets.update(forwarding_group["groups"])
+    return [group for group in enabled_groups if group in targets]

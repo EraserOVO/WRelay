@@ -17,6 +17,7 @@
       <div class="pagetabs" id="pageTabs" style="margin-bottom:0;">
         <button type="button" class="fgtab active" data-kind="pageTab" data-page="discord">Discord → QQ</button>
         <button type="button" class="fgtab" data-kind="pageTab" data-page="x">X → QQ</button>
+        <button type="button" class="fgtab" data-kind="pageTab" data-page="bilibili">Bilibili → QQ</button>
         <button type="button" class="fgtab" data-kind="pageTab" data-page="qq">QQ → QQ</button>
       </div>
     </div>
@@ -29,9 +30,9 @@
   <div class="cardrow page-content">
     <div class="card">
       <h2 style="display:flex;align-items:center;gap:6px;">机器人状态 <button class="hintbtn" data-hint="managedHint" data-title="机器人状态">?</button></h2>
-      <div class="row">
+      <div class="row robot-status-summary">
         <span id="badge" class="badge off">检测中…</span>
-        <label class="auto-translation-field qq-bot-workspace-field"><span>当前 QQ Bot</span><select id="qqBotWorkspace"></select></label>
+        <label class="auto-translation-field qq-bot-workspace-field"><select id="qqBotWorkspace" aria-label="选择 QQ Bot"></select></label>
         <span id="pidinfo" class="pid"></span>
         <span id="stats" class="pid"></span>
       </div>
@@ -88,6 +89,25 @@
         <span class="bf-limit-label">秒</span>
       </div>
       <div class="hint" id="hint-xrss" style="display:none">轮询间隔至少 30 秒，保存后下一轮生效，无需重启机器人。</div>
+    </div>
+
+    <div class="card" id="bilibiliCard" style="display:none">
+      <h2 style="display:flex;align-items:center;gap:6px;">Bilibili RSS 状态 <button class="hintbtn" data-hint="hint-bilibili" data-title="Bilibili RSS 状态">?</button></h2>
+      <div class="row" style="flex-wrap:wrap;">
+        <span id="bilibiliBadge" class="badge off">检测中…</span>
+        <span id="bilibiliSummary" class="xrss-summary">—</span>
+      </div>
+      <div class="row bilibili-rss-config-row" style="margin-top:10px;">
+        <span class="bf-limit-label">RSSHub 地址</span>
+        <input type="text" id="bilibiliRsshubBase" style="flex:none;width:168px;">
+        <span class="bf-limit-label">轮询间隔</span>
+        <input type="number" id="bilibiliPollInterval" min="30" step="1" class="bf-limit-input" style="width:70px;">
+        <span class="bf-limit-label">秒</span>
+        <div class="bilibili-card-actions">
+          <button id="btnBilibiliProtection" class="sec iconbtn" type="button" title="转发保护（限流设置）" aria-label="转发保护（限流设置）"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17a8 8 0 1 1 16 0"/><path d="M7 12.5l1.4.8M12 9v2M17 12.5l-1.4.8"/><path d="M12 17v-6"/><circle cx="12" cy="17" r="1.5" fill="currentColor" stroke="none"/><path d="M5 20h14"/></svg></button>
+        </div>
+      </div>
+      <div class="hint" id="hint-bilibili" style="display:none">支持 UP 主投稿、Bilibili 标签搜索和关键词搜索；轮询间隔至少 30 秒，保存后下一轮生效。</div>
     </div>
 
     <div class="card" id="scheduledMessageCard" style="display:none">
@@ -319,6 +339,61 @@
         </span>
       </div>
     </div>
+    </div>
+  </div>
+
+  <div id="pageBilibili" class="page-content" style="display:none">
+    <div class="card">
+      <h2 style="display:flex;align-items:center;gap:6px;">转发组 <button class="hintbtn" data-hint="hint-bilibili-fg" data-title="Bilibili 转发组">?</button></h2>
+      <div id="bilibiliFgBody">
+        <div class="fgtabs" id="bilibiliFgTabs">
+          <button type="button" class="fgtab active" data-kind="fgTab" data-ctx="bilibili" data-id="bilibili_default">转发组1</button>
+          <button type="button" class="fgtab-add" id="btnAddBilibiliFg">＋ 添加转发组</button>
+        </div>
+        <div class="hint" id="hint-bilibili-fg" style="display:none">Bilibili 转发组独立于 Discord、X 和 QQ→QQ。来源类型支持 UP 主投稿、标签和关键词；来源与 QQ 群的全局启用状态及当前组成员关系同时满足时才会转发。</div>
+
+        <div class="fgsection">
+          <h3 class="fgh3" style="display:flex;justify-content:space-between;align-items:center;"><span>Bilibili 来源</span> <button class="foldbtn" data-fold="bilibiliSourceContent" aria-label="展开/折叠"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 5l8 14H4z"/></svg></button></h3>
+          <div id="bilibiliSourceContent">
+            <div class="tablewrap">
+              <table id="bilibiliSourceList" style="table-layout:fixed">
+                <thead><tr>
+                  <th style="width:1.6%"></th>
+                  <th style="width:2.3%;text-align:center" class="col-muted" title="启用 = 是否允许该来源参与轮询与发送"><input type="checkbox" id="bilibiliSourceAllEnabled"></th>
+                  <th style="width:12%">类型</th><th style="width:28%">范围</th><th style="width:16%">标签/关键词</th><th style="width:10%"></th>
+                </tr></thead>
+                <tbody id="bilibiliSourceBody"></tbody>
+              </table>
+            </div>
+            <div class="row addrow">
+              <button id="btnAddBilibiliFgSource">＋ 新增</button>
+              <button id="btnAddBilibiliSource" class="sec">注册来源</button>
+              <button id="btnOpenBilibili" class="sec linkbtn" style="margin-left:auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.813 4.653h.854c1.51.054 2.769.578 3.773 1.574 1.004.995 1.524 2.249 1.56 3.76v7.36c-.036 1.51-.556 2.769-1.56 3.773s-2.262 1.524-3.773 1.56H5.333c-1.51-.036-2.769-.556-3.773-1.56S.036 18.858 0 17.347v-7.36c.036-1.511.556-2.765 1.56-3.76 1.004-.996 2.262-1.52 3.773-1.574h.774l-1.174-1.12a1.234 1.234 0 0 1-.373-.906c0-.356.124-.658.373-.907l.027-.027c.267-.249.573-.373.92-.373.347 0 .653.124.92.373L9.653 4.44c.071.071.134.142.187.213h4.267a.836.836 0 0 1 .16-.213l2.853-2.747c.267-.249.573-.373.92-.373.347 0 .662.151.929.4.267.249.391.551.391.907 0 .355-.124.657-.373.906zM5.333 7.24c-.746.018-1.373.276-1.88.773-.506.498-.769 1.13-.786 1.894v7.52c.017.764.28 1.395.786 1.893.507.498 1.134.756 1.88.773h13.334c.746-.017 1.373-.275 1.88-.773.506-.498.769-1.129.786-1.893v-7.52c-.017-.765-.28-1.396-.786-1.894-.507-.497-1.134-.755-1.88-.773zM8 11.107c.373 0 .684.124.933.373.25.249.383.569.4.96v1.173c-.017.391-.15.711-.4.96-.249.25-.56.374-.933.374s-.684-.125-.933-.374c-.25-.249-.383-.569-.4-.96V12.44c0-.373.129-.689.386-.947.258-.257.574-.386.947-.386zm8 0c.373 0 .684.124.933.373.25.249.383.569.4.96v1.173c-.017.391-.15.711-.4.96-.249.25-.56.374-.933.374s-.684-.125-.933-.374c-.25-.249-.383-.569-.4-.96V12.44c.017-.391.15-.711.4-.96.249-.249.56-.373.933-.373Z"/></svg>打开 Bilibili</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="fgsection">
+          <h3 class="fgh3" style="display:flex;justify-content:space-between;align-items:center;"><span>QQ 接收群</span> <button class="foldbtn" data-fold="bilibiliGroupContent" aria-label="展开/折叠"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 5l8 14H4z"/></svg></button></h3>
+          <div id="bilibiliGroupContent">
+            <div class="tablewrap">
+              <table id="bilibiliGroupList" style="table-layout:fixed">
+                <thead><tr>
+                  <th style="width:1.6%"></th>
+                  <th style="width:2.3%;text-align:center" class="col-muted" title="启用 = 是否允许该群接收转发"><input type="checkbox" id="bilibiliGroupAllEnabled"></th>
+                  <th style="width:11.2%">名称</th><th style="width:18%">账号</th><th style="width:13%">Group OpenID</th><th style="width:3.5%"></th>
+                </tr></thead>
+                <tbody id="bilibiliGroupBody"></tbody>
+              </table>
+            </div>
+            <div class="row addrow">
+              <button id="btnAddBilibiliFgGroup">＋ 新增</button>
+              <button id="btnSyncBilibiliGroups" class="sec">注册审核</button>
+              <button id="btnQQPlatformBilibili" class="sec linkbtn" style="margin-left:auto"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9.50039 11.1504C9.96983 11.1504 10.3504 11.5309 10.3504 12.0004V14.0004C10.3504 14.4698 9.96983 14.8504 9.50039 14.8504C9.03095 14.8504 8.65039 14.4698 8.65039 14.0004V12.0004C8.65039 11.5309 9.03095 11.1504 9.50039 11.1504Z" fill="currentColor"/><path d="M14.5004 11.1504C14.9698 11.1504 15.3504 11.5309 15.3504 12.0004V14.0004C15.3504 14.4698 14.9698 14.8504 14.5004 14.8504C14.0309 14.8504 13.6504 14.4698 13.6504 14.0004V12.0004C13.6504 11.5309 14.0309 11.1504 14.5004 11.1504Z" fill="currentColor"/><path fill-rule="evenodd" clip-rule="evenodd" d="M12.8504 5.3109C13.5299 4.99138 14.0004 4.30063 14.0004 3.5C14.0004 2.39543 13.1049 1.5 12.0004 1.5C10.8958 1.5 10.0004 2.39543 10.0004 3.5C10.0004 4.30065 10.4708 4.99141 11.1504 5.31092V6.18851C6.38487 6.61795 2.65039 10.6231 2.65039 15.5004V17.0004C2.65039 19.679 4.82181 21.8504 7.50039 21.8504H16.5004C19.179 21.8504 21.3504 19.679 21.3504 17.0004V15.5004C21.3504 10.6231 17.6159 6.61795 12.8504 6.18851V5.3109ZM12.0004 7.85039C7.77541 7.85039 4.35039 11.2754 4.35039 15.5004V17.0004C4.35039 18.7401 5.76069 20.1504 7.50039 20.1504H16.5004C18.2401 20.1504 19.6504 18.7401 19.6504 17.0004V15.5004C19.6504 11.2754 16.2254 7.85039 12.0004 7.85039Z" fill="currentColor"/></svg>QQ 机器人平台</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 

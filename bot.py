@@ -322,6 +322,7 @@ BOT_PLUGIN_MODULES = (
     "plugins.registration",
     "plugins.relay",
     "plugins.scheduled_message",
+    "plugins.bilibili",
     "plugins.x_rss",
 )
 nonebot.load_all_plugins(

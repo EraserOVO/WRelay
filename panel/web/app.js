@@ -57,8 +57,8 @@ function toggleTheme() {
 let channelNames = {};
 // Discord 频道服务器 ID 映射 {频道ID: 服务器ID}，仅用于生成频道跳转链接
 let channelGuildIds = {};
-// 转发组机制：Discord、X、QQ→QQ 各自一套上下文（组列表字段 / 成员字段 / active
-// 状态 / id 前缀等），组相关函数全部按 ctx 参数化复用，三者交互一致。
+// 转发组机制：Discord、X、Bilibili、QQ→QQ 各自一套上下文（组列表字段 / 成员字段 / active
+// 状态 / id 前缀等），组相关函数全部按 ctx 参数化复用，四者交互一致。
 // active 组 id 各自持久化到 localStorage，刷新后恢复且互不影响；
 // 组内成员随 settings 整体保存。
 const MAX_FG = 10;
@@ -84,6 +84,17 @@ const FG_X = {
   addBtnId: "btnAddXFg",
   activeId: null,
 };
+const FG_BILIBILI = {
+  key: "bilibili",
+  field: "bilibili_forwarding_groups",
+  memberField: {biliSource: "sources", source: "sources", group: "groups"},
+  emptyMembers: ["sources", "groups"],
+  storageKey: "wrelay_active_bilibili_fg",
+  idPrefix: "bilibili_fg_",
+  tabsId: "bilibiliFgTabs",
+  addBtnId: "btnAddBilibiliFg",
+  activeId: null,
+};
 const FG_QQ = {
   key: "qq",
   field: "qq_forwarding_groups",
@@ -95,9 +106,10 @@ const FG_QQ = {
   addBtnId: "btnAddQQFg",
   activeId: null,
 };
-const FG_CTX = {discord: FG_DISCORD, x: FG_X, qq: FG_QQ};
+const FG_CTX = {discord: FG_DISCORD, x: FG_X, bilibili: FG_BILIBILI, qq: FG_QQ};
 try { FG_DISCORD.activeId = localStorage.getItem(FG_DISCORD.storageKey); } catch (e) { FG_DISCORD.activeId = null; }
 try { FG_X.activeId = localStorage.getItem(FG_X.storageKey); } catch (e) { FG_X.activeId = null; }
+try { FG_BILIBILI.activeId = localStorage.getItem(FG_BILIBILI.storageKey); } catch (e) { FG_BILIBILI.activeId = null; }
 try { FG_QQ.activeId = localStorage.getItem(FG_QQ.storageKey); } catch (e) { FG_QQ.activeId = null; }
 // X source 字符串 → 去重状态 key（与 bot 侧 config._x_source_key 同规则）：
 // screen_name 去 @；完整 URL 时提取 /twitter/user/{handle}，提取不到用整个 URL
@@ -203,7 +215,7 @@ function localizeUserError(message, fallback) {
   return translated;
 }
 
-// ---------------- 主要界面切换（Discord → QQ / X → QQ / QQ → QQ） ----------------
+// ---------------- 主要界面切换（Discord / X / Bilibili / QQ） ----------------
 // 每种转发组合一个独立页面，页面选择持久化到 localStorage（与主题/转发组同方式），
 // 刷新后恢复；默认进入 Discord → QQ（不改变原有使用习惯）。
 // 三个页面共用同一份 settings 对象（整体保存、整体拉取），切换只改可见性，
@@ -212,20 +224,23 @@ const PAGE_STORAGE_KEY = "wrelay_active_page";
 let activePage = "discord";
 try {
   const savedPage = localStorage.getItem(PAGE_STORAGE_KEY);
-  if (savedPage === "x" || savedPage === "qq") activePage = savedPage;
+  if (savedPage === "x" || savedPage === "bilibili" || savedPage === "qq") activePage = savedPage;
 } catch (e) {}
 
 function setActivePage(page) {
-  activePage = page === "x" || page === "qq" ? page : "discord";
+  activePage = page === "x" || page === "bilibili" || page === "qq" ? page : "discord";
   try { localStorage.setItem(PAGE_STORAGE_KEY, activePage); } catch (e) {}
   document.getElementById("pageDiscord").style.display = activePage === "discord" ? "" : "none";
   document.getElementById("pageX").style.display = activePage === "x" ? "" : "none";
+  document.getElementById("pageBilibili").style.display = activePage === "bilibili" ? "" : "none";
   document.getElementById("pageQQ").style.display = activePage === "qq" ? "" : "none";
   // 顶部第二张卡按页面切换：Discord → 离线补发；X → X RSS 状态；QQ → 不显示
   const backfillCard = document.getElementById("backfillCard");
   if (backfillCard) backfillCard.style.display = activePage === "discord" ? "" : "none";
   const xrssCard = document.getElementById("xrssCard");
   if (xrssCard) xrssCard.style.display = activePage === "x" ? "" : "none";
+  const bilibiliCard = document.getElementById("bilibiliCard");
+  if (bilibiliCard) bilibiliCard.style.display = activePage === "bilibili" ? "" : "none";
   const scheduledCard = document.getElementById("scheduledMessageCard");
   if (scheduledCard) scheduledCard.style.display = activePage === "qq" ? "" : "none";
   document.querySelectorAll('#pageTabs [data-kind="pageTab"]').forEach(function (btn) {
@@ -727,7 +742,11 @@ async function saveScheduledMessageSettings(enabled) {
 
 // ---------- 转发组（Discord / X / QQ→QQ 共用机制，按 ctx 区分） ----------
 function getFgList(ctx) {
-  return (settings && settings[ctx.field]) || [];
+  if (!settings) return [];
+  // 新增链路的旧配置可能尚未含有对应字段；先挂回 settings，
+  // 否则对临时空数组 push 后会在保存前丢失，表现为“添加转发组无反应”。
+  if (!Array.isArray(settings[ctx.field])) settings[ctx.field] = [];
+  return settings[ctx.field];
 }
 function getActiveFg(ctx) {
   const list = getFgList(ctx);
@@ -789,6 +808,18 @@ function fgCandidate(kind) {
       labelOf: function (c) { return ((c.name || "") + " " + c.id).trim(); },
     };
   }
+  if (kind === "biliSource") {
+    return {
+      all: settings.bilibili_sources || [],
+      idOf: function (source) {
+        return String(source.id || bilibiliSourceId(source.kind || "up", source.value || ""));
+      },
+      labelOf: function (source) {
+        const kindText = source.kind === "up" ? "UP主" : source.kind === "tag" ? "标签" : "关键词";
+        return ((source.name || source.value || "") + " · " + kindText + " · " + (source.value || "")).trim();
+      },
+    };
+  }
   // source（X 转发账号）：组内以 key（去 @ handle）为标识
   return {
     all: settings.x_rss_sources,
@@ -803,7 +834,7 @@ function openFgAddPicker(ctx, kind) {
   // 「从已注册项新增」：从全局已注册实体中选择加入当前转发组
   const fg = getActiveFg(ctx);
   if (!fg) return;
-  const field = ctx.memberField[kind];
+  const field = ctx.memberField[kind] || ctx.memberField.source;
   const cand = fgCandidate(kind);
   const memberSet = {};
   (fg[field] || []).forEach(function (id) { memberSet[String(id)] = true; });
@@ -813,7 +844,7 @@ function openFgAddPicker(ctx, kind) {
   if (!candidates.length) {
     showAlert(
       "从已注册项新增",
-      "当前转发组已包含全部已注册的" + (kind === "group" ? "群" : kind === "chan" ? "频道" : "来源") + "，没有可添加的条目"
+      "当前转发组已包含全部已注册的" + (kind === "group" ? "群" : kind === "chan" ? "频道" : kind === "biliSource" ? "Bilibili 来源" : "来源") + "，没有可添加的条目"
     );
     return;
   }
@@ -905,16 +936,24 @@ function deleteRegisteredItem(kind, item, reopenPicker) {
   const isGroup = kind === "group";
   const isChan = kind === "chan";
   const isSource = kind === "source";
-  const id = String(isChan ? item.id : isSource ? xSourceKey(item.source) : item.openid);
+  const isBilibiliSource = kind === "biliSource";
+  const id = String(
+    isChan ? item.id
+      : isSource ? xSourceKey(item.source)
+        : isBilibiliSource ? (item.id || bilibiliSourceId(item.kind || "up", item.value || ""))
+          : item.openid
+  );
   const name = isGroup
     ? (item.name || item.remark || identityName("groups", item.openid) || "")
     : isChan
       ? (item.name || "")
       : isSource
         ? (item.name || xSourceKey(item.source) || "")
+        : isBilibiliSource
+          ? (item.name || item.value || "")
         : (item.name || item.remark || identityName("users", item.openid) || "");
   const label = ((name || "") + " " + id).trim();
-  const kindName = isGroup ? "群" : isChan ? "频道" : isSource ? "来源" : "用户";
+  const kindName = isGroup ? "群" : isChan ? "频道" : isSource || isBilibiliSource ? "来源" : "用户";
   hideConfirm();
   showConfirmDlg("删除注册记录",
     "确定删除「" + label + "」的注册记录？\n删除后将从已注册列表移除，并从所属转发组中移出；如需使用请重新注册。",
@@ -928,6 +967,11 @@ function deleteRegisteredItem(kind, item, reopenPicker) {
       } else if (isSource) {
         const idx = settings.x_rss_sources.findIndex(function (o) { return xSourceKey(o.source) === id; });
         if (idx >= 0) settings.x_rss_sources.splice(idx, 1);
+      } else if (isBilibiliSource) {
+        const idx = (settings.bilibili_sources || []).findIndex(function (o) {
+          return String(o.id || bilibiliSourceId(o.kind || "up", o.value || "")) === id;
+        });
+        if (idx >= 0) settings.bilibili_sources.splice(idx, 1);
       } else {
         const idx = settings.qq_user_openids.findIndex(function (o) { return String(o.openid) === id; });
         if (idx >= 0) settings.qq_user_openids.splice(idx, 1);
@@ -1035,7 +1079,7 @@ function renderFgTabs(ctx) {
     wrap.appendChild(add);
   }
 }
-function addForwardingGroup(ctx) {
+async function addForwardingGroup(ctx) {
   const list = getFgList(ctx);
   if (list.length >= MAX_FG) { showAlert("添加转发组", "最多 " + MAX_FG + " 个转发组"); return; }
   // 空组：不复制任何成员；名称自动取未占用的「转发组N」（从 1 起找）
@@ -1052,7 +1096,7 @@ function addForwardingGroup(ctx) {
   list.push(fg);
   ctx.activeId = fg.id;
   try { localStorage.setItem(ctx.storageKey, fg.id); } catch (e) {}
-  saveAndReload();
+  return await saveAndReload();
 }
 let fgRenameActive = false;
 let fgRenameCtxKey = null;   // 正在重命名的转发组上下文 key（discord / x）
@@ -1143,11 +1187,14 @@ function renderQQBotWorkspace() {
   select.disabled = qqBotIds.length < 2;
 }
 
-document.getElementById("qqBotWorkspace").addEventListener("change", function (event) {
-  activeQQBotId = String(event.target.value || "");
-  try { localStorage.setItem(QQ_BOT_WORKSPACE_KEY, activeQQBotId); } catch (e) {}
-  renderSettings();
-});
+const qqBotWorkspace = document.getElementById("qqBotWorkspace");
+if (qqBotWorkspace) {
+  qqBotWorkspace.addEventListener("change", function (event) {
+    activeQQBotId = String(event.target.value || "");
+    try { localStorage.setItem(QQ_BOT_WORKSPACE_KEY, activeQQBotId); } catch (e) {}
+    renderSettings();
+  });
+}
 
 function renderSettings() {
   renderAIControls();
@@ -1266,8 +1313,9 @@ function renderSettings() {
   syncHeaderAll("groupAllEnabled", grpRows, "enabled");
   syncHeaderAll("chanAllEnabled", chanRows, "enabled");
   syncHeaderAll("userAllEnabled", settings.qq_user_openids || [], "enabled");
-  // X → QQ / QQ → QQ 页面与 Discord 页共用同一份 settings，跟随每次保存/轮询同步刷新
+  // X / Bilibili / QQ → QQ 页面与 Discord 页共用同一份 settings，跟随保存刷新
   renderXPage();
+  renderBilibiliPage();
   renderQQPage();
 }
 
@@ -1553,6 +1601,110 @@ function renderXPage() {
   }
 }
 
+// ---------------- Bilibili → QQ 页面 ----------------
+// Bilibili 使用独立的来源和转发组；来源条目本身携带 kind/value/filter 字段，
+// 因此不复用 X 的账号字段，避免保存时互相覆盖。
+function bilibiliKindText(source) {
+  return source && source.kind === "up" ? "UP主" : source && source.kind === "tag" ? "标签" : "关键词";
+}
+
+function renderBilibiliPage() {
+  const sourceBody = document.getElementById("bilibiliSourceBody");
+  if (!sourceBody || !settings) return;
+  renderFgTabs(FG_BILIBILI);
+  const fg = getActiveFg(FG_BILIBILI);
+  const allSources = Array.isArray(settings.bilibili_sources) ? settings.bilibili_sources : [];
+  const memberSources = {};
+  if (fg) (fg.sources || []).forEach(function (id) { memberSources[String(id)] = true; });
+  const sourceRows = allSources.filter(function (source) {
+    const sourceId = String(source.id || bilibiliSourceId(source.kind || "up", source.value || ""));
+    return memberSources[sourceId];
+  });
+  sourceBody.innerHTML = "";
+  if (!sourceRows.length) {
+    sourceBody.innerHTML = '<tr class="fgempty-row"><td colspan="6" class="fgempty-msg">还未新增来源，请先「注册来源」，再加入当前转发组。</td></tr>';
+  }
+  sourceRows.forEach(function (source) {
+    const index = allSources.indexOf(source);
+    const sourceId = String(source.id || bilibiliSourceId(source.kind || "up", source.value || ""));
+    const filters = [].concat(
+      source.filter_tags || [],
+      source.filter_keywords || [],
+      source.filter_title_keywords || [],
+      source.filter_exclude_keywords || [],
+      source.filter_authors || []
+    ).filter(Boolean).join("、");
+    const tr = document.createElement("tr");
+    tr.setAttribute("data-id", sourceId);
+    tr.innerHTML =
+      '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
+      '<td style="text-align:center"><input type="checkbox" data-kind="biliSource" data-i="' + index + '"' + (source.enabled ? " checked" : "") + '></td>' +
+      '<td>' + escapeHtml(bilibiliKindText(source)) + '</td>' +
+      '<td><span class="chan-name" data-kind="biliSourceNameDisplay" data-i="' + index + '">' +
+        '<span class="chan-name-text">' + escapeHtml(source.name || source.value || "") + '</span>' +
+        '<span class="chan-name-edit" data-kind="biliSourceNameEdit" data-i="' + index + '" title="编辑来源名称">' + SVG_PEN + '</span>' +
+      '</span><div class="mono" style="font-size:11px;">' + escapeHtml(source.value || "") + '</div></td>' +
+      '<td>' + escapeHtml(filters || "—") + '</td>' +
+        '<td style="text-align:right"><button class="sec rowicon" data-kind="biliSourceFilterEdit" data-i="' + index + '" title="编辑筛选">' + SVG_PEN + '</button><button class="danger rowicon" data-kind="biliFgSourceRemove" data-id="' + escapeHtml(sourceId) + '" title="移出当前转发组">' + SVG_TRASH + '</button></td>';
+    sourceBody.appendChild(tr);
+  });
+  syncHeaderAll("bilibiliSourceAllEnabled", sourceRows, "enabled");
+
+  const groupBody = document.getElementById("bilibiliGroupBody");
+  const allGroups = settings.qq_group_openids || [];
+  const memberGroups = {};
+  if (fg) (fg.groups || []).forEach(function (id) { memberGroups[String(id)] = true; });
+  const groupRows = allGroups.filter(function (group) {
+    return memberGroups[String(group.openid)] && groupInActiveQQBotWorkspace(group);
+  });
+  groupBody.innerHTML = "";
+  if (!groupRows.length) {
+    groupBody.innerHTML = '<tr class="fgempty-row"><td colspan="6" class="fgempty-msg">还未新增群，请加入一个 QQ 接收群。</td></tr>';
+  }
+  groupRows.forEach(function (group) {
+    const index = allGroups.indexOf(group);
+    const name = group.name || identityName("groups", group.openid) || "";
+    const account = group.qq_id || "";
+    const tr = document.createElement("tr");
+    tr.setAttribute("data-id", String(group.openid));
+    tr.innerHTML =
+      '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
+      '<td style="text-align:center"><input type="checkbox" data-kind="group" data-i="' + index + '"' + (group.enabled ? " checked" : "") + '></td>' +
+      '<td>' + (name ? '<div style="color:var(--fg);font-size:12px;word-break:break-all;">' + escapeHtml(name) + '</div>' : '') + '</td>' +
+      '<td style="font-size:12px;">' + escapeHtml(account) + '</td>' +
+      '<td class="mono">' + escapeHtml(group.openid) + '</td>' +
+      '<td style="text-align:right"><button class="danger rowicon" data-kind="biliFgGroupRemove" data-id="' + escapeHtml(String(group.openid)) + '" title="移出当前转发组">' + SVG_TRASH + '</button></td>';
+    groupBody.appendChild(tr);
+  });
+  syncHeaderAll("bilibiliGroupAllEnabled", groupRows, "enabled");
+
+  const baseInput = document.getElementById("bilibiliRsshubBase");
+  if (baseInput && document.activeElement !== baseInput) baseInput.value = settings.bilibili_rsshub_base || "";
+  const intervalInput = document.getElementById("bilibiliPollInterval");
+  if (intervalInput && document.activeElement !== intervalInput) {
+    const value = Number(settings.bilibili_poll_interval);
+    intervalInput.value = value > 0 ? value : 300;
+  }
+  const protection = settings.bilibili_protection || {};
+  const minInterval = document.getElementById("bilibiliMinSendInterval");
+  if (minInterval && document.activeElement !== minInterval) {
+    minInterval.value = Number.isFinite(Number(protection.min_send_interval))
+      ? Math.max(0, Number(protection.min_send_interval)) : 60;
+  }
+  const hourlyLimit = document.getElementById("bilibiliHourlyLimit");
+  if (hourlyLimit && document.activeElement !== hourlyLimit) {
+    hourlyLimit.value = Number(protection.hourly_limit) > 0 ? Number(protection.hourly_limit) : 10;
+  }
+  const backlogLimit = document.getElementById("bilibiliBacklogLimit");
+  if (backlogLimit && document.activeElement !== backlogLimit) {
+    backlogLimit.value = Number(protection.backlog_limit) > 0 ? Number(protection.backlog_limit) : 10;
+  }
+  const overflowPolicy = document.getElementById("bilibiliOverflowPolicy");
+  if (overflowPolicy && document.activeElement !== overflowPolicy) {
+    overflowPolicy.value = protection.overflow_policy === "oldest" ? "oldest" : "latest";
+  }
+}
+
 // ---------------- X RSS 状态卡片（真实运行状态，轻量轮询） ----------------
 // 数据来自面板 /api/xrss/status（代理 bot 的 /api/x-rss/status 运行时状态）。
 // 只更新本卡片的 textContent，不重建任何表格/输入框：转发组重命名输入框
@@ -1645,6 +1797,72 @@ async function refreshXStatus() {
   } catch (err) { /* 面板瞬断：保留当前显示，下一轮覆盖 */ }
 }
 
+function renderBilibiliStatus(st) {
+  const badge = document.getElementById("bilibiliBadge");
+  if (!badge || !st) return;
+  const botUp = st.bot_running === true;
+  const pollTs = Number(st.last_poll_ts) || 0;
+  const pollText = pollTs ? xrssFmtTime(pollTs) : "—";
+  let srcText = "—";
+  if (st.sources_total !== undefined) {
+    srcText = st.sources_enabled + " / " + st.sources_total;
+  } else if (settings && Array.isArray(settings.bilibili_sources)) {
+    const all = settings.bilibili_sources;
+    srcText = all.filter(function (s) { return s.enabled; }).length + " / " + all.length;
+  }
+
+  let badgeText, badgeCls, failed = false;
+  if (!botUp) {
+    badgeText = "未运行";
+    badgeCls = "badge off";
+  } else if (st.ok === false) {
+    badgeText = localizeUserError(st.msg, "检测中…");
+    badgeCls = "badge warn";
+  } else if (!st.running) {
+    badgeText = "等待 QQ 连接";
+    badgeCls = "badge warn";
+  } else if (!st.qq_connected) {
+    badgeText = st.last_result === "ok" ? "RSS 正常 · QQ 未连接" : "RSSHub 请求失败 · QQ 未连接";
+    badgeCls = "badge warn";
+  } else if (st.last_result === "fetch_failed") {
+    badgeText = "RSSHub 请求失败";
+    badgeCls = "badge off";
+    failed = true;
+  } else if (st.last_result === "parse_failed") {
+    badgeText = "RSS 解析失败";
+    badgeCls = "badge off";
+    failed = true;
+  } else {
+    badgeText = "运行中";
+    badgeCls = "badge on";
+  }
+  badge.textContent = badgeText;
+  badge.className = badgeCls;
+
+  const summary = document.getElementById("bilibiliSummary");
+  if (summary) {
+    const sendFailed = Number(st.last_failed_count) || 0;
+    summary.classList.toggle("err", failed || sendFailed > 0);
+    if (!botUp) {
+      summary.textContent = "—";
+    } else if (failed) {
+      summary.textContent = localizeUserError(st.last_error, "请求失败") + " · 上次轮询 " + pollText;
+    } else {
+      summary.textContent = "来源 " + srcText + " · 上次轮询 " + pollText
+        + " · 发现 " + (Number(st.last_new_count) || 0) + " 条"
+        + " · 发送 " + (Number(st.last_sent_count) || 0) + " 条"
+        + " · 积压 " + (Number(st.protection_queue_pending) || 0) + " 条"
+        + (sendFailed > 0 ? " · 发送失败 " + sendFailed + " 条" : "");
+    }
+  }
+}
+
+async function refreshBilibiliStatus() {
+  try {
+    renderBilibiliStatus(await jget("/api/bilibili/status"));
+  } catch (err) { /* 面板瞬断：保留当前显示，下一轮覆盖 */ }
+}
+
 // ---------------- 消息追踪（近期投递结果，只读） ----------------
 function messageTraceTime(ts) {
   const d = new Date(Number(ts || 0) * 1000);
@@ -1663,6 +1881,12 @@ function messageTraceSource(entry) {
       return xSourceKey(item.source) === id;
     });
     return {name: "X RSS", id: (source && source.name) || id || "未知来源"};
+  }
+  if (kind === "bilibili") {
+    const source = ((settings && settings.bilibili_sources) || []).find(function (item) {
+      return String(item.id || (String(item.kind || "up") + ":" + String(item.value || ""))) === id;
+    });
+    return {name: "Bilibili", id: (source && (source.name || source.value)) || id || "未知来源"};
   }
   if (kind === "discord") {
     return {name: "Discord", id: channelNames[id] || id || "未知频道"};
@@ -1778,6 +2002,111 @@ function openXSourceRegister() {
     });
     if (dup) { showAlert("注册新源", "该账号已在源列表中"); return; }
     settings.x_rss_sources.push({source: handle, name: nameInput.value.trim(), enabled: true});
+    await saveAndReload();
+  };
+  document.getElementById("confirmModal").style.display = "flex";
+}
+
+function bilibiliSourceId(kind, value) {
+  return String(kind || "up") + ":" + String(value || "").trim();
+}
+
+function splitBilibiliValues(value) {
+  return String(value || "").split(/[，,\n]/).map(function (item) {
+    return item.trim();
+  }).filter(Boolean);
+}
+
+function openBilibiliSourceRegister(editIndex) {
+  const isEdit = Number.isInteger(editIndex) && editIndex >= 0;
+  const editingSource = isEdit ? (settings.bilibili_sources || [])[editIndex] : null;
+  if (isEdit && !editingSource) return;
+  document.getElementById("confirmTitle").textContent = isEdit ? "编辑 Bilibili 来源筛选" : "注册 Bilibili 来源";
+  const body = document.getElementById("confirmBody");
+  body.innerHTML = "";
+  function field(labelText, placeholder) {
+    const wrap = document.createElement("div");
+    wrap.style.marginBottom = "10px";
+    const label = document.createElement("div");
+    label.className = "bf-limit-label";
+    label.textContent = labelText;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = placeholder || "";
+    input.style.width = "100%";
+    wrap.appendChild(label);
+    wrap.appendChild(input);
+    body.appendChild(wrap);
+    return input;
+  }
+  const kindWrap = document.createElement("div");
+  kindWrap.style.marginBottom = "10px";
+  const kindLabel = document.createElement("div");
+  kindLabel.className = "bf-limit-label";
+  kindLabel.textContent = "来源范围";
+  const kind = document.createElement("select");
+  kind.style.width = "100%";
+  kind.innerHTML = '<option value="up">UP 主投稿（UID）</option><option value="tag">标签搜索</option><option value="keyword">关键词搜索</option>';
+  if (editingSource) {
+    kind.value = editingSource.kind || "up";
+    kind.disabled = true;
+  }
+  kindWrap.appendChild(kindLabel);
+  kindWrap.appendChild(kind);
+  body.appendChild(kindWrap);
+  const valueInput = field("UID / 标签 / 关键词", "例如：123456 或 游戏");
+  const nameInput = field("显示名称（可选）", "例如：某某 UP 主");
+  const tagInput = field("额外标签筛选（可选）", "多个标签用逗号分隔");
+  const keywordInput = field("额外关键词筛选（可选）", "多个关键词用逗号分隔");
+  const titleInput = field("标题必须包含（可选）", "标题包含任一关键词，例如：攻略、实况");
+  const excludeInput = field("标题排除关键词（可选）", "标题包含任一关键词时跳过，例如：广告、抽奖");
+  const authorInput = field("作者白名单（可选）", "只转发这些作者，多个作者用逗号分隔");
+  if (editingSource) {
+    valueInput.value = editingSource.value || "";
+    nameInput.value = editingSource.name || editingSource.value || "";
+    tagInput.value = (editingSource.filter_tags || []).join("、");
+    keywordInput.value = (editingSource.filter_keywords || []).join("、");
+    titleInput.value = (editingSource.filter_title_keywords || []).join("、");
+    excludeInput.value = (editingSource.filter_exclude_keywords || []).join("、");
+    authorInput.value = (editingSource.filter_authors || []).join("、");
+    valueInput.disabled = true;
+  }
+  setConfirmButtons(isEdit ? "保存" : "注册", true);
+  confirmAction = async function () {
+    const type = kind.value;
+    const value = valueInput.value.trim();
+    if (isEdit) {
+      editingSource.name = nameInput.value.trim() || editingSource.value || "";
+      editingSource.filter_tags = splitBilibiliValues(tagInput.value);
+      editingSource.filter_keywords = splitBilibiliValues(keywordInput.value);
+      editingSource.filter_title_keywords = splitBilibiliValues(titleInput.value);
+      editingSource.filter_exclude_keywords = splitBilibiliValues(excludeInput.value);
+      editingSource.filter_authors = splitBilibiliValues(authorInput.value);
+      await saveAndReload();
+      return;
+    }
+    if (!value) { showAlert("注册 Bilibili 来源", "请先填写 UID、标签或关键词"); return; }
+    if (type === "up" && !/^\d+$/.test(value)) {
+      showAlert("注册 Bilibili 来源", "UP 主来源需要填写数字 UID");
+      return;
+    }
+    if (!Array.isArray(settings.bilibili_sources)) settings.bilibili_sources = [];
+    const duplicate = settings.bilibili_sources.some(function (source) {
+      return String(source.kind || "up") === type && String(source.value || "").toLowerCase() === value.toLowerCase();
+    });
+    if (duplicate) { showAlert("注册 Bilibili 来源", "该来源已经在列表中"); return; }
+    settings.bilibili_sources.push({
+      id: bilibiliSourceId(type, value),
+      kind: type,
+      value: value,
+      name: nameInput.value.trim() || value,
+      enabled: true,
+      filter_tags: splitBilibiliValues(tagInput.value),
+      filter_keywords: splitBilibiliValues(keywordInput.value),
+      filter_title_keywords: splitBilibiliValues(titleInput.value),
+      filter_exclude_keywords: splitBilibiliValues(excludeInput.value),
+      filter_authors: splitBilibiliValues(authorInput.value),
+    });
     await saveAndReload();
   };
   document.getElementById("confirmModal").style.display = "flex";
@@ -2227,6 +2556,102 @@ function showConfirmSelect(title, items, labelFn, onOkSelected, opts) {
   confirmAction = function () {
     const selected = rows.filter(function (b) { return b.cb.checked; }).map(function (b) { return b.it; });
     return onOkSelected(selected);
+  };
+  document.getElementById("confirmModal").style.display = "flex";
+}
+
+function openBilibiliProtectionModal() {
+  const protection = Object.assign({
+    min_send_interval: 60,
+    hourly_limit: 10,
+    backlog_limit: 10,
+    overflow_policy: "latest",
+  }, (settings && settings.bilibili_protection) || {});
+  const body = document.getElementById("confirmBody");
+  if (!body) return;
+
+  body.innerHTML = "";
+  const form = document.createElement("div");
+  form.className = "bilibili-protection-modal-form";
+
+  function addNumberField(row, id, label, value, unit, min, max) {
+    const wrapper = document.createElement("label");
+    wrapper.className = "bilibili-protection-modal-field";
+    const labelText = document.createElement("span");
+    labelText.textContent = label;
+    const control = document.createElement("span");
+    const input = document.createElement("input");
+    input.id = id;
+    input.type = "number";
+    input.min = String(min);
+    input.max = String(max);
+    input.step = "1";
+    input.value = String(value);
+    const unitText = document.createElement("span");
+    unitText.textContent = unit;
+    control.appendChild(input);
+    control.appendChild(unitText);
+    wrapper.appendChild(labelText);
+    wrapper.appendChild(control);
+    row.appendChild(wrapper);
+  }
+
+  const firstRow = document.createElement("div");
+  firstRow.className = "bilibili-protection-modal-row";
+  addNumberField(firstRow, "bilibiliProtectionMinSendInterval", "最短发送间隔", Number(protection.min_send_interval) >= 0 ? Number(protection.min_send_interval) : 60, "秒", 0, 86400);
+  addNumberField(firstRow, "bilibiliProtectionHourlyLimit", "每小时最多", Number(protection.hourly_limit) > 0 ? Number(protection.hourly_limit) : 10, "条", 1, 10000);
+  form.appendChild(firstRow);
+
+  const secondRow = document.createElement("div");
+  secondRow.className = "bilibili-protection-modal-row";
+  addNumberField(secondRow, "bilibiliProtectionBacklogLimit", "每个来源积压上限", Number(protection.backlog_limit) > 0 ? Number(protection.backlog_limit) : 10, "条", 1, 1000);
+  form.appendChild(secondRow);
+
+  const policy = document.createElement("label");
+  policy.className = "bilibili-protection-modal-policy";
+  const policyText = document.createElement("span");
+  policyText.textContent = "超出时";
+  const select = document.createElement("select");
+  select.id = "bilibiliProtectionOverflowPolicy";
+  [
+    ["latest", "保留最新、跳过旧投稿"],
+    ["oldest", "保留最旧、跳过新投稿"],
+  ].forEach(function (item) {
+    const option = document.createElement("option");
+    option.value = item[0];
+    option.textContent = item[1];
+    select.appendChild(option);
+  });
+  select.value = protection.overflow_policy === "oldest" ? "oldest" : "latest";
+  policy.appendChild(policyText);
+  policy.appendChild(select);
+  form.appendChild(policy);
+
+  const hint = document.createElement("div");
+  hint.style.cssText = "font-size:12px;color:var(--muted);line-height:1.5;";
+  hint.textContent = "保护参数按全部 Bilibili 来源合计生效；积压上限按每个来源计算。";
+  form.appendChild(hint);
+  body.appendChild(form);
+
+  document.getElementById("confirmTitle").textContent = "Bilibili 转发保护";
+  setConfirmButtons("保存", true);
+  confirmAction = async function () {
+    let minInterval = parseInt(document.getElementById("bilibiliProtectionMinSendInterval").value, 10);
+    let hourlyLimit = parseInt(document.getElementById("bilibiliProtectionHourlyLimit").value, 10);
+    let backlogLimit = parseInt(document.getElementById("bilibiliProtectionBacklogLimit").value, 10);
+    if (!(minInterval >= 0)) minInterval = 60;
+    if (minInterval > 86400) minInterval = 86400;
+    if (!(hourlyLimit > 0)) hourlyLimit = 10;
+    if (hourlyLimit > 10000) hourlyLimit = 10000;
+    if (!(backlogLimit > 0)) backlogLimit = 10;
+    if (backlogLimit > 1000) backlogLimit = 1000;
+    settings.bilibili_protection = {
+      min_send_interval: minInterval,
+      hourly_limit: hourlyLimit,
+      backlog_limit: backlogLimit,
+      overflow_policy: document.getElementById("bilibiliProtectionOverflowPolicy").value === "oldest" ? "oldest" : "latest",
+    };
+    await saveAndReload();
   };
   document.getElementById("confirmModal").style.display = "flex";
 }
@@ -3292,6 +3717,10 @@ document.addEventListener("click", async function (e) {
     showAlert(btn.dataset.title, (tip && tip.textContent) || "当前无附加说明。");
     return;
   }
+  if (btn.id === "btnBilibiliProtection") {
+    openBilibiliProtectionModal();
+    return;
+  }
   if (btn.id === "aiProfileAdd") {
     if (!aiProfileDraft) aiProfileDraft = cloneAiProfileDraft();
     const source = activeAiDraftProfile() || {};
@@ -3485,6 +3914,10 @@ document.addEventListener("click", async function (e) {
     addForwardingGroup(FG_X);
     return;
   }
+  if (btn.id === "btnAddBilibiliFg") {
+    await addForwardingGroup(FG_BILIBILI);
+    return;
+  }
   if (btn.id === "btnAddQQFg") {
     addForwardingGroup(FG_QQ);
     return;
@@ -3544,6 +3977,19 @@ document.addEventListener("click", async function (e) {
     openFgAddPicker(FG_X, "group");
     return;
   }
+  if (btn.id === "btnAddBilibiliSource") {
+    // 「注册」：登记 Bilibili 的 UP 主、标签或关键词来源，不自动加入转发组
+    openBilibiliSourceRegister();
+    return;
+  }
+  if (btn.id === "btnAddBilibiliFgSource") {
+    openFgAddPicker(FG_BILIBILI, "biliSource");
+    return;
+  }
+  if (btn.id === "btnAddBilibiliFgGroup") {
+    openFgAddPicker(FG_BILIBILI, "group");
+    return;
+  }
   if (btn.id === "btnAddQQFgGroup") {
     // 「＋ 新增」（QQ 转发群）：从已注册群中选择加入当前 QQ→QQ 转发组
     openFgAddPicker(FG_QQ, "group");
@@ -3551,6 +3997,10 @@ document.addEventListener("click", async function (e) {
   }
   if (btn.id === "btnSyncXGroups") {
     // 与 Discord → QQ 页共用的注册审核流程（/api/registrations）
+    await openRegistrationReview("groups");
+    return;
+  }
+  if (btn.id === "btnSyncBilibiliGroups") {
     await openRegistrationReview("groups");
     return;
   }
@@ -3562,6 +4012,10 @@ document.addEventListener("click", async function (e) {
     window.open("https://q.qq.com/qqbot/dashboard/", "_blank");
     return;
   }
+  if (btn.id === "btnQQPlatformBilibili") {
+    window.open("https://q.qq.com/qqbot/dashboard/", "_blank");
+    return;
+  }
   if (btn.id === "btnQQPlatformQQ") {
     window.open("https://q.qq.com/qqbot/dashboard/", "_blank");
     return;
@@ -3569,6 +4023,10 @@ document.addEventListener("click", async function (e) {
   if (btn.id === "btnOpenX") {
     // 与 QQ 开放平台管理页同一新标签页跳转方式
     window.open("https://x.com/", "_blank");
+    return;
+  }
+  if (btn.id === "btnOpenBilibili") {
+    window.open("https://www.bilibili.com/", "_blank");
     return;
   }
   if (btn.id === "btnAddXUser") {
@@ -3604,6 +4062,18 @@ document.addEventListener("click", async function (e) {
   if (k === "xFgGroupRemove") {
     // 仅把群移出当前 X 转发组（不删全局群、不影响其他组）
     removeFgMember(FG_X, btn.dataset.id, "groups");
+    return;
+  }
+  if (k === "biliFgSourceRemove") {
+    removeFgMember(FG_BILIBILI, btn.dataset.id, "sources");
+    return;
+  }
+  if (k === "biliSourceFilterEdit") {
+    openBilibiliSourceRegister(Number(btn.dataset.i));
+    return;
+  }
+  if (k === "biliFgGroupRemove") {
+    removeFgMember(FG_BILIBILI, btn.dataset.id, "groups");
     return;
   }
   if (k === "qqFgGroupRemove") {
@@ -3807,6 +4277,16 @@ document.addEventListener("change", async function (e) {
     await saveAndReload();
     return;
   }
+  if (el.id === "bilibiliSourceAllEnabled") {
+    const fg = getActiveFg(FG_BILIBILI);
+    const sourceSet = memberIdSet(fg && fg.sources);
+    (settings.bilibili_sources || []).forEach(function (source) {
+      const sourceId = String(source.id || bilibiliSourceId(source.kind || "up", source.value || ""));
+      if (sourceSet[sourceId]) source.enabled = el.checked;
+    });
+    await saveAndReload();
+    return;
+  }
   if (el.id === "xRsshubBase") {
     settings.x_rsshub_base = el.value.trim();
     await saveAndReload();
@@ -3822,13 +4302,59 @@ document.addEventListener("change", async function (e) {
     await saveAndReload();
     return;
   }
+  if (el.id === "bilibiliRsshubBase") {
+    settings.bilibili_rsshub_base = el.value.trim().replace(/\/+$/, "");
+    await saveAndReload();
+    return;
+  }
+  if (el.id === "bilibiliPollInterval") {
+    let v = parseInt(el.value, 10);
+    if (!(v > 0)) v = 300;
+    if (v < 30) v = 30;
+    settings.bilibili_poll_interval = v;
+    el.value = v;
+    await saveAndReload();
+    return;
+  }
+  if (el.id === "bilibiliMinSendInterval" || el.id === "bilibiliHourlyLimit" || el.id === "bilibiliBacklogLimit" || el.id === "bilibiliOverflowPolicy") {
+    const protection = Object.assign({
+      min_send_interval: 60,
+      hourly_limit: 10,
+      backlog_limit: 10,
+      overflow_policy: "latest",
+    }, settings.bilibili_protection || {});
+    if (el.id === "bilibiliMinSendInterval") {
+      let v = parseInt(el.value, 10);
+      if (!(v >= 0)) v = 60;
+      if (v > 86400) v = 86400;
+      protection.min_send_interval = v;
+      el.value = v;
+    } else if (el.id === "bilibiliHourlyLimit") {
+      let v = parseInt(el.value, 10);
+      if (!(v > 0)) v = 10;
+      if (v > 10000) v = 10000;
+      protection.hourly_limit = v;
+      el.value = v;
+    } else if (el.id === "bilibiliBacklogLimit") {
+      let v = parseInt(el.value, 10);
+      if (!(v > 0)) v = 10;
+      if (v > 1000) v = 1000;
+      protection.backlog_limit = v;
+      el.value = v;
+    } else {
+      protection.overflow_policy = el.value === "oldest" ? "oldest" : "latest";
+    }
+    settings.bilibili_protection = protection;
+    await saveAndReload();
+    return;
+  }
   if (el.id === "xUserAllEnabled") {
     settings.qq_user_openids.forEach(function (u) { u.enabled = el.checked; });
     await saveAndReload();
     return;
   }
-  if (el.id === "groupAllEnabled" || el.id === "xGroupAllEnabled" || el.id === "qqGroupAllEnabled") {
-    const ctx = el.id === "xGroupAllEnabled" ? FG_X : el.id === "qqGroupAllEnabled" ? FG_QQ : FG_DISCORD;
+  if (el.id === "groupAllEnabled" || el.id === "xGroupAllEnabled" || el.id === "bilibiliGroupAllEnabled" || el.id === "qqGroupAllEnabled") {
+    const ctx = el.id === "xGroupAllEnabled" ? FG_X : el.id === "bilibiliGroupAllEnabled" ? FG_BILIBILI : el.id === "qqGroupAllEnabled" ? FG_QQ : FG_DISCORD;
     const fg = getActiveFg(ctx);
     const groupSet = memberIdSet(fg && fg.groups);
     settings.qq_group_openids.forEach(function (g) {
@@ -3860,6 +4386,14 @@ document.addEventListener("change", async function (e) {
     }
     return;
   }
+  if (el.dataset.kind === "biliSource") {
+    const source = (settings.bilibili_sources || [])[Number(el.dataset.i)];
+    if (source) {
+      source.enabled = el.checked;
+      await saveAndReload();
+    }
+    return;
+  }
   if (el.dataset.kind === "xUser") {
     const u = settings.qq_user_openids[Number(el.dataset.i)];
     if (u) {
@@ -3887,6 +4421,12 @@ document.addEventListener("blur", async function (e) {
     await saveAndReload();
   } else if (el.dataset.kind === "xSourceName") {
     const source = (settings.x_rss_sources || [])[Number(el.dataset.i)];
+    if (source) {
+      source.name = el.value;
+      await saveAndReload();
+    }
+  } else if (el.dataset.kind === "biliSourceName") {
+    const source = (settings.bilibili_sources || [])[Number(el.dataset.i)];
     if (source) {
       source.name = el.value;
       await saveAndReload();
@@ -3924,6 +4464,20 @@ function startXSourceNameEdit(i) {
   input.focus();
   input.select();
 }
+function startBilibiliSourceNameEdit(i) {
+  const source = (settings.bilibili_sources || [])[Number(i)];
+  if (!source) return;
+  const holder = document.querySelector('.chan-name[data-kind="biliSourceNameDisplay"][data-i="' + i + '"]');
+  if (!holder) return;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = source.name || "";
+  input.dataset.kind = "biliSourceName";
+  input.dataset.i = String(i);
+  holder.replaceWith(input);
+  input.focus();
+  input.select();
+}
 document.addEventListener("click", function (e) {
   const edit = e.target.closest('[data-kind="chanNameEdit"]');
   if (edit) {
@@ -3933,6 +4487,11 @@ document.addEventListener("click", function (e) {
   const xEdit = e.target.closest('[data-kind="xSourceNameEdit"]');
   if (xEdit) {
     startXSourceNameEdit(xEdit.dataset.i);
+    return;
+  }
+  const biliEdit = e.target.closest('[data-kind="biliSourceNameEdit"]');
+  if (biliEdit) {
+    startBilibiliSourceNameEdit(biliEdit.dataset.i);
   }
 });
 
@@ -4048,6 +4607,9 @@ async function init() {
   // X RSS 状态卡片：独立轻量轮询（只更新卡片文本，10 秒足够）
   await refreshXStatus();
   setInterval(refreshXStatus, 10000);
+  // Bilibili RSS 状态卡片：与 X RSS 相同的轻量轮询
+  await refreshBilibiliStatus();
+  setInterval(refreshBilibiliStatus, 10000);
   await refreshMessageTrace();
   setInterval(refreshMessageTrace, 10000);
 }

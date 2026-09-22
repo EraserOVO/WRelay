@@ -14,8 +14,10 @@ WRelay/
 │   ├── config.py             配置读取 + 内存缓存（settings.json 的消费者）
 │   ├── relay.py              Discord → QQ 实时转发主逻辑
 │   ├── x_rss.py              X/Twitter RSS → QQ 轮询与投递
+│   ├── bilibili.py           Bilibili RSS → QQ 轮询与投递
 │   ├── scheduled_message.py  QQ 定时消息投递
 │   ├── x_rss_parser.py       RSS 内容解析
+│   ├── bilibili_parser.py    Bilibili RSS 内容解析
 │   ├── command.py            QQ 私聊 relay 命令（手动转发）
 │   ├── manage.py             QQ 私聊管理命令（status/restart/mode 等）
 │   ├── registration.py       QQ 注册指令（register / register-group）+ 申请存储
@@ -58,7 +60,7 @@ WRelay/
 |------|------|
 | **Discord 侧** | 接收 Discord 消息事件、通过 REST API 抓取消息内容、下载媒体 |
 | **QQ 侧** | 向 QQ 群发送消息、接收 QQ 私聊命令、自动发现群/用户 OpenID |
-| **Relay** | 自动把 Discord / X RSS 消息转发到 QQ 群；不做 QQ → Discord 或双向同步 |
+| **Relay** | 自动把 Discord / X RSS / Bilibili RSS 消息转发到 QQ 群；不做 QQ → Discord 或双向同步 |
 | **管理面板** | 本地 Web 界面，管理群/频道/权限的启用状态、启停机器人、查看日志 |
 | **数据文件** | JSON 格式的配置、去重记录、统计、身份信息，是 bot 与面板之间的 IPC 通道 |
 
@@ -161,9 +163,40 @@ X RSS 与 Discord 使用独立的转发组配置。RSSHub 不可用、解析失�
 
 ---
 
-## 4.2 统一翻译路由与 AI 模型轮换
+## 4.2 Bilibili RSS → QQ 轮询流程
 
-Discord、X RSS 和 QQ 手动转发在完成消息渲染后，统一通过 `plugins/translation.py`
+```
+定时器（最短 30 秒）
+    │
+    ▼
+plugins/bilibili.py
+    │ ① 读取启用的 Bilibili 来源与 Bilibili 转发组
+    │ ② 按来源类型生成 RSSHub 路由：UP 主投稿 / 标签搜索 / 关键词搜索
+    │ ③ 请求 RSS，复用 ETag / 304 缓存并对临时错误退避重试
+    │ ④ plugins/bilibili_parser.py 解析标题、作者、标签、视频链接和封面
+    │ ⑤ 以 bilibili:{kind}:{value} 作为独立来源游标去重
+    │ ⑥ 按来源标签/关键词/标题/作者筛选
+    │ ⑦ 进入有限积压队列，按最短间隔和每小时上限复用 translation/sender 投递
+    └── 首次启用来源或群只建基线；发送失败、QQ 未连接时不推进游标
+```
+
+Bilibili 与 Discord、X 使用独立的转发组和来源游标；全局来源、QQ 群启用状态以及当前
+转发组成员关系必须同时满足才会投递。消息文本使用“自动转发来自 Bilibili 中[UP 主名称]的投稿”
+来源头，优先使用 RSS 投稿作者，缺少作者时回退到注册来源；只渲染标题和
+`[原始投稿地址](原始投稿地址)`，并发送一张 RSS 提供的封面图片；不发送作者行、标签、其他分类、简介及播放统计，也不下载视频本体，避免大文件和临时 CDN 地址影响
+轮询稳定性。
+RSSHub 请求失败、解析失败或发送失败只影响对应 Bilibili 来源，不会阻断其他自动链路。
+
+Bilibili 另有一层独立的投递保护：`settings.json` 中的 `bilibili_protection` 控制全链路
+最短发送间隔、每小时成功投稿上限、每个来源的积压上限和超限策略。积压队列保存在
+`data/bilibili_protection.json`。选择“保留最新、跳过旧投稿”时，队列超限会优先丢弃旧内容；
+选择“保留最旧、跳过新投稿”时，新内容先记录为延后跳过，只有保留的旧内容处理完后才推进游标，
+避免游标提前越过仍需发送的投稿。来源条目还支持标题必须包含、标题排除关键词和作者白名单，
+作为标签/关键词筛选之后的第二层内容筛选。
+
+## 4.3 统一翻译路由与 AI 模型轮换
+
+Discord、X RSS、Bilibili RSS 和 QQ 手动转发在完成消息渲染后，统一通过 `plugins/translation.py`
 按当前链路配置尝试首选服务和后备服务：
 
 ```
@@ -280,7 +313,7 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 
 ### 7.1 QQ 接收群
 
-多 QQ Bot 配置使用面板左上角的「当前 QQ Bot」作为工作区。Discord → QQ 和 X → QQ
+多 QQ Bot 配置使用面板左上角的 QQ Bot 下拉框作为工作区。Discord → QQ 和 X → QQ
 页面只展示当前 Bot 发现并归属的群，不再在每个群行单独绑定 Bot；同一个实体群可以因
 不同 Bot 使用不同的 `group_openid`，分别加入多个 Bot 工作区。新发现或注册审核通过的群
 记录发现它的 Bot；旧配置中 `bot_id` 为空的群继续兼容为第一个已连接 Bot。
@@ -332,7 +365,7 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 |------|--------|--------|------|
 | `data/settings.json` | 面板（主要；保存时先轮转 `settings.json.bak` 备份）；bot（仅文件完全不存在时首次默认初始化） | bot（高频，带缓存；损坏/结构无效时内存降级，不覆盖原文件）、面板 | 启用的群/频道/用户列表、补发开关、模式预设 |
 | `data/settings.json.bak` | 面板（每次保存前轮转写入） | 面板 / 人工（配置损坏或误写时恢复） | 上一版 settings.json 的完整备份（仅保留最近一代） |
-| `data/discord_last.json` | bot | bot | 每个频道每个群最后成功转发的消息 ID（去重用） |
+| `data/discord_last.json` | bot | bot | Discord/X/Bilibili 每个来源或频道每个群最后成功转发的消息 ID（去重用） |
 | `data/qq_group_openids.json` | bot（自动发现）；面板（审核通过时补回缺失 openid） | 面板（同步预览、审核补回校验） | 机器人发现的所有群 openid 及 `group_bot_ids` 归属映射（原始记录，非权限，不进同步名单） |
 | `data/qq_user_openids.json` | bot（自动发现）；面板（审核通过时补回缺失 openid） | 面板（同步预览、审核补回校验） | 机器人发现的所有用户 openid（原始记录，非权限，不进同步名单） |
 | `data/qq_registrations.json` | bot（注册指令）；面板（审核通过/拒绝时移除申请并写回） | 面板（注册审核列表） | 待审核的注册申请：用户（QQ号/昵称）、群（群号/群名/操作人），非权限 |
@@ -346,6 +379,8 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | `data/message_trace.json` | bot（message_trace.py） | bot（health_api.py）、面板 | 最近投递结果、目标群、失败原因和重试次数；自动限制记录数量 |
 | `data/panel_auth.json` | 面板 | 面板、bot（manage.py） | 本机面板 API 认证令牌，不应外传 |
 | `data/x_rss.json` | bot（x_rss.py） | bot（x_rss.py） | RSS ETag/Last-Modified 等轮询缓存 |
+| `data/bilibili.json` | bot（bilibili.py） | bot（bilibili.py） | Bilibili RSS ETag/Last-Modified 等轮询缓存 |
+| `data/bilibili_protection.json` | bot（bilibili.py） | bot（bilibili.py）、面板状态接口 | Bilibili 限速时间窗、来源积压队列和延后跳过记录 |
 
 ---
 
@@ -365,14 +400,17 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | `plugins/message_trace.py` | 投递结果追踪与持久化 | 低 |
 | `plugins/failure_notification.py` | 管理员失败通知与冷却 | 低 |
 | `plugins/x_rss.py` | X RSS 轮询、游标和投递 | 中 |
+| `plugins/bilibili.py` | Bilibili RSS 轮询、来源筛选、限速队列、游标和投递 | 中 |
 | `plugins/translation.py` | 统一翻译路由、后备服务和最近成功服务状态 | 中 |
 | `plugins/ai_client.py` | OpenAI 兼容 AI 请求、模型可用性检查和自动轮换 | 中 |
 | `plugins/tencent_tmt.py` | 腾讯 TMT 请求适配和错误转换 | 低 |
 | `plugins/scheduled_message.py` | 按显式目标群名单和日历计划进行 QQ 定时消息投递 | 中 |
 | `plugins/x_rss_parser.py` | RSS 条目解析 | 中 |
+| `plugins/bilibili_parser.py` | Bilibili RSS 条目解析与稳定游标生成 | 中 |
+| `plugins/bilibili_rate_limit.py` | Bilibili 限速配置归一化、积压裁剪和时间窗计算 | 低 |
 | `plugins/media.py` | 文本美化（Markdown → 纯文本）+ Emoji 提取 + 媒体下载 | 低 |
 | `plugins/dedup.py` | 去重纯函数：该不该发、发给谁、成功后怎么记 | 低 |
-| `plugins/filter.py` | 频道消息筛选纯函数（用户名/关键词，relay 与 backfill 共用） | 低 |
+| `plugins/filter.py` | 频道消息筛选，以及 Bilibili 标签/关键词/标题/作者筛选纯函数 | 低 |
 | `plugins/history.py` | discord_last.json 读写（带 mtime 缓存） | 低 |
 | `plugins/backfill.py` | 启动后自动补发离线缺失消息 | 中 |
 | `plugins/backfill_api.py` | 补发 HTTP 接口（面板调用）+ 频道权限审计 | 中 |
@@ -395,6 +433,7 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | **修改补发逻辑** | `plugins/backfill.py`（自动补发）+ `plugins/backfill_api.py`（手动触发接口） |
 | **修改失败重试逻辑** | `plugins/retry.py`（队列/恢复/退避）+ `plugins/sender.py`（发送返回值） |
 | **修改 X RSS 转发** | `plugins/x_rss.py`（轮询/游标）+ `plugins/x_rss_parser.py`（解析） |
+| **修改 Bilibili RSS 转发** | `plugins/bilibili.py`（轮询/投递/限速队列）+ `plugins/bilibili_parser.py`（解析）+ `plugins/bilibili_rate_limit.py`（保护策略）+ `plugins/filter.py`（标签/关键词/标题/作者筛选） |
 | **修改自动翻译或 AI 模型轮换** | `plugins/translation.py`（服务路由）+ `plugins/ai_client.py`（AI 请求/轮换）+ `plugins/tencent_tmt.py`（TMT） |
 | **修改 OpenID 自动发现** | `plugins/command.py`（`save_group_openid` / `save_user_openid`） |
 | **修改注册/审核机制** | `plugins/registration.py`（指令 + 存储）+ `panel/管理面板.pyw`（`/api/registrations*`）+ `panel/web/app.js`（审核弹窗） |

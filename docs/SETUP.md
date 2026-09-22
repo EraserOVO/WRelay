@@ -1,6 +1,6 @@
 # WRelay 安装指南（Windows）
 
-WRelay 包含三条独立链路：Discord → QQ、X/Twitter RSS → QQ，以及授权用户通过
+WRelay 包含四条独立链路：Discord → QQ、X/Twitter RSS → QQ、Bilibili RSS → QQ，以及授权用户通过
 QQ 私聊命令执行的 QQ → QQ 手动转发。不提供 QQ → Discord 自动转发，也不做双向同步。
 
 ---
@@ -26,8 +26,8 @@ QQ 私聊命令执行的 QQ → QQ 手动转发。不提供 QQ → Discord 自�
 4. **双击 `启动面板.bat`** 打开管理面板（浏览器访问 `http://127.0.0.1:18090`）。
 5. 在面板中：勾选你的 Discord 频道和 QQ 群 → 点击「启动机器人」。
 
-如果还要转发 X/Twitter，请先准备可访问的 RSSHub，在面板的 X 页面登记来源、
-加入 X 转发组并启用目标 QQ 群，再启动机器人。
+如果还要转发 X/Twitter 或 Bilibili，请先准备可访问的 RSSHub，在面板对应页面登记来源、
+加入转发组并启用目标 QQ 群，再启动机器人。
 
 > 安装后每次使用只需双击 `启动面板.bat`（机器人由面板托管，崩溃会自动重启）。
 
@@ -108,7 +108,7 @@ Get-FileHash .\WRelay-Setup.exe -Algorithm SHA256
 5. 打开管理面板 →「QQ 接收群」→ 点「同步自动发现的群」，勾选启用该群。
 
 多个 QQ Bot 时，打开管理面板的「QQ Bot 配置」，点「添加 QQ Bot」并填写新的
-AppID / AppSecret。面板左上角的「当前 QQ Bot」用于切换工作区；Discord → QQ
+AppID / AppSecret。面板左上角的 QQ Bot 下拉框用于切换工作区；Discord → QQ
 与 X → QQ 页面只显示该 Bot 发现的目标群，新发现或注册审核通过的群会自动归属
 发现它的 Bot。这样不必逐群选择 Bot；同一个实体群可由多个 Bot 分别发现并配置为目标。
 旧配置中没有 Bot 归属的群继续按第一个 Bot 处理。选择框会显示当前 Bot 的连接状态；
@@ -133,6 +133,32 @@ RSSHub 请求失败、QQ 暂时未连接或发送失败时不会推进来源游�
 其他 4xx 会立即报告。RSS 使用 ETag/304 缓存减少重复请求；RSSHub 必须能被运行
 WRelay 的机器访问。若 RSSHub 暂时不可用，WRelay 会回退到 X 公开时间线继续轮询；
 若回退接口也被限流或持续失败，再检查网络、RSSHub 服务和地址。
+
+### Bilibili RSS 转发
+
+1. 准备一个可从本机访问的 RSSHub 实例，默认地址为 `http://127.0.0.1:1200`；在面板 Bilibili 页修改 RSSHub 地址和轮询间隔。
+2. 点击「注册来源」，选择范围并填写：UP 主使用数字 UID，标签或关键词使用对应文本。
+3. 如需进一步限制内容，可填写额外标签或关键词、标题必须包含、标题排除关键词和作者白名单；标签来源会优先按 RSS 的分类标签匹配，RSS 没有分类时再回退到标题和简介匹配。已注册来源可点击编辑按钮修改这些条件。
+4. 创建/选择 Bilibili 转发组，把 Bilibili 来源和已启用的 QQ 群加入同一组并保存。
+5. 点击 Bilibili RSS 状态卡片右下角的限速表图标，调整保护参数：最短发送间隔、每小时最多发送条数、每个来源积压上限，以及超限时“保留最新、跳过旧投稿”或“保留最旧、跳过新投稿”。
+6. 启动机器人后，Bilibili 页会显示来源数量、最近轮询、发现、发送和当前积压统计。
+
+UP 主投稿使用 RSSHub 的 `/bilibili/user/video/{uid}` 路由，标签和关键词使用
+`/bilibili/vsearch/{关键词}/pubdate/0` 路由。首次启用来源或新 QQ 群只建立当前 RSS
+窗口的游标基线，不会一次性刷出历史投稿；转发消息使用“自动转发来自 Bilibili 中[UP 主名称]的投稿”来源头，优先显示 RSS 投稿作者，缺少作者时回退到注册来源；
+并只包含标题、`[原始投稿地址](原始投稿地址)`
+和封面图片，不发送作者、标签、其他分类、简介及播放统计，也不下载视频本体。RSSHub 请求失败、QQ 暂时未连接或发送
+失败时不会推进来源游标，恢复后继续尝试。
+
+保护参数是应用层的保守上限，不等同于 QQ 官方平台公布的配额。推荐先使用默认值：每条之间至少
+间隔 60 秒、每小时最多 10 条、每个来源最多积压 10 条；热门标签建议选择“保留最新、跳过旧投稿”，
+避免热门内容形成长期欠账。限速队列会保存到 `data/bilibili_protection.json`，机器人重启后继续按
+当前配置发送，不会把积压一次性冲出。
+
+若使用 Docker 运行 RSSHub，Bilibili 路由需要 Playwright Chromium 运行时。出现
+`Executable doesn't exist at /root/.cache/ms-playwright/...` 时，应在 RSSHub 的 Compose 配置中持久化
+`/root/.cache/ms-playwright`，并补齐 Chromium 的系统库；标签/关键词搜索属于公开 API，可配置空的
+`BILIBILI_COOKIE_1` 跳过自动获取 Cookie，避免 RSSHub 因浏览器 Cookie 初始化卡住并返回 503。
 
 ### 管理面板诊断与投递追踪
 
@@ -221,7 +247,7 @@ Discord API 和 CDN 在国内无法直连，需要 HTTP 代理：
 | 收不到转发消息 | 群主是否开启「主动消息」权限；公域机器人有时段/频率限制；频道 ID / 群 openid 是否已启用 |
 | 图片 / 音频发不出来 | 检查代理；文件超过 `MEDIA_MAX_BYTES` 会降级为文字 + 链接 |
 | 视频发不出来 | 检查媒体下载权限、代理和文件大小；下载/上传失败时会保留视频链接，详情可在消息追踪查看 |
-| RSSHub 请求失败 | 查看 X RSS 状态卡片和运行日志；429/5xx 会自动短暂重试，持续 502 通常需要检查 RSSHub 服务本身 |
+| RSSHub 请求失败 | 查看 X/Bilibili RSS 状态卡片和运行日志；429/5xx 会自动短暂重试，持续 502 通常需要检查 RSSHub 服务本身 |
 | 想重置配置 | 删除 `data/settings.json` 后重启机器人，会生成空配置重新开始 |
 
 ---
@@ -245,4 +271,4 @@ Discord API 和 CDN 在国内无法直连，需要 HTTP 代理：
   但不影响程序本身；`data/panel_auth.json` 不应外传。
 - 失败消息会持久化到 `data/retry_pending.json`，进程重启后继续重试；媒体文件本身不会写入该文件。
 - `data/message_trace.json` 只保存最近投递追踪摘要，不保存媒体字节；可在面板消息追踪窗口查看。
-- 自动链路为 Discord → QQ 和 X RSS → QQ；不做 QQ → Discord，QQ → QQ 仅限授权用户手动命令。
+- 自动链路为 Discord → QQ、X RSS → QQ 和 Bilibili RSS → QQ；不做 QQ → Discord，QQ → QQ 仅限授权用户手动命令。

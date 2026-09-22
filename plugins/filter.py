@@ -151,3 +151,72 @@ def check_x_post_filter(filter_config: dict, post: dict) -> bool:
                 return False
 
     return True
+
+
+def check_bilibili_video_filter(filter_config: dict, post: dict) -> bool:
+    """判断 Bilibili 投稿是否符合标签、关键词、标题和作者筛选。"""
+    filter_config = filter_config or {}
+    post = post or {}
+    tags = [
+        str(tag).strip().lstrip("#").lower()
+        for tag in (post.get("tags") or [])
+        if str(tag).strip()
+    ]
+    wanted_tags = [
+        str(tag).strip().lstrip("#").lower()
+        for tag in (filter_config.get("filter_tags") or [])
+        if str(tag).strip()
+    ]
+    if wanted_tags:
+        if tags:
+            if not any(tag in tags for tag in wanted_tags):
+                return False
+        else:
+            fallback_text = " ".join(
+                [post.get("title") or "", post.get("description") or ""]
+            ).lower()
+            if not any(tag in fallback_text for tag in wanted_tags):
+                return False
+
+    keywords = [
+        str(keyword).strip().lower()
+        for keyword in (filter_config.get("filter_keywords") or [])
+        if str(keyword).strip()
+    ]
+    if keywords:
+        search_text = " ".join(
+            [
+                post.get("title") or "",
+                post.get("description") or "",
+                " ".join(tags),
+            ]
+        ).lower()
+        if not any(keyword in search_text for keyword in keywords):
+            return False
+
+    title = str(post.get("title") or "").lower()
+    title_keywords = [
+        str(keyword).strip().lower()
+        for keyword in (filter_config.get("filter_title_keywords") or [])
+        if str(keyword).strip()
+    ]
+    if title_keywords and not any(keyword in title for keyword in title_keywords):
+        return False
+
+    exclude_keywords = [
+        str(keyword).strip().lower()
+        for keyword in (filter_config.get("filter_exclude_keywords") or [])
+        if str(keyword).strip()
+    ]
+    if exclude_keywords and any(keyword in title for keyword in exclude_keywords):
+        return False
+
+    authors = [
+        str(author).strip().lower()
+        for author in (filter_config.get("filter_authors") or [])
+        if str(author).strip()
+    ]
+    if authors and str(post.get("author") or "").strip().lower() not in authors:
+        return False
+
+    return True

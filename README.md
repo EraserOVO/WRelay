@@ -1,9 +1,10 @@
 # WRelay
 
-WRelay 是一个基于 NoneBot2 的 Windows 消息转发服务。当前代码包含三条相互独立的消息链路：
+WRelay 是一个基于 NoneBot2 的 Windows 消息转发服务。当前代码包含四条相互独立的消息链路：
 
 - Discord → QQ：实时转发和离线补发
 - X/Twitter RSS → QQ：通过 RSSHub 轮询 X 账号并转发
+- Bilibili RSS → QQ：通过 RSSHub 按 UP 主、标签或关键词轮询新投稿并转发
 - QQ → QQ：授权用户通过私聊命令手动转发文字或 Discord 消息
 
 项目不提供 QQ → Discord 自动转发，也不做双向同步。
@@ -41,9 +42,21 @@ WRelay 是一个基于 NoneBot2 的 Windows 消息转发服务。当前代码包
 - 管理面板提供 RSS 运行状态、最近轮询结果和失败原因
 - 支持向选定的 QQ 接收群定期发送固定消息，可在面板或白名单私聊中控制
 
+### Bilibili RSS → QQ
+
+- 通过 RSSHub 轮询 Bilibili 新投稿
+- 支持按 UP 主 UID、Bilibili 标签或关键词注册来源
+- 支持多个来源和独立的 Bilibili 转发组，可分别选择 QQ 接收群
+- 支持来源级标签、关键词、标题必须包含、标题排除和作者白名单筛选；可在面板编辑筛选条件
+- 支持可调的最短发送间隔、每小时上限和每来源积压上限；积压超限可选择保留最新或保留最旧
+- 限速队列持久化保存，RSS 突发投稿不会在一次轮询中集中发送；RSS ETag/304 缓存和失败重试仍有效
+- 保留“自动转发来自 Bilibili 中[UP 主名称]的投稿”来源头（优先使用投稿作者，RSS 缺少作者时回退到注册来源）；只发送标题和 `[投稿地址](投稿地址)`，再发送封面图片；不发送作者行、标签、其他分类、简介及播放统计
+- 首次启用来源或 QQ 群只建立游标基线，不批量刷出 RSS 历史窗口
+- RSSHub 暂时不可用、QQ 未连接或发送失败时不推进游标，恢复后继续补投
+
 ### 自动翻译
 
-- Discord → QQ 与 X/Twitter RSS → QQ 可分别启用自动翻译，并按链路设置首选服务和后备服务
+- Discord → QQ 与 X/Twitter RSS → QQ 可分别启用自动翻译，并按链路设置首选服务和后备服务；Bilibili 首版默认发送原文
 - 支持腾讯 TMT 与 OpenAI 兼容 AI API；所有翻译服务失败时仍发送原文
 - AI API 遇到模型不存在、模型并发受限，或明确的模型容量/节点不可用错误时，会自动查询可用模型并逐个轮换尝试，直到成功或全部候选模型失败
 - 面板「翻译服务配置」显示最近一次真实翻译成功使用的工作模型；AI 检测记录只表示独立检测结果，两者可能不同
@@ -102,22 +115,22 @@ list                           查看命令帮助
 - 启动、停止、重启机器人
 - 机器人异常退出后的自动拉起
 - Windows 开机自启
-- 管理 Discord 频道、X 来源、QQ 接收群和私聊权限
-- 创建、重命名、排序和删除 Discord/X 转发组
+- 管理 Discord 频道、X/Bilibili 来源、QQ 接收群和私聊权限
+- 创建、重命名、排序和删除 Discord/X/Bilibili 转发组
 - 配置频道筛选条件
-- 注册新的可读 Discord 频道和 X 来源
+- 注册新的可读 Discord 频道、X 来源和 Bilibili 来源
 - 审核 QQ 用户/群注册申请
 - 配置腾讯 TMT、AI API 和自动翻译路由，查看工作模型与 AI 检测记录
 - 查看频道权限审计结果和真实频道名称
 - 查看、清空和动态切换机器人日志级别
 - 查看转发统计
 - 查看和操作 Discord 离线补发
-- 查看 X RSS 轮询状态
+- 查看 X RSS 和 Bilibili RSS 轮询状态
 - 在运行日志卡片中打开消息追踪二级窗口，查看最近 50 条投递结果
 - 使用连接诊断工具查看机器人、Discord、QQ 和待重试投递状态
 - 在机器人状态卡片中开关失败通知
 - 编辑 QQ Bot 与 Discord Bot 配置
-- 多个 QQ Bot 时在左上角切换当前 Bot 工作区；Discord → QQ 与 X → QQ 页面只显示该 Bot 的目标群，
+- 多个 QQ Bot 时通过左上角 QQ Bot 下拉框切换当前工作区；Discord → QQ 与 X → QQ 页面只显示该 Bot 的目标群，
   不需要在每个群行单独选择 Bot
 
 ## 快速开始（Windows）
@@ -129,14 +142,14 @@ list                           查看命令帮助
 3. 编辑 `.env.prod`，填写 QQ 官方机器人和 Discord Bot 配置。
 4. 如需访问 Discord，在 `.env.prod` 中配置 `HTTP_PROXY`。
 5. 双击 `启动面板.bat`，打开 `http://127.0.0.1:18090`。
-6. 在面板中登记并启用 Discord 频道、X 来源、QQ 群和私聊用户，然后启动机器人。
+6. 在面板中登记并启用 Discord 频道、X/Bilibili 来源、QQ 群和私聊用户，然后启动机器人。
 
 详细的 Bot 创建、权限、`group_openid`、频道登记、代理和 RSSHub 配置方式见 [docs/SETUP.md](docs/SETUP.md)。
 
 ## 配置与权限说明
 
-- Discord 频道、X 来源、QQ 群和 QQ 用户是否启用，以 `data/settings.json` 为准。
-- Discord 和 X 分别使用独立的转发组配置；全局启用和转发组成员关系必须同时满足，消息才会发送。
+- Discord 频道、X/Bilibili 来源、QQ 群和 QQ 用户是否启用，以 `data/settings.json` 为准。
+- Discord、X 和 Bilibili 分别使用独立的转发组配置；全局启用和转发组成员关系必须同时满足，消息才会发送。
 - QQ 官方机器人使用 `group_openid`，不能从普通群号直接推算；同一个实体群被多个 Bot 发现时，
   每个 Bot 会保存自己的 OpenID 和转发目标关系。
 - 旧配置中没有 Bot 归属的群继续由第一个已连接 QQ Bot 处理；面板状态卡片会显示当前工作区的连接状态。
@@ -160,6 +173,9 @@ WRelay/
 │  ├─ relay.py               # Discord 实时转发
 │  ├─ x_rss.py               # X RSS 轮询和投递
 │  ├─ x_rss_parser.py        # RSS 内容解析
+│  ├─ bilibili.py             # Bilibili RSS 轮询和投递
+│  ├─ bilibili_parser.py      # Bilibili RSS 内容解析
+│  ├─ bilibili_rate_limit.py  # Bilibili 限速、积压裁剪纯逻辑
 │  ├─ command.py             # QQ relay 命令、OpenID 自动发现和身份记录
 │  ├─ manage.py              # QQ 私聊管理命令
 │  ├─ registration.py        # QQ 用户/群注册申请
@@ -193,14 +209,16 @@ WRelay/
 - `nonebot-adapter-qq`
 - FastAPI / Uvicorn
 - httpx
-- RSSHub（X/Twitter RSS 来源）
+- RSSHub（X/Twitter、Bilibili RSS 来源）
 
 ## 运行数据
 
 主要运行时文件包括：
 
 - `data/settings.json`：频道、来源、群、用户、转发组和补发配置
-- `data/discord_last.json`：Discord/X 按目标群保存的去重游标
+- `data/discord_last.json`：Discord/X/Bilibili 按目标群保存的去重游标
+- `data/bilibili.json`：Bilibili RSS 的 ETag 和轮询缓存
+- `data/bilibili_protection.json`：Bilibili 限速时间窗、待发送积压和延后跳过记录
 - `data/stats.json`：成功、失败和当日转发统计
 - `data/message_trace.json`：最近投递结果追踪（自动限制保留数量）
 - `data/qq_identities.json`：QQ 用户和群身份资料

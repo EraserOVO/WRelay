@@ -23,6 +23,8 @@ def _source_info(channel_id):
     value = str(channel_id or "").strip()
     if value.startswith("x_rss:"):
         return "x_rss", value.removeprefix("x_rss:")
+    if value.startswith("bilibili:"):
+        return "bilibili", value.removeprefix("bilibili:")
     if value:
         return "discord", value
     return "other", ""

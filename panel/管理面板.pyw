@@ -159,10 +159,18 @@ from plugins.user_errors import localize_user_error
 # （保存时清理悬空引用）。导入失败时用最小回退（等价于不做注入/清理）。
 try:
     from plugins.config import (
+        get_bilibili_forwarding_groups,
+        _bilibili_source_id,
         get_x_forwarding_groups,
         _x_source_key,
     )
 except Exception:
+    def get_bilibili_forwarding_groups():
+        return []
+
+    def _bilibili_source_id(kind, value):
+        return "%s:%s" % (kind, value)
+
     def get_x_forwarding_groups():
         return []
 
@@ -590,6 +598,50 @@ def _normalize_x_forwarding_groups(data):
     data["x_forwarding_groups"] = clean
 
 
+def _normalize_bilibili_forwarding_groups(data):
+    """写盘前归一化 Bilibili 转发组，清理已删除来源/群的引用。"""
+    groups = data.get("bilibili_forwarding_groups")
+    if not isinstance(groups, list):
+        return
+    known_sources = set()
+    for source in data.get("bilibili_sources", []):
+        if not isinstance(source, dict):
+            continue
+        kind = str(source.get("kind") or "up").strip().lower()
+        value = str(source.get("value") or source.get("uid") or "").strip()
+        source_id = str(source.get("id") or _bilibili_source_id(kind, value)).strip()
+        if source_id:
+            known_sources.add(source_id)
+    known_groups = {
+        str(group.get("openid"))
+        for group in data.get("qq_group_openids", [])
+        if isinstance(group, dict) and group.get("openid")
+    }
+    clean = []
+    seen_ids = set()
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        group_id = str(group.get("id") or "").strip()
+        if not group_id or group_id in seen_ids:
+            continue
+        seen_ids.add(group_id)
+        clean.append({
+            "id": group_id,
+            "name": str(group.get("name") or "").strip() or group_id,
+            "enabled": group.get("enabled", True) is not False,
+            "sources": [
+                value for value in dict.fromkeys(str(item) for item in group.get("sources") or [])
+                if value and value in known_sources
+            ],
+            "groups": [
+                value for value in dict.fromkeys(str(item) for item in group.get("groups") or [])
+                if value and value in known_groups
+            ],
+        })
+    data["bilibili_forwarding_groups"] = clean
+
+
 def _normalize_qq_forwarding_groups(data):
     """写盘前归一化 QQ→QQ 独立转发组，剔除已删除的 QQ 群。"""
     qfgs = data.get("qq_forwarding_groups")
@@ -639,6 +691,7 @@ def save_settings(data, expected_revision=None):
     # 再走统一原子写（唯一 tmp + os.replace，见 plugins/json_io.py）
     _normalize_forwarding_groups(data)
     _normalize_x_forwarding_groups(data)
+    _normalize_bilibili_forwarding_groups(data)
     _normalize_qq_forwarding_groups(data)
     with json_file_lock(SETTINGS_FILE):
         if (
@@ -1293,6 +1346,10 @@ def _settings_payload():
     data, revision = _load_settings_snapshot()
     try:
         data["x_forwarding_groups"] = get_x_forwarding_groups()
+    except Exception:
+        pass
+    try:
+        data["bilibili_forwarding_groups"] = get_bilibili_forwarding_groups()
     except Exception:
         pass
     data["_revision"] = revision
@@ -2786,6 +2843,18 @@ def api_xrss_status():
     if not bot_status()["running"]:
         return {"ok": False, "bot_running": False}
     data = bot_api_get("/api/x-rss/status")
+    if data is None:
+        return {"ok": False, "bot_running": True, "msg": "bot 接口不可用"}
+    data["bot_running"] = True
+    return data
+
+
+@app.get("/api/bilibili/status")
+def api_bilibili_status():
+    """代理 bot 的 Bilibili RSS 运行状态。"""
+    if not bot_status()["running"]:
+        return {"ok": False, "bot_running": False}
+    data = bot_api_get("/api/bilibili/status")
     if data is None:
         return {"ok": False, "bot_running": True, "msg": "bot 接口不可用"}
     data["bot_running"] = True

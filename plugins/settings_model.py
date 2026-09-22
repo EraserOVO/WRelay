@@ -180,6 +180,16 @@ class SettingsModel(dict):
             "x_rss_sources": [],
             "x_rss_poll_interval": 300,
             "x_rsshub_base": "http://localhost:1200",
+            "bilibili_sources": [],
+            "bilibili_poll_interval": 300,
+            "bilibili_rsshub_base": "http://localhost:1200",
+            "bilibili_protection": {
+                "min_send_interval": 60,
+                "hourly_limit": 10,
+                "backlog_limit": 10,
+                "overflow_policy": "latest",
+            },
+            "bilibili_forwarding_groups": [],
             "scheduled_message": {
                 "enabled": False,
                 "content": "",
@@ -273,7 +283,11 @@ class SettingsModel(dict):
 
         # 自动翻译原为 Discord/X 各一组全局开关。迁移到来源条目时，
         # 未单独设置过的频道/账号继承共享 translation 的旧值，避免升级后转发内容突变。
-        for item_key, config_key in (("discord_channels", "translation"), ("x_rss_sources", "translation")):
+        for item_key, config_key in (
+            ("discord_channels", "translation"),
+            ("x_rss_sources", "translation"),
+            ("bilibili_sources", "translation"),
+        ):
             translation = result.get(config_key)
             if not isinstance(translation, dict):
                 continue
@@ -369,6 +383,58 @@ def validate_settings(
                 for post_type in post_types
             ):
                 return "x_rss_sources.filter_post_types 包含不支持的类型"
+
+    bilibili_sources = data.get("bilibili_sources")
+    if not isinstance(bilibili_sources, list):
+        return "bilibili_sources 必须是列表"
+    allowed_bilibili_kinds = {"up", "tag", "keyword"}
+    for item in bilibili_sources:
+        if not isinstance(item, dict):
+            return "bilibili_sources 的每一项必须是对象"
+        kind = item.get("kind", "up")
+        if kind not in allowed_bilibili_kinds:
+            return "bilibili_sources.kind 只支持 up、tag、keyword"
+        for key in ("id", "value", "name"):
+            if key in item and not isinstance(item[key], str):
+                return "bilibili_sources.%s 必须是字符串" % key
+        if "enabled" in item and not isinstance(item["enabled"], bool):
+            return "bilibili_sources.enabled 必须是布尔值"
+        for key in (
+            "filter_tags",
+            "filter_keywords",
+            "filter_title_keywords",
+            "filter_exclude_keywords",
+            "filter_authors",
+        ):
+            values = item.get(key)
+            if values is not None and (
+                not isinstance(values, list)
+                or any(not isinstance(value, str) for value in values)
+            ):
+                return "bilibili_sources.%s 必须是字符串列表" % key
+        if "translation_enabled" in item and not isinstance(item["translation_enabled"], bool):
+            return "bilibili_sources.translation_enabled 必须是布尔值"
+        if "translation_append_original" in item and not isinstance(item["translation_append_original"], bool):
+            return "bilibili_sources.translation_append_original 必须是布尔值"
+        if "translation_show_datetime" in item and not isinstance(item["translation_show_datetime"], bool):
+            return "bilibili_sources.translation_show_datetime 必须是布尔值"
+
+    if "bilibili_protection" in data:
+        protection = data.get("bilibili_protection")
+        if not isinstance(protection, dict):
+            return "bilibili_protection 必须是对象"
+        for key in ("min_send_interval", "hourly_limit", "backlog_limit"):
+            value = protection.get(key)
+            if not isinstance(value, int) or isinstance(value, bool):
+                return "bilibili_protection.%s 必须是整数" % key
+        if not 0 <= protection["min_send_interval"] <= 86400:
+            return "bilibili_protection.min_send_interval 范围必须是 0-86400"
+        if not 1 <= protection["hourly_limit"] <= 10000:
+            return "bilibili_protection.hourly_limit 范围必须是 1-10000"
+        if not 1 <= protection["backlog_limit"] <= 1000:
+            return "bilibili_protection.backlog_limit 范围必须是 1-1000"
+        if protection.get("overflow_policy") not in {"latest", "oldest"}:
+            return "bilibili_protection.overflow_policy 只支持 latest 或 oldest"
 
     relay_filter = data.get("qq_c2c_relay_filter")
     if not isinstance(relay_filter, dict):
@@ -564,6 +630,7 @@ def validate_settings(
     for key, fields in (
         ("forwarding_groups", ("channels", "groups")),
         ("x_forwarding_groups", ("sources", "groups")),
+        ("bilibili_forwarding_groups", ("sources", "groups")),
         ("qq_forwarding_groups", ("groups",)),
     ):
         if not validate_forwarding_groups:
