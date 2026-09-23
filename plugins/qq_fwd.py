@@ -3,7 +3,7 @@
 
 任何 QQ 用户在一个已注册的 QQ 接收群里：
 
-  relay-list                  列出当前可作为转发目标的、已注册且 enabled 的 QQ 群（带序号）
+  relay list                  列出当前可作为转发目标的、已注册且 enabled 的 QQ 群（带序号）
   relay {序号}                将用户接下来发送的下一条普通消息，转发到序号对应的目标群
 
 发送前会再次校验目标群（仍注册 / enabled / 与当前群仍属同一已启用 QQ 转发组 / 排除当前群），
@@ -15,7 +15,7 @@
   - 不再依赖“上一条消息”缓存：转发的就是 relay {序号} 之后收到的下一条普通用户消息。
   - 候选目标群 = 与当前群至少共同属于一个 QQ→QQ 转发组（qq_forwarding_groups）的其他已注册(enabled)群，
     跨多个转发组合并去重；当前群不属于任何转发组时候选为空。与测试组无关。
-  - 过滤 Bot 消息（author.bot == True），relay / relay-list 等指令本身不会进入转发内容。
+  - 过滤 Bot 消息（author.bot == True），relay / relay list 等指令本身不会进入转发内容。
   - 发送复用 plugins/sender（分片/重试/限流退避/媒体降级）与 plugins/media（图片/音视频字节上传+链接降级）。
   - 不依赖白名单；QQ→QQ 转发组只在本功能内使用，不读取 Discord/X 转发组。
 """
@@ -46,7 +46,7 @@ from plugins.translation import translate_text_parts
 # =====================================================
 # 指令
 # =====================================================
-CMD_LIST = "relay-list"
+CMD_LIST = "relay list"
 CMD_PREFIX = "relay "
 CMD_BARE = "relay"
 
@@ -64,7 +64,7 @@ def compute_target_list(entries, current_openid, related_openids):
     related_openids：与当前群至少共同属于一个转发组的其他群 openid 集合
     （见 config.get_related_group_openids；set 或可 in 判断的容器）。
     返回 [{"openid", "name"}]；只含 enabled、在 related 集合内且非当前群。
-    顺序与 settings 中条目顺序一致，relay-list / relay {序号} 共用同一顺序。
+    顺序与 settings 中条目顺序一致，relay list / relay {序号} 共用同一顺序。
     """
     current = str(current_openid)
     related = set(related_openids or ())
@@ -89,7 +89,7 @@ def compute_target_list(entries, current_openid, related_openids):
 
 
 def build_relay_list(targets):
-    """把目标群列表渲染为 relay-list 的回复文本（带连续序号）。"""
+    """把目标群列表渲染为 relay list 的回复文本（带连续序号）。"""
     if not targets:
         return "【Relay群列表】\n当前没有可转发的目标群"
     lines = ["【Relay群列表】"]
@@ -103,7 +103,7 @@ def build_relay_list(targets):
 # 指令解析（纯函数）
 #
 # parse_relay 返回 (kind, payload)：
-#   ("list",     None)   —— relay-list
+#   ("list",     None)   —— relay list
 #   ("number",   int)    —— relay {i}，i 为 >=1 的整数
 #   ("invalid",  None)   —— relay / relay <非数字>，无法定位目标群
 #   (None,       None)   —— 不是 relay 指令

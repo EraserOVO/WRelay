@@ -146,7 +146,7 @@ WRelay 的机器访问。若 RSSHub 暂时不可用，WRelay 会回退到 X 公�
 UP 主投稿使用 RSSHub 的 `/bilibili/user/video/{uid}` 路由，标签和关键词使用
 `/bilibili/vsearch/{关键词}/pubdate/0` 路由。首次启用来源或新 QQ 群只建立当前 RSS
 窗口的游标基线，不会一次性刷出历史投稿；转发消息使用“自动转发来自 Bilibili 中[UP 主名称]的投稿”来源头，优先显示 RSS 投稿作者，缺少作者时回退到注册来源；
-并只包含标题、`[原始投稿地址](原始投稿地址)`
+并只包含标题、纯文本原始投稿地址
 和封面图片，不发送作者、标签、其他分类、简介及播放统计，也不下载视频本体。RSSHub 请求失败、QQ 暂时未连接或发送
 失败时不会推进来源游标，恢复后继续尝试。
 
@@ -155,10 +155,12 @@ UP 主投稿使用 RSSHub 的 `/bilibili/user/video/{uid}` 路由，标签和关
 避免热门内容形成长期欠账。限速队列会保存到 `data/bilibili_protection.json`，机器人重启后继续按
 当前配置发送，不会把积压一次性冲出。
 
-若使用 Docker 运行 RSSHub，Bilibili 路由需要 Playwright Chromium 运行时。出现
-`Executable doesn't exist at /root/.cache/ms-playwright/...` 时，应在 RSSHub 的 Compose 配置中持久化
-`/root/.cache/ms-playwright`，并补齐 Chromium 的系统库；标签/关键词搜索属于公开 API，可配置空的
-`BILIBILI_COOKIE_1` 跳过自动获取 Cookie，避免 RSSHub 因浏览器 Cookie 初始化卡住并返回 503。
+若使用 Docker 运行 RSSHub，Bilibili 标签/关键词路由需要 Playwright Chromium 运行时。建议使用
+`diygod/rsshub:chromium-bundled` 镜像；若日志出现
+`Executable doesn't exist at /root/.cache/ms-playwright/...`，还应持久化
+`/root/.cache/ms-playwright` 并补齐 Chromium 的系统库。如果 Bilibili 上游返回
+`412 Precondition Failed`，RSSHub 通常会对外显示 503；也可以为 RSSHub 配置有效的
+`BILIBILI_COOKIE_1`，但 Cookie 只能放在本机环境变量或未提交的 Compose 配置中，不要写入仓库。
 
 ### 管理面板诊断与投递追踪
 
@@ -171,7 +173,7 @@ UP 主投稿使用 RSSHub 的 `/bilibili/user/video/{uid}` 路由，标签和关
 
 ### QQ 私聊手动转发
 
-白名单用户私聊机器人发送 `relay-list` 查看目标群，发送 `relay 1` 选择第一个
+白名单用户私聊机器人发送 `relay list` 查看目标群，发送 `relay 1` 选择第一个
 群，也可以发送 `relay 1 2` 同时选择多个群，或发送 `relay all` 选择全部已启用群；随后发送的下一条文字会转发到所选 QQ 群。
 下一条消息也可以是 Discord 消息链接，机器人会抓取原消息并复用图片、音频等解析逻辑。
 该功能是授权的 QQ → QQ 手动操作，不会把 QQ 消息自动发回 Discord。
@@ -181,9 +183,8 @@ UP 主投稿使用 RSSHub 的 `/bilibili/user/video/{uid}` 路由，标签和关
 管理面板的「定时消息」卡片可设置消息内容、目标群、重复方式、发送时间和启用状态。
 重复方式支持“每隔 N 天”或“每 N 周指定星期”（可设置起算日期）；目标群从已审核群中选择，
 只有同时启用的目标群才会接收消息。修改后无需重启机器人。白名单用户也可以私聊机器人使用
-`timer` 查询，或使用 `timer on/off`、`timer text 内容`、`timer days 天数 [HH:MM]`、
-`timer weekly 周几... [HH:MM]`、`timer time HH:MM`、`timer groups 序号1 序号2`
-和 `timer clear` 控制。
+`timer` 查询、`timer on/off` 开启或关闭，或 `timer clear` 关闭并清空定时消息内容；消息内容、
+目标群、重复方式和发送时间请在管理面板中设置。
 
 ### 公告自动翻译（可选）
 

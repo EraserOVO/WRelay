@@ -51,8 +51,10 @@ from plugins.translation import translate_text_parts
 
 
 FEED_TIMEOUT = 30
-FEED_MAX_ATTEMPTS = 3
-FEED_RETRY_DELAYS = (1, 3)
+# RSSHub 会继续请求 Bilibili 上游；多个来源同时刷新容易触发上游拦截。
+FEED_MAX_ATTEMPTS = 4
+FEED_RETRY_DELAYS = (2, 5, 15)
+FEED_REQUEST_GAP = 2
 BILIBILI_POLL_CONCURRENCY = 4
 BILIBILI_STATE_FILE = data_path("bilibili.json")
 BILIBILI_PROTECTION_FILE = data_path("bilibili_protection.json")
@@ -61,6 +63,8 @@ _feed_client = None
 _state_file_lock = threading.Lock()
 _protection_file_lock = threading.Lock()
 _protection_lock = asyncio.Lock()
+_feed_request_lock = asyncio.Lock()
+_last_feed_request_ts = 0.0
 _posts_cache = {}
 _protection_runtime_state = None
 
@@ -342,17 +346,25 @@ def _update_source_state(source_id, etag=None, clear_etag=False):
 
 
 async def _fetch_feed(url, etag=None):
+    global _last_feed_request_ts
     headers = {"Accept-Encoding": "identity"}
     if etag:
         headers["If-None-Match"] = etag.removeprefix("W/")
     last_error = ""
     for attempt in range(FEED_MAX_ATTEMPTS):
         try:
-            response = await _get_feed_client().get(
-                url,
-                headers=headers,
-                timeout=FEED_TIMEOUT,
-            )
+            async with _feed_request_lock:
+                elapsed = time.monotonic() - _last_feed_request_ts
+                if elapsed < FEED_REQUEST_GAP:
+                    await asyncio.sleep(FEED_REQUEST_GAP - elapsed)
+                try:
+                    response = await _get_feed_client().get(
+                        url,
+                        headers=headers,
+                        timeout=FEED_TIMEOUT,
+                    )
+                finally:
+                    _last_feed_request_ts = time.monotonic()
         except Exception as exc:
             last_error = "请求异常: %s" % exc
             retriable = True
@@ -362,6 +374,8 @@ async def _fetch_feed(url, etag=None):
             if response.status_code == 200 and response.content:
                 return response.content, response.headers.get("etag"), None
             last_error = "HTTP %s" % response.status_code
+            if response.status_code == 503:
+                last_error += "（RSSHub 上游可能需要 Chromium 或有效 BILIBILI_COOKIE_1）"
             retriable = response.status_code == 429 or response.status_code >= 500
 
         if not retriable or attempt + 1 >= FEED_MAX_ATTEMPTS:

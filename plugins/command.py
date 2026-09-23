@@ -248,7 +248,7 @@ async def log_group_add_openid(
 # =====================================================
 # 私聊 relay 命令（两步式：先指定目标，再发送下一条内容）
 #
-#   relay-list            列出可转发目标群（全部已注册且 enabled，私聊不做测试/正式隔离）
+#   relay list            列出可转发目标群（全部已注册且 enabled，私聊不做测试/正式隔离）
 #   relay {序号1} {序号2}  选择多个群，静默等待下一条普通消息转发
 #   relay all             选择全部可用群，静默等待下一条普通消息转发
 #   relay / relay abc / relay 999 → 无法找到对应的转发群
@@ -362,8 +362,7 @@ async def handle(
 
     # ---- relay 指令 ----
     if (
-        stripped == "relay-list"
-        or stripped == "relay"
+        stripped == "relay"
         or stripped.startswith("relay ")
     ):
         await _handle_relay_cmd(bot, event, stripped, user)
@@ -396,8 +395,8 @@ async def _handle_relay_cmd(bot, event, stripped, user):
         _stop_propagation()
         return
 
-    # relay-list：列出可转发目标群
-    if stripped == "relay-list":
+    # relay list：列出可转发目标群
+    if stripped == "relay list":
 
         await bot.send(
             event,

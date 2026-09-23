@@ -172,6 +172,7 @@ X RSS 与 Discord 使用独立的转发组配置。RSSHub 不可用、解析失�
 plugins/bilibili.py
     │ ① 读取启用的 Bilibili 来源与 Bilibili 转发组
     │ ② 按来源类型生成 RSSHub 路由：UP 主投稿 / 标签搜索 / 关键词搜索
+    │    RSS 请求按来源串行并留出间隔；429/5xx/连接异常最多退避重试 4 次
     │ ③ 请求 RSS，复用 ETag / 304 缓存并对临时错误退避重试
     │ ④ plugins/bilibili_parser.py 解析标题、作者、标签、视频链接和封面
     │ ⑤ 以 bilibili:{kind}:{value} 作为独立来源游标去重
@@ -183,9 +184,11 @@ plugins/bilibili.py
 Bilibili 与 Discord、X 使用独立的转发组和来源游标；全局来源、QQ 群启用状态以及当前
 转发组成员关系必须同时满足才会投递。消息文本使用“自动转发来自 Bilibili 中[UP 主名称]的投稿”
 来源头，优先使用 RSS 投稿作者，缺少作者时回退到注册来源；只渲染标题和
-`[原始投稿地址](原始投稿地址)`，并发送一张 RSS 提供的封面图片；不发送作者行、标签、其他分类、简介及播放统计，也不下载视频本体，避免大文件和临时 CDN 地址影响
+原始投稿地址（纯文本链接），并发送一张 RSS 提供的封面图片；不发送作者行、标签、其他分类、简介及播放统计，也不下载视频本体，避免大文件和临时 CDN 地址影响
 轮询稳定性。
 RSSHub 请求失败、解析失败或发送失败只影响对应 Bilibili 来源，不会阻断其他自动链路。
+若 RSSHub 日志显示 Bilibili 上游 `412 Precondition Failed`，RSSHub 通常会对外返回 503；此时
+需要使用带 Chromium 的 RSSHub 镜像，或为 RSSHub 配置有效的 `BILIBILI_COOKIE_1`。
 
 Bilibili 另有一层独立的投递保护：`settings.json` 中的 `bilibili_protection` 控制全链路
 最短发送间隔、每小时成功投稿上限、每个来源的积压上限和超限策略。积压队列保存在
@@ -252,7 +255,7 @@ QQ 私聊消息
                                            └── ⑤ 回复执行结果
 ```
 
-`relay-list` 查看启用群，`relay <序号1> <序号2>` 或 `relay all` 选择目标，下一条消息
+`relay list` 查看启用群，`relay <序号1> <序号2>` 或 `relay all` 选择目标，下一条消息
 转发到 QQ 群。若下一条是 Discord 消息链接，会从 Discord API 抓取并复用正常
 渲染流程；这是授权用户触发的 QQ → QQ 手动操作，不是 QQ → Discord 自动同步。
 

@@ -56,7 +56,7 @@ def format_post_text(post, source=None):
     if title:
         lines.append(title)
     if link:
-        lines.append("[%s](%s)" % (link, link))
+        lines.append(link)
     return "\n".join(lines)
 
 

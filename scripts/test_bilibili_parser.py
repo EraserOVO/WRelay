@@ -38,7 +38,7 @@ def main():
     assert format_post_text(posts[0], tag_source) == (
         "自动转发来自 Bilibili 中[测试 UP]的投稿：\n"
         "第一个视频\n"
-        "[https://www.bilibili.com/video/BV1AA411C7mD](https://www.bilibili.com/video/BV1AA411C7mD)"
+        "https://www.bilibili.com/video/BV1AA411C7mD"
     )
     assert format_post_text(posts[1], tag_source).startswith("自动转发来自 Bilibili 中[空洞骑士]的投稿：\n")
     assert "作者：" not in format_post_text(posts[0], tag_source)
