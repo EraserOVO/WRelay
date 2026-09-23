@@ -1,7 +1,7 @@
 """统一运行 WRelay 回归测试。
 
-测试脚本保持独立，便于单独定位；本入口负责统一 UTF-8 环境、工作目录和
-退出码。用法：.venv/Scripts/python.exe scripts/run_tests.py
+测试脚本保持独立，便于单独定位；本入口负责统一 UTF-8 环境、工作目录、
+单项超时和退出码。用法：.venv/Scripts/python.exe scripts/run_tests.py
 """
 import os
 import subprocess
@@ -10,6 +10,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+TEST_TIMEOUT_SECONDS = 120
 TESTS = (
     "test_fetch_reference.py",
     "test_fetch_video.py",
@@ -50,15 +51,30 @@ def main():
 
     for name in TESTS:
         path = ROOT / "scripts" / name
-        result = subprocess.run(
-            [sys.executable, "-u", str(path)],
-            cwd=str(ROOT),
-            env=env,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
+        try:
+            result = subprocess.run(
+                [sys.executable, "-u", str(path)],
+                cwd=str(ROOT),
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=TEST_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as exc:
+            failures.append(name)
+            print("FAIL - {} (超时，超过 {} 秒)".format(
+                name, TEST_TIMEOUT_SECONDS
+            ))
+            for label, output in (("stdout", exc.stdout), ("stderr", exc.stderr)):
+                if not output:
+                    continue
+                if isinstance(output, bytes):
+                    output = output.decode("utf-8", errors="replace")
+                print("{}:".format(label))
+                print(output)
+            continue
         if result.returncode == 0:
             print("PASS - " + name)
             continue

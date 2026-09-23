@@ -9,19 +9,46 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.12"]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install dependencies
         run: python -m pip install -r requirements-lock.txt -e .
       - name: Check whitespace
-        run: git diff --check HEAD
+        run: git diff --check HEAD^ HEAD
       - name: Compile source
         run: python -m compileall -q bot.py plugins panel scripts
       - name: Run regression suite
         run: python -u scripts/run_tests.py
+
+  installer-smoke:
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare bundled runtime
+        shell: pwsh
+        run: .\scripts\prepare_runtime.ps1
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build installer and run smoke test
+        shell: pwsh
+        run: |
+          .\scripts\build_installer.ps1
+          .\scripts\test_installer_smoke.ps1

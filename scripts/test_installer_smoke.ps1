@@ -33,6 +33,9 @@ function Test-ExpectedFile([string]$relativePath) {
     }
 }
 
+$smokeError = $null
+$cleanupError = $null
+
 try {
     $arguments = @(
         "/VERYSILENT",
@@ -49,9 +52,14 @@ try {
 
     foreach ($file in @(
         "python\python.exe",
+        "python\pythonw.exe",
         "bot.py",
         "plugins\sender.py",
+        "panel\管理面板.pyw",
         "panel\wrelay_panel.ico",
+        "panel\web\index.html",
+        "panel\web\app.js",
+        "panel\web\style.css",
         ".env.prod"
     )) {
         Test-ExpectedFile $file
@@ -75,13 +83,49 @@ try {
         throw "Fresh-install startup guard expected exit code 2, got $($startupProcess.ExitCode). Output: $text"
     }
 
-    Write-Host "Installer smoke test passed: install, media, and first-start guard."
-}
-finally {
-    if (-not $KeepInstallDir -and (Test-Path -LiteralPath $installDir)) {
-        $allowedPrefix = $smokeRoot + "\" + $smokePrefix
-        if ($installDir.StartsWith($allowedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-            Remove-Item -LiteralPath $installDir -Recurse -Force
+} catch {
+    $smokeError = $_
+} finally {
+    if (-not $KeepInstallDir) {
+        try {
+            if (Test-Path -LiteralPath $installDir) {
+                $allowedPrefix = $smokeRoot + "\" + $smokePrefix
+                if (-not $installDir.StartsWith($allowedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    throw "Refusing to clean an install directory outside the smoke-test path: $installDir"
+                }
+
+                $uninstaller = Get-ChildItem -LiteralPath $installDir -Filter "unins*.exe" -File |
+                    Select-Object -First 1
+                if (-not $uninstaller) {
+                    throw "Smoke-test uninstaller not found"
+                }
+
+                $uninstallProcess = Start-Process -FilePath $uninstaller.FullName -ArgumentList @(
+                    "/VERYSILENT",
+                    "/SUPPRESSMSGBOXES",
+                    "/NORESTART"
+                ) -Wait -PassThru -NoNewWindow
+                if ($uninstallProcess.ExitCode -ne 0) {
+                    throw "Smoke-test uninstall failed with exit code $($uninstallProcess.ExitCode)"
+                }
+
+                Remove-Item -LiteralPath $installDir -Recurse -Force
+            }
+        } catch {
+            $cleanupError = "Smoke-test cleanup failed; temporary install may remain at '$installDir'. $($_.Exception.Message)"
         }
     }
 }
+
+if ($smokeError -and $cleanupError) {
+    Write-Warning $cleanupError
+    throw $smokeError.Exception
+}
+if ($smokeError) {
+    throw $smokeError.Exception
+}
+if ($cleanupError) {
+    throw $cleanupError
+}
+
+Write-Host "Installer smoke test passed: install, media, and first-start guard."

@@ -280,6 +280,14 @@ async function jpost(url, body) {
   });
   return r.json();
 }
+async function runBotAction(url, title, fallback) {
+  try {
+    const r = await jpost(url);
+    if (!r.ok) showAlert(title, r.msg || fallback);
+  } catch (e) {
+    showAlert(title, "无法连接管理面板，请检查面板是否仍在运行");
+  }
+}
 
 function openBackupRestore() {
   document.getElementById("backupRestoreModal").style.display = "flex";
@@ -293,7 +301,11 @@ async function exportBackup() {
   const r = await fetch("/api/backup/export?include_runtime_state=" + (runtime ? "true" : "false"), {
     headers: {"X-WRelay-Token": panelToken},
   });
-  if (!r.ok) throw new Error("导出失败");
+  if (!r.ok) {
+    let data = {};
+    try { data = await r.json(); } catch (e) {}
+    throw new Error(data.msg || "导出失败");
+  }
   const url = URL.createObjectURL(await r.blob());
   const a = document.createElement("a");
   a.href = url; a.download = "wrelay-backup.zip"; a.click();
@@ -4173,13 +4185,13 @@ document.addEventListener("click", async function (e) {
       }
     });
   } else if (btn.id === "btnStart") {
-    await jpost("/api/bot/start");
+    await runBotAction("/api/bot/start", "启动失败", "启动机器人失败");
     await sleep(800); await refreshStatus();
   } else if (btn.id === "btnStop") {
-    await jpost("/api/bot/stop");
+    await runBotAction("/api/bot/stop", "停止失败", "停止机器人失败");
     await sleep(800); await refreshStatus();
   } else if (btn.id === "btnRestart") {
-    await jpost("/api/bot/restart");
+    await runBotAction("/api/bot/restart", "重启失败", "重启机器人失败");
     await sleep(1500); await refreshStatus();
   } else if (btn.id === "btnAutostart") {
     const enabled = btn.dataset.on !== "1";

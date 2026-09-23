@@ -80,7 +80,7 @@ begin
     EnvPath := ExpandConstant('{app}\.env.prod');
     ExamplePath := ExpandConstant('{app}\.env.example');
     if (not FileExists(EnvPath)) and FileExists(ExamplePath) then
-      if not FileCopy(ExamplePath, EnvPath, False) then
+      if not CopyFile(ExamplePath, EnvPath, False) then
         MsgBox('无法创建 .env.prod，请检查安装目录的写入权限。', mbError, MB_OK);
   end;
 end;

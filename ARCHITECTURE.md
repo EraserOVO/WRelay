@@ -38,13 +38,15 @@ WRelay/
 │   └── json_io.py            JSON 原子读写工具
 ├── panel/
 │   ├── 管理面板.pyw           管理面板主程序（FastAPI + 进程管理）
+│   ├── backup_restore.py    配置备份、恢复校验、失败回滚
+│   ├── process_manager.py   机器人进程、PID 文件与存活检测
 │   ├── autostart.pyw         开机自启入口
 │   ├── restart_worker.pyw    面板重启 worker
 │   └── web/                  面板前端（纯静态 HTML/JS/CSS）
 │       ├── index.html
 │       ├── app.js
 │       └── style.css
-├── scripts/                  独立诊断脚本（如 diagnose_channels.py）
+├── scripts/                  构建、诊断与验证脚本（如 prepare_runtime.ps1）
 ├── data/                     运行时数据（settings、去重记录、统计等）
 ├── docs/                     文档（SETUP.md、CHANNELS.md）
 ├── .env.prod                 环境变量（Discord Token、QQ AppID 等，不进版本库）
@@ -368,6 +370,7 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 |------|--------|--------|------|
 | `data/settings.json` | 面板（主要；保存时先轮转 `settings.json.bak` 备份）；bot（仅文件完全不存在时首次默认初始化） | bot（高频，带缓存；损坏/结构无效时内存降级，不覆盖原文件）、面板 | 启用的群/频道/用户列表、补发开关、模式预设 |
 | `data/settings.json.bak` | 面板（每次保存前轮转写入） | 面板 / 人工（配置损坏或误写时恢复） | 上一版 settings.json 的完整备份（仅保留最近一代） |
+| `data/restore_backups/restore-before-*.zip` | 面板 | 面板恢复流程 / 管理员 | 每次恢复前的白名单快照；多文件恢复失败时用于自动回滚，最多保留最近 10 份 |
 | `data/discord_last.json` | bot | bot | Discord/X/Bilibili 每个来源或频道每个群最后成功转发的消息 ID（去重用） |
 | `data/qq_group_openids.json` | bot（自动发现）；面板（审核通过时补回缺失 openid） | 面板（同步预览、审核补回校验） | 机器人发现的所有群 openid 及 `group_bot_ids` 归属映射（原始记录，非权限，不进同步名单） |
 | `data/qq_user_openids.json` | bot（自动发现）；面板（审核通过时补回缺失 openid） | 面板（同步预览、审核补回校验） | 机器人发现的所有用户 openid（原始记录，非权限，不进同步名单） |
@@ -376,7 +379,7 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | `data/stats.json` | bot | 面板 | 转发成功/失败累计 + 当日条数 |
 | `data/channels_audit.json` | bot（诊断脚本） | 面板 | 频道权限扫描快照（可读/可见频道列表） |
 | `data/runtime_log_level.json` | 面板 | bot | 运行时日志级别（面板写入后 bot 3 秒内自动生效） |
-| `data/bot.pid` | 面板 | 面板 | 机器人进程 PID（进程管理用） |
+| `data/bot.pid` | 面板（临时文件 + 原子替换） | 面板 | 机器人进程 PID（进程管理用）；启动后若 PID 写入失败，面板会尝试终止新进程并核实结果 |
 | `data/restart_pending.json` | bot（manage.py） | bot（manage.py） | 跨进程重启确认标记 |
 | `data/retry_pending.json` | bot（retry.py） | bot（retry.py）、面板 | 失败消息摘要、失败群、重试次数和下次重试时间；不保存媒体字节 |
 | `data/message_trace.json` | bot（message_trace.py） | bot（health_api.py）、面板 | 最近投递结果、目标群、失败原因和重试次数；自动限制记录数量 |
@@ -421,7 +424,9 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | `plugins/stats.py` | 转发统计 | 低 |
 | `plugins/json_io.py` | JSON 原子读写工具 | 低 |
 | `plugins/health_api.py` | Bot 健康状态接口（整体连接状态、逐 QQ Bot 连接列表、翻译运行状态） | 低 |
-| `panel/管理面板.pyw` | 面板主程序：FastAPI + 配置读写 + 进程管理 + 看门狗 | 高 |
+| `panel/管理面板.pyw` | 面板主程序：FastAPI + 配置读写 + 进程管理 + 看门狗；共享启停锁串行化 API 与看门狗操作 | 高 |
+| `panel/backup_restore.py` | 面板设置备份、归档校验、流式回退快照和多文件失败回滚 | 中 |
+| `panel/process_manager.py` | 机器人进程生命周期、原子 PID 文件写入和 Windows 进程校验 | 中 |
 | `panel/web/app.js` | 面板前端逻辑、QQ Bot 工作区切换与状态显示 | 高 |
 
 ---
@@ -505,4 +510,4 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | `qq_registrations.json` | 注册申请存储，与白名单数据独立；**不参与任何权限判断**，审核通过 ≠ 自动启用 |
 | `qq_identities.json` | 纯身份资料库（昵称、群名、管理员备注），只用于面板展示，**绝不参与任何权限判断** |
 | 不存在主动反查群名 | QQ 官方 API 不提供群名/昵称查询接口。群名只在机器人收到群消息时从事件中提取并记录，无法通过 openid 主动查询 |
-| 自动转发方向 | 自动链路为 Discord → QQ、X RSS → QQ；项目不做 QQ → Discord 或双向同步；QQ → QQ 仅限授权用户手动 relay 命令 |
+| 自动转发方向 | 自动链路为 Discord → QQ、X RSS → QQ、Bilibili RSS → QQ；项目不做 QQ → Discord 或双向同步；QQ → QQ 仅限授权用户手动 relay 命令 |

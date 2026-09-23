@@ -19,17 +19,12 @@ import shutil
 import time
 import asyncio
 import re
-import ctypes
-import socket
 import threading
 import subprocess
 import webbrowser
 import secrets
 import uuid
-import io
-import zipfile
-from datetime import datetime, timezone
-from contextlib import ExitStack
+from datetime import datetime
 
 # ---------------- 路径 ----------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))      # .../panel
@@ -154,6 +149,16 @@ from plugins.json_io import (
 )
 from plugins.settings_model import SettingsModel, validate_settings
 from plugins.user_errors import localize_user_error
+from panel.backup_restore import (
+    BACKUP_MANIFEST_NAME,
+    BACKUP_MAX_BYTES,
+    BACKUP_RUNTIME_NAMES,
+    BACKUP_SETTINGS_NAME,
+    RESTORE_BACKUP_RETENTION,
+    BackupRestoreService,
+    RestoreRollbackError,
+)
+from panel.process_manager import BotProcessManager
 
 # X 转发组：复用 bot 侧的归一化结果（GET 注入默认组）与 source key 派生
 # （保存时清理悬空引用）。导入失败时用最小回退（等价于不做注入/清理）。
@@ -261,171 +266,62 @@ def _validate_settings(data):
 
 
 # ---------------- 安全备份与恢复 ----------------
-# 仅允许这些明确列出的文件进入归档；不要把身份、令牌、日志或环境变量
-# 当作“配置”处理。运行状态只在用户明确选择时才会导出或恢复。
-BACKUP_SETTINGS_NAME = "settings.json"
-BACKUP_RUNTIME_NAMES = ("discord_last.json", "retry_pending.json")
-BACKUP_MANIFEST_NAME = "manifest.json"
-BACKUP_MAX_BYTES = 5 * 1024 * 1024
-RESTORE_BACKUP_RETENTION = 10
+def _backup_service():
+    return BackupRestoreService(
+        settings_file=SETTINGS_FILE,
+        discord_last_file=DISCORD_LAST_FILE,
+        retry_pending_file=RETRY_PENDING_FILE,
+        restore_backup_dir=RESTORE_BACKUP_DIR,
+        file_lock=json_file_lock,
+        atomic_write_json_unlocked=_atomic_write_json_unlocked,
+        default_settings_factory=get_default_settings,
+        settings_validator=_validate_settings,
+        logger=_log,
+    )
 
 
 def _backup_targets():
-    return {
-        BACKUP_SETTINGS_NAME: SETTINGS_FILE,
-        "discord_last.json": DISCORD_LAST_FILE,
-        "retry_pending.json": RETRY_PENDING_FILE,
-    }
+    return _backup_service().backup_targets()
 
 
 def _lock_backup_targets(names):
-    """按稳定顺序锁住一批文件，避免多文件操作产生交错快照或死锁。"""
-    targets = _backup_targets()
-    stack = ExitStack()
-    for name in sorted(names):
-        stack.enter_context(json_file_lock(targets[name]))
-    return stack
+    return _backup_service().lock_backup_targets(names)
 
 
 def _backup_manifest(names, include_runtime_state):
-    return {
-        "format": "wrelay-backup",
-        "version": 1,
-        "exported_at": datetime.now(timezone.utc).isoformat(),
-        "include_runtime_state": bool(include_runtime_state),
-        "files": list(names),
-    }
+    return BackupRestoreService.backup_manifest(names, include_runtime_state)
 
 
 def create_backup_archive(include_runtime_state=False):
-    """生成只含白名单文件的 ZIP，供 API 和测试共用。"""
-    targets = _backup_targets()
-    requested_names = [BACKUP_SETTINGS_NAME]
-    if include_runtime_state:
-        requested_names.extend(BACKUP_RUNTIME_NAMES)
-    with _lock_backup_targets(requested_names):
-        names = [name for name in requested_names if os.path.exists(targets[name])]
-        if BACKUP_SETTINGS_NAME not in names:
-            names.insert(0, BACKUP_SETTINGS_NAME)
-        payload = io.BytesIO()
-        with zipfile.ZipFile(payload, "w", zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr(
-                BACKUP_MANIFEST_NAME,
-                json.dumps(_backup_manifest(names, include_runtime_state), ensure_ascii=False, indent=2),
-            )
-            for name in names:
-                try:
-                    with open(targets[name], "rb") as source:
-                        archive.writestr(name, source.read())
-                except FileNotFoundError:
-                    if name == BACKUP_SETTINGS_NAME:
-                        archive.writestr(name, json.dumps(get_default_settings(), ensure_ascii=False, indent=2))
-                    else:
-                        raise
-    return payload.getvalue()
+    return _backup_service().create_backup_archive(include_runtime_state)
 
 
 def _read_restore_archive(payload):
-    if not isinstance(payload, (bytes, bytearray)) or not payload or len(payload) > BACKUP_MAX_BYTES:
-        raise ValueError("备份文件为空或超过 5 MB 限制")
-    try:
-        with zipfile.ZipFile(io.BytesIO(payload), "r") as archive:
-            infos = archive.infolist()
-            names = [info.filename for info in infos]
-            allowed = {BACKUP_MANIFEST_NAME, BACKUP_SETTINGS_NAME, *BACKUP_RUNTIME_NAMES}
-            if len(names) != len(set(names)) or set(names) - allowed:
-                raise ValueError("备份内含不允许的文件")
-            if BACKUP_MANIFEST_NAME not in names or BACKUP_SETTINGS_NAME not in names:
-                raise ValueError("备份缺少清单或 settings.json")
-            if any("/" in name or "\\" in name or name.startswith(".") for name in names):
-                raise ValueError("备份文件名不安全")
-            total = sum(info.file_size for info in infos)
-            if total > BACKUP_MAX_BYTES or any(info.file_size > BACKUP_MAX_BYTES for info in infos):
-                raise ValueError("备份解压后超过 5 MB 限制")
-            try:
-                manifest = json.loads(archive.read(BACKUP_MANIFEST_NAME).decode("utf-8"))
-            except Exception as exc:
-                raise ValueError("备份清单格式错误") from exc
-            if not isinstance(manifest, dict) or manifest.get("format") != "wrelay-backup" or manifest.get("version") != 1:
-                raise ValueError("不支持的备份格式")
-            if manifest.get("files") != [name for name in names if name != BACKUP_MANIFEST_NAME]:
-                raise ValueError("备份清单与文件不一致")
-            if any(name in names for name in BACKUP_RUNTIME_NAMES) and manifest.get("include_runtime_state") is not True:
-                raise ValueError("备份清单未声明运行状态")
-            data = {}
-            for name in names:
-                if name == BACKUP_MANIFEST_NAME:
-                    continue
-                try:
-                    data[name] = json.loads(archive.read(name).decode("utf-8"))
-                except Exception as exc:
-                    raise ValueError("%s 不是有效 JSON" % name) from exc
-    except zipfile.BadZipFile as exc:
-        raise ValueError("请选择有效的 ZIP 备份文件") from exc
-    err = _validate_settings(data[BACKUP_SETTINGS_NAME])
-    if err:
-        raise ValueError("settings.json 配置校验失败: " + err)
-    return data
+    return _backup_service().read_restore_archive(payload)
 
 
 def _save_restore_rollback(names):
-    """先完整备份当前待覆盖文件；失败时绝不开始写入恢复数据。"""
-    os.makedirs(RESTORE_BACKUP_DIR, exist_ok=True)
-    path = os.path.join(
-        RESTORE_BACKUP_DIR,
-        "restore-before-%s-%s.zip" % (datetime.now().strftime("%Y%m%d-%H%M%S"), uuid.uuid4().hex[:8]),
-    )
-    targets = _backup_targets()
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr(BACKUP_MANIFEST_NAME, json.dumps({
-            "format": "wrelay-restore-rollback", "version": 1,
-            "created_at": datetime.now(timezone.utc).isoformat(), "files": list(names),
-        }, ensure_ascii=False, indent=2))
-        for name in names:
-            if os.path.exists(targets[name]):
-                with open(targets[name], "rb") as source:
-                    archive.writestr(name, source.read())
-    _prune_restore_rollbacks(path)
-    return path
+    return _backup_service().save_restore_rollback(names)
 
 
 def _prune_restore_rollbacks(current_path):
-    """仅清理本功能创建的旧回退 ZIP，绝不碰目录中的其他文件。"""
-    try:
-        current = os.path.normcase(os.path.abspath(current_path))
-        backups = []
-        with os.scandir(RESTORE_BACKUP_DIR) as entries:
-            for entry in entries:
-                if (
-                    entry.is_file(follow_symlinks=False)
-                    and entry.name.startswith("restore-before-")
-                    and entry.name.endswith(".zip")
-                ):
-                    path = os.path.normcase(os.path.abspath(entry.path))
-                    if path != current:
-                        backups.append((entry.stat(follow_symlinks=False).st_mtime_ns, entry.name, entry.path))
-        backups.sort(reverse=True)
-        for _mtime, _name, path in backups[max(RESTORE_BACKUP_RETENTION - 1, 0):]:
-            os.remove(path)
-    except OSError as exc:
-        # 清理失败不影响刚创建的回退备份，更不能阻断本次恢复。
-        _log("清理旧恢复前备份失败: %s" % exc)
+    return _backup_service().prune_restore_rollbacks(current_path)
 
 
-def restore_backup_archive(payload, include_runtime_state=False, confirmed_runtime_state=False):
-    """验证 ZIP 后恢复白名单数据；返回本次自动回退备份位置。"""
-    data = _read_restore_archive(payload)
-    names = [BACKUP_SETTINGS_NAME]
-    if include_runtime_state:
-        if not confirmed_runtime_state:
-            raise ValueError("恢复运行状态需要明确确认风险")
-        names.extend(name for name in BACKUP_RUNTIME_NAMES if name in data)
-    targets = _backup_targets()
-    with _lock_backup_targets(names):
-        rollback_path = _save_restore_rollback(names)
-        for name in names:
-            _atomic_write_json_unlocked(targets[name], data[name], indent=2)
-    return {"restored": names, "rollback": rollback_path}
+def restore_backup_archive(
+    payload,
+    include_runtime_state=False,
+    confirmed_runtime_state=False,
+):
+    return _backup_service().restore_backup_archive(
+        payload,
+        include_runtime_state,
+        confirmed_runtime_state,
+        targets_provider=_backup_targets,
+        lock_targets=_lock_backup_targets,
+        save_rollback=_save_restore_rollback,
+        read_archive=_read_restore_archive,
+    )
 
 
 def _sync_legacy_scheduled_message(scheduled, body):
@@ -779,6 +675,8 @@ def get_qq_appid():
 
 # ---------------- 机器人进程管理 ----------------
 _bot = {"proc": None}
+# API 与看门狗可并发触发启停；重启/看门狗会重入包装函数，因此使用 RLock。
+_BOT_CONTROL_LOCK = threading.RLock()
 
 # 看门狗：_want_running 为 True 表示"面板期望机器人保持运行"（点过启动/重启/开机自启），
 # 机器人崩溃或被杀后由后台线程自动拉起；手动停止（stop_bot）会置 False，不再自动重启。
@@ -789,11 +687,7 @@ MIN_AUTO_RESTART_GAP = 30.0  # 两次自动重启至少间隔 30 秒，连续崩
 
 
 def port_open(port):
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=0.5):
-            return True
-    except Exception:
-        return False
+    return _process_manager().port_open(port)
 
 
 PANEL_PING_URL = "http://%s:%d/api/status" % (PANEL_HOST, PANEL_PORT)
@@ -807,16 +701,7 @@ def panel_alive():
     退出，浏览器反而打不开管理页。只有返回 200 的 HTTP 响应才说明
     当前 18090 上确实是本面板。
     """
-    import urllib.request
-    try:
-        req = urllib.request.Request(
-            PANEL_PING_URL,
-            headers={"X-WRelay-Token": PANEL_TOKEN},
-        )
-        with urllib.request.urlopen(req, timeout=1.5) as resp:
-            return resp.status == 200
-    except Exception:
-        return False
+    return _process_manager().panel_alive()
 
 
 def _proc_exists(pid):
@@ -825,149 +710,57 @@ def _proc_exists(pid):
     即使其它进程（如面板持有的 Popen 句柄）仍持有该进程的对象句柄，
     进程终止后 WaitForSingleObject 也会返回 signaled，
     避免"进程已退出却被误判为运行中"导致看门狗不重启。"""
-    if pid <= 0:
-        return False
-    try:
-        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        SYNCHRONIZE = 0x00100000
-        handle = ctypes.windll.kernel32.OpenProcess(
-            PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
-            False,
-            pid,
-        )
-        if not handle:
-            return False
-        try:
-            # 0 = WAIT_OBJECT_0（进程已终止）；0x102 = WAIT_TIMEOUT（仍在运行）
-            alive = (
-                ctypes.windll.kernel32.WaitForSingleObject(handle, 0)
-                == 0x102
-            )
-            if not alive:
-                return False
-
-            # PID 可能在 Bot 退出后被 Windows 复用。只有进程镜像确实是
-            # 当前 WRelay 使用的 Python 解释器时，才允许面板接管/结束它。
-            size = ctypes.c_ulong(32768)
-            buf = ctypes.create_unicode_buffer(size.value)
-            query = ctypes.windll.kernel32.QueryFullProcessImageNameW
-            query.argtypes = [
-                ctypes.c_void_p,
-                ctypes.c_ulong,
-                ctypes.c_wchar_p,
-                ctypes.POINTER(ctypes.c_ulong),
-            ]
-            query.restype = ctypes.c_int
-            if not query(handle, 0, buf, ctypes.byref(size)):
-                return False
-            return os.path.normcase(os.path.abspath(buf.value)) == os.path.normcase(
-                os.path.abspath(VENV_PYTHON)
-            )
-        finally:
-            ctypes.windll.kernel32.CloseHandle(handle)
-    except Exception:
-        return False
+    return _process_manager().proc_exists(pid)
 
 
 def read_pid():
-    try:
-        with open(PID_FILE, "r") as f:
-            return int(f.read().strip() or 0)
-    except Exception:
-        return 0
+    return _process_manager().read_pid()
 
 
 def write_pid(pid):
-    with open(PID_FILE, "w") as f:
-        f.write(str(pid))
+    _process_manager().write_pid(pid)
 
 
 def clear_pid():
-    try:
-        os.remove(PID_FILE)
-    except Exception:
-        pass
+    _process_manager().clear_pid()
 
 
 def bot_status():
-    proc = _bot["proc"]
-    if proc is not None and proc.poll() is None:
-        return {"running": True, "pid": proc.pid, "managed": True}
-    pid = read_pid()
-    if pid:
-        if _proc_exists(pid):
-            return {"running": True, "pid": pid, "managed": False}
-        # 过期 pid（重启后进程已不存在）自动清理，避免被其它进程复用 PID 误判
-        clear_pid()
-    # 不再用端口探测判断存活：BOT_PORT 可能被其它程序（如 QQ 客户端）
-    # 占用，导致 Bot 未运行却被误判为 running、start_bot 拒绝重启。
-    # 存活只依据进程本身（_bot["proc"] 或 bot.pid）。
-    return {"running": False, "pid": 0, "managed": False}
+    return _process_manager().bot_status()
 
 
 def _kill_tree(pid):
-    try:
-        subprocess.run(
-            ["taskkill", "/PID", str(pid), "/T", "/F"],
-            capture_output=True,
-            timeout=10,
-        )
-    except Exception:
-        try:
-            ctypes.windll.kernel32.TerminateProcess(
-                ctypes.windll.kernel32.OpenProcess(0x0001, False, pid), 1
-            )
-        except Exception:
-            pass
+    _process_manager().kill_tree(pid)
+
+
+def _process_manager():
+    return BotProcessManager(
+        project_root=PROJECT_ROOT,
+        python_path=VENV_PYTHON,
+        bot_entry=BOT_ENTRY,
+        pid_file=PID_FILE,
+        panel_ping_url=PANEL_PING_URL,
+        panel_token=PANEL_TOKEN,
+        process_state=_bot,
+        logger=_log,
+        localize_error=localize_user_error,
+    )
 
 
 def start_bot():
     global _want_running
-    st = bot_status()
-    if st["running"]:
-        return {"ok": False, "msg": "机器人已在运行"}
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    env = os.environ.copy()
-    # 日志改由 bot.py 内的 loguru 直接写 data/logs/bot.log（带 5MB 轮转），
-    # 因此不再把 stdout/stderr 重定向到 bot.log，避免双写同一文件。
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["PYTHONUTF8"] = "1"
-    try:
-        proc = subprocess.Popen(
-            [VENV_PYTHON, BOT_ENTRY],
-            cwd=PROJECT_ROOT,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.STDOUT,
-            creationflags=flags,
-            env=env,
-        )
-    except Exception as exc:
-        _log("启动机器人失败: %s" % exc)
-        return {"ok": False, "msg": localize_user_error(f"启动失败: {exc}", "启动失败")}
-    _bot["proc"] = proc
-    write_pid(proc.pid)
-    _want_running = True
-    _log("启动机器人 pid=%s" % proc.pid)
-    return {"ok": True, "pid": proc.pid}
+    with _BOT_CONTROL_LOCK:
+        result = _process_manager().start_bot()
+        if result.get("ok"):
+            _want_running = True
+        return result
 
 
 def stop_bot():
     global _want_running
-    _want_running = False
-    stopped = False
-    proc = _bot["proc"]
-    if proc is not None and proc.poll() is None:
-        _kill_tree(proc.pid)
-        stopped = True
-    _bot["proc"] = None
-    pid = read_pid()
-    if pid and _proc_exists(pid):
-        _kill_tree(pid)
-        stopped = True
-    clear_pid()
-    if stopped:
-        _log("停止机器人")
-    return {"ok": True, "stopped": stopped}
+    with _BOT_CONTROL_LOCK:
+        _want_running = False
+        return _process_manager().stop_bot()
 
 
 def log_tail(path, n=400, max_bytes=262144):
@@ -1163,19 +956,20 @@ def _watchdog_loop():
     global _last_auto_start
     while True:
         time.sleep(WATCHDOG_INTERVAL)
-        if not _want_running:
-            continue
-        if bot_status()["running"]:
-            continue
-        if time.time() - _last_auto_start < MIN_AUTO_RESTART_GAP:
-            continue
-        _log("看门狗：检测到机器人已停止，自动重启")
-        result = start_bot()
-        if result.get("ok"):
-            _last_auto_start = time.time()
-            _log("看门狗自动重启成功 pid=%s" % result.get("pid"))
-        else:
-            _log("看门狗自动重启失败: %s" % result.get("msg"))
+        with _BOT_CONTROL_LOCK:
+            if not _want_running:
+                continue
+            if bot_status()["running"]:
+                continue
+            if time.time() - _last_auto_start < MIN_AUTO_RESTART_GAP:
+                continue
+            _log("看门狗：检测到机器人已停止，自动重启")
+            result = start_bot()
+            if result.get("ok"):
+                _last_auto_start = time.time()
+                _log("看门狗自动重启成功 pid=%s" % result.get("pid"))
+            else:
+                _log("看门狗自动重启失败: %s" % result.get("msg"))
 
 
 # ---------------- 转发统计 / 日志级别（机器人侧写入，面板只读） ----------------
@@ -1368,7 +1162,10 @@ def api_settings_default():
 
 @app.get("/api/backup/export")
 def api_backup_export(include_runtime_state: bool = False):
-    payload = create_backup_archive(include_runtime_state)
+    try:
+        payload = create_backup_archive(include_runtime_state)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "msg": str(exc)}, status_code=413)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return Response(
         content=payload,
@@ -1379,15 +1176,56 @@ def api_backup_export(include_runtime_state: bool = False):
 
 @app.post("/api/backup/restore")
 async def api_backup_restore(request: Request, include_runtime_state: bool = False, confirm_runtime_state: bool = False):
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > BACKUP_MAX_BYTES:
+                return JSONResponse(
+                    {"ok": False, "msg": "备份文件为空或超过 5 MB 限制"},
+                    status_code=413,
+                )
+        except ValueError:
+            return JSONResponse(
+                {"ok": False, "msg": "上传请求大小无效"}, status_code=400
+            )
+
+    payload = bytearray()
+    try:
+        async for chunk in request.stream():
+            if len(payload) + len(chunk) > BACKUP_MAX_BYTES:
+                return JSONResponse(
+                    {"ok": False, "msg": "备份文件为空或超过 5 MB 限制"},
+                    status_code=413,
+                )
+            payload.extend(chunk)
+    except Exception as exc:
+        _log("读取备份上传失败: %s" % exc)
+        return JSONResponse(
+            {"ok": False, "msg": "读取备份上传失败"}, status_code=400
+        )
+
     try:
         result = restore_backup_archive(
-            await request.body(), include_runtime_state, confirm_runtime_state,
+            bytes(payload), include_runtime_state, confirm_runtime_state,
         )
     except ValueError as exc:
         return JSONResponse({"ok": False, "msg": localize_user_error(exc)}, status_code=400)
+    except RestoreRollbackError as exc:
+        _log("恢复备份失败且自动回滚不完整: %s" % exc)
+        return JSONResponse(
+            {
+                "ok": False,
+                "msg": "恢复失败，自动回滚不完整。恢复前备份保存在：%s"
+                % exc.rollback_path,
+            },
+            status_code=500,
+        )
     except Exception as exc:
         _log("恢复备份失败: %s" % exc)
-        return JSONResponse({"ok": False, "msg": "恢复失败，当前文件未被覆盖"}, status_code=500)
+        return JSONResponse(
+            {"ok": False, "msg": "恢复失败，当前文件已恢复到操作前状态"},
+            status_code=500,
+        )
     _log("已恢复备份：%s；回退备份：%s" % (", ".join(result["restored"]), result["rollback"]))
     return {"ok": True, "restored": result["restored"], "msg": "恢复完成，已自动创建恢复前备份"}
 
@@ -1835,9 +1673,14 @@ def api_bot_stop():
 
 @app.post("/api/bot/restart")
 def api_bot_restart():
-    stop_bot()
-    time.sleep(1.0)
-    return start_bot()
+    global _want_running
+    with _BOT_CONTROL_LOCK:
+        stop_result = stop_bot()
+        if not stop_result.get("ok"):
+            _want_running = True
+            return stop_result
+        time.sleep(1.0)
+        return start_bot()
 
 
 # ---------------- Bot 凭据配置（.env.prod 的 QQ_BOTS / DISCORD_BOTS） ----------------

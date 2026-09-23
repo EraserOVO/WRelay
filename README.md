@@ -122,6 +122,7 @@ list                           查看命令帮助
 - 查看频道权限审计结果和真实频道名称
 - 查看、清空和动态切换机器人日志级别
 - 查看转发统计
+- 导出和恢复配置备份（ZIP 上限 5 MB）；运行状态可选，恢复前自动保存回退快照
 - 查看和操作 Discord 离线补发
 - 查看 X RSS 和 Bilibili RSS 轮询状态
 - 在运行日志卡片中打开消息追踪二级窗口，查看最近 50 条投递结果
@@ -164,6 +165,12 @@ WRelay/
 ├─ .env.example              # 环境变量模板
 ├─ install.bat               # Windows 安装脚本
 ├─ 启动面板.bat              # 启动管理面板
+├─ WRelay.iss                # Inno Setup 安装包定义
+├─ scripts/
+│  ├─ run_tests.py           # 回归测试统一入口
+│  ├─ prepare_runtime.ps1    # 准备安装包内置 Python
+│  ├─ build_installer.ps1    # 构建 Windows 安装包
+│  └─ test_installer_smoke.ps1 # 安装包冒烟检查
 ├─ docs/
 │  ├─ SETUP.md               # 安装与配置指南
 │  └─ CHANNELS.md            # Discord 频道权限记录
@@ -171,9 +178,9 @@ WRelay/
 │  ├─ relay.py               # Discord 实时转发
 │  ├─ x_rss.py               # X RSS 轮询和投递
 │  ├─ x_rss_parser.py        # RSS 内容解析
-│  ├─ bilibili.py             # Bilibili RSS 轮询和投递
-│  ├─ bilibili_parser.py      # Bilibili RSS 内容解析
-│  ├─ bilibili_rate_limit.py  # Bilibili 限速、积压裁剪纯逻辑
+│  ├─ bilibili.py            # Bilibili RSS 轮询和投递
+│  ├─ bilibili_parser.py     # Bilibili RSS 内容解析
+│  ├─ bilibili_rate_limit.py # Bilibili 限速、积压裁剪纯逻辑
 │  ├─ command.py             # QQ relay 命令、OpenID 自动发现和身份记录
 │  ├─ manage.py              # QQ 私聊管理命令
 │  ├─ registration.py        # QQ 用户/群注册申请
@@ -194,7 +201,9 @@ WRelay/
 │  ├─ stats.py               # 转发统计
 │  └─ json_io.py              # JSON 原子读写
 ├─ panel/
-│  ├─ 管理面板.pyw            # FastAPI 管理面板和机器人进程管理
+│  ├─ 管理面板.pyw            # FastAPI 管理面板与启停协调
+│  ├─ backup_restore.py      # 配置备份、校验和恢复回滚
+│  ├─ process_manager.py     # 机器人进程与 PID 管理
 │  ├─ autostart.pyw           # 开机自启入口
 │  └─ web/                    # 管理面板前端
 └─ data/                      # 配置、游标、日志和运行时数据
