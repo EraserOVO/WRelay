@@ -60,8 +60,8 @@ Source: "docs\*"; DestDir: "{app}\docs"; Flags: recursesubdirs ignoreversion
 ; 安装时仅创建空白 data 目录，settings 等默认结构由程序首次运行按需生成。
 
 ; ---- 自包含 Python 运行时（替换旧 .venv）----
-; 排除调试符号、缓存、开发残留
-Source: ".runtime\python\*"; DestDir: "{app}\python"; Flags: recursesubdirs ignoreversion; Excludes: "*.pdb,__pycache__,.git"
+; 保留 WRelay 运行依赖，排除调试符号、缓存及通用 Python 开发工具。
+Source: ".runtime\python\*"; DestDir: "{app}\python"; Flags: recursesubdirs ignoreversion; Excludes: "*.pdb,__pycache__,.git,Lib\site-packages\pip\*,Lib\site-packages\pip-*.dist-info\*,Scripts\*,Lib\venv\*,Lib\ensurepip\*,Lib\idlelib\*,include\*,libs\*"
 
 [Icons]
 Name: "{group}\启动 WRelay 管理面板"; Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\panel\管理面板.pyw"""; WorkingDir: "{app}"; IconFilename: "{app}\panel\wrelay_panel.ico"

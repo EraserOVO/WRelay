@@ -57,6 +57,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_installer.ps1
 才会编译 `WRelay.iss`，并输出安装包大小和 SHA256。若编译器不在常见安装目录，
 可以先设置 `INNO_SETUP_ISCC` 为 `ISCC.exe` 的完整路径。
 
+最终安装包会保留运行 WRelay 所需的 Python 解释器、标准库和锁定依赖；为减小体积，
+不包含 pip/命令行入口、venv/ensurepip、IDLE 或 C 扩展编译用的头文件和链接库。
+仓库中的 `.runtime\python` 不做这些裁剪，仍可用于准备依赖和构建安装包。
+
 `pyproject.toml` 也提供标准 Python 构建元数据，可用于构建插件依赖包；它不是完整的桌面应用安装方式。
 完整的 Bot、管理面板、内置 Python 和 Windows 快捷方式请使用上面的 Inno Setup 安装包。
 

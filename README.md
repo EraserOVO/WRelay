@@ -136,7 +136,7 @@ list                           查看命令帮助
 
 当前安装脚本和管理面板仅支持 Windows，Python 版本要求为 3.10 及以上。
 
-1. 安装包版本直接使用随包提供的 `python\` 运行时，并在安装时从 `.env.example` 生成 `.env.prod`；源码目录运行 `install.bat` 时，如果没有内置 Python，则创建 `.venv` 并安装项目依赖。
+1. 安装包版本直接使用随包提供的 `python\` 运行时（仅供运行 WRelay，不含 pip、venv 等通用开发工具），并在安装时从 `.env.example` 生成 `.env.prod`；源码目录运行 `install.bat` 时，如果没有内置 Python，则创建 `.venv` 并安装项目依赖。
 2. 源码版本如果不存在 `.env.prod`，安装脚本会从 `.env.example` 生成配置模板。
 3. 编辑 `.env.prod`，填写 QQ 官方机器人和 Discord Bot 配置。
 4. 如需访问 Discord，在 `.env.prod` 中配置 `HTTP_PROXY`。
