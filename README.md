@@ -131,6 +131,9 @@ list                           查看命令帮助
 - 编辑 QQ Bot 与 Discord Bot 配置
 - 多个 QQ Bot 时通过左上角 QQ Bot 下拉框切换当前工作区；Discord → QQ 与 X → QQ 页面只显示该 Bot 的目标群，
   不需要在每个群行单独选择 Bot
+- 页面标题、浏览器标签页和 Windows 安装快捷方式统一使用 WRelay 主标识；转发组与白名单表格在各页面保持一致的拖动及启用列布局
+
+桌面端窗口布局目前是规划参考，当前管理面板仍通过浏览器访问；概念图见 [docs/DESIGN.md](docs/DESIGN.md)。
 
 ## 快速开始（Windows）
 
@@ -172,6 +175,7 @@ WRelay/
 │  ├─ build_installer.ps1    # 构建 Windows 安装包
 │  └─ test_installer_smoke.ps1 # 安装包冒烟检查
 ├─ docs/
+│  ├─ DESIGN.md              # 主标识与桌面端界面概念图
 │  ├─ SETUP.md               # 安装与配置指南
 │  └─ CHANNELS.md            # Discord 频道权限记录
 ├─ plugins/
@@ -205,7 +209,8 @@ WRelay/
 │  ├─ backup_restore.py      # 配置备份、校验和恢复回滚
 │  ├─ process_manager.py     # 机器人进程与 PID 管理
 │  ├─ autostart.pyw           # 开机自启入口
-│  └─ web/                    # 管理面板前端
+│  ├─ wrelay_panel.ico       # Windows 安装器与快捷方式图标
+│  └─ web/                    # 管理面板前端与品牌 SVG
 └─ data/                      # 配置、游标、日志和运行时数据
 ```
 

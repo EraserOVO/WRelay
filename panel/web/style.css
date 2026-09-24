@@ -83,13 +83,15 @@
     width: 100%; max-width: 1440px;
     margin-left: auto; margin-right: auto;
   }
-  h1 { font-size: 22px; margin: 0 0 4px; }
+  h1 { font-size: 22px; margin: 0 0 4px; color: #818DF9; }
+  body.theme-light h1 { color: #3C478A; }
   .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
   .card {
     background: var(--card-bg); border-radius: 10px;
     padding: 16px 18px; margin-bottom: 16px;
   }
-  .card h2 { font-size: 15px; margin: 0 0 12px; color: var(--card-heading); }
+  .card h2 { font-size: 15px; margin: 0 0 12px; color: #818DF9; }
+  body.theme-light .card h2 { color: #5E6CD8; }
   .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .badge {
     padding: 4px 12px; border-radius: 20px; font-size: 13px; font-weight: bold;
@@ -524,13 +526,23 @@
     -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>') center / 70% no-repeat;
     mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>') center / 70% no-repeat;
   }
-  /* 各转发组与白名单的启用勾选列：缩小复选框左右留白，避免窄列被撑宽 */
+  /* 各页转发组/白名单表统一首两列宽度，避免表格宽度差异造成左侧控件错位。 */
+  :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
+      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) th:first-child,
+  :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
+      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) td.drag-handle {
+    width: 52px !important;
+  }
   #chanList th:nth-child(2), #chanList td:nth-child(2),
   #groupList th:nth-child(2), #groupList td:nth-child(2),
   #userList th:nth-child(2), #userList td:nth-child(2),
   #xSourceList th:nth-child(2), #xSourceList td:nth-child(2),
   #xGroupList th:nth-child(2), #xGroupList td:nth-child(2),
-  #xUserList th:nth-child(2), #xUserList td:nth-child(2) {
+  #xUserList th:nth-child(2), #xUserList td:nth-child(2),
+  #bilibiliSourceList th:nth-child(2), #bilibiliSourceList td:nth-child(2),
+  #bilibiliGroupList th:nth-child(2), #bilibiliGroupList td:nth-child(2),
+  #qqFgGroupList th:nth-child(2), #qqFgGroupList td:nth-child(2) {
+    width: 74px !important;
     padding-left: 0; padding-right: 0;
   }
   .mono { font-family: Consolas, monospace; font-size: 12px; }
@@ -1009,22 +1021,23 @@
   /* .fgtab.active 背景为蓝色（--primary），中央文字颜色统一为 --btn-fg
     （与「关于作者」按钮中央图案同源；日间主题原值相同，夜间由 #e6e8eb 统一为基准色） */
   .fgtab.active { background: var(--primary); border-color: var(--primary-border); color: var(--btn-fg); }
-  /* 暂停中的转发组即使未选中也保持橙黄色，避免与正常组混淆。 */
+  /* 未选中的暂停转发组使用淡橙色，降低与选中状态的视觉强调。 */
   .fgtab.paused {
     background: var(--badge-warn-bg);
-    background: color-mix(in srgb, var(--warn-bg) 38%, var(--sec-bg));
+    background: color-mix(in srgb, var(--warn-bg) 25%, var(--sec-bg));
     border: 1px solid var(--field-border);
     color: var(--warn-fg);
   }
   .fgtab.active.paused {
-    background: var(--warn-bg); border: 1px solid var(--primary-border);
+    background: var(--warn-bg);
+    border: 1px solid var(--primary-border);
     color: var(--warn-fg);
   }
-  button.fg-toggle {
+  button.fg-toggle, button.fgctrl {
     background: var(--sec-bg); color: var(--muted); border: 1px solid var(--field-border);
   }
-  button.fg-toggle:hover { color: var(--hover-fg); }
-  button.fg-toggle.paused { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-bg); }
+  button.fg-toggle:hover, button.fgctrl:hover { color: var(--hover-fg); }
+  button.fg-toggle.paused { background: var(--sec-bg); color: var(--muted); border-color: var(--field-border); }
   .fgtab-add {
     background: transparent; border: 1px dashed var(--field-border); color: var(--muted);
     /* 与 .fgtab 相同内边距/字号：外框高度与转发组一致（虚线边框额外占 2px 高度） */

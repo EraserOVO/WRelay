@@ -684,6 +684,12 @@ _want_running = False
 _last_auto_start = 0.0
 WATCHDOG_INTERVAL = 10.0   # 每 10 秒检查一次机器人存活
 MIN_AUTO_RESTART_GAP = 30.0  # 两次自动重启至少间隔 30 秒，连续崩溃时不刷屏
+DISCORD_UNAVAILABLE_GRACE = 120.0  # Discord 连续不可用 2 分钟后重启机器人
+DISCORD_RESTART_BASE_GAP = 300.0  # Discord 自动恢复重启从 5 分钟冷却开始
+DISCORD_RESTART_MAX_GAP = 3600.0  # 持续故障时逐步延长冷却，最多每小时一次
+_discord_unavailable_since = None
+_last_discord_restart_attempt = 0.0
+_discord_restart_count = 0
 
 
 def port_open(port):
@@ -761,6 +767,20 @@ def stop_bot():
     with _BOT_CONTROL_LOCK:
         _want_running = False
         return _process_manager().stop_bot()
+
+
+def restart_bot():
+    """重启机器人并保留面板的运行意图，供 API 与看门狗共用。"""
+    global _want_running, _discord_unavailable_since
+    with _BOT_CONTROL_LOCK:
+        _discord_unavailable_since = None
+        stop_result = stop_bot()
+        if not stop_result.get("ok"):
+            _want_running = True
+            return stop_result
+        _want_running = True
+        time.sleep(1.0)
+        return start_bot()
 
 
 def log_tail(path, n=400, max_bytes=262144):
@@ -950,26 +970,68 @@ def _autostart_bot_after_up():
 
 
 def _watchdog_loop():
-    """看门狗：_want_running（面板期望机器人运行）时，检测到机器人死了就自动拉起。
-    手动停止后 _want_running=False 不会拉起；自动重启之间至少间隔 MIN_AUTO_RESTART_GAP，
-    避免机器人反复崩溃时每 10 秒拉起一次的刷屏。"""
-    global _last_auto_start
+    """保持机器人进程与 Discord 网关连接；手动停止后不自动拉起。"""
+    global _last_auto_start, _discord_unavailable_since
+    global _last_discord_restart_attempt, _discord_restart_count
     while True:
         time.sleep(WATCHDOG_INTERVAL)
         with _BOT_CONTROL_LOCK:
             if not _want_running:
+                _discord_unavailable_since = None
                 continue
-            if bot_status()["running"]:
+            status = bot_status()
+            if not status["running"]:
+                _discord_unavailable_since = None
+                if time.time() - _last_auto_start < MIN_AUTO_RESTART_GAP:
+                    continue
+                _log("看门狗：检测到机器人已停止，自动重启")
+                result = start_bot()
+                if result.get("ok"):
+                    _last_auto_start = time.time()
+                    _log("看门狗自动重启成功 pid=%s" % result.get("pid"))
+                else:
+                    _log("看门狗自动重启失败: %s" % result.get("msg"))
                 continue
-            if time.time() - _last_auto_start < MIN_AUTO_RESTART_GAP:
+
+            health = _bot_health_cached()
+            discord_connected = health.get("discord") if isinstance(health, dict) else None
+            if discord_connected is not True and discord_connected is not False:
+                # 健康接口暂不可用或状态未知时不据此重启。
+                _discord_unavailable_since = None
                 continue
-            _log("看门狗：检测到机器人已停止，自动重启")
-            result = start_bot()
+            if discord_connected:
+                _discord_unavailable_since = None
+                _discord_restart_count = 0
+                _last_discord_restart_attempt = 0.0
+                continue
+
+            now = time.time()
+            if _discord_unavailable_since is None:
+                _discord_unavailable_since = now
+                continue
+            if now - _discord_unavailable_since < DISCORD_UNAVAILABLE_GRACE:
+                continue
+
+            cooldown = min(
+                DISCORD_RESTART_BASE_GAP * (2 ** min(_discord_restart_count, 4)),
+                DISCORD_RESTART_MAX_GAP,
+            )
+            if now - _last_discord_restart_attempt < cooldown:
+                continue
+
+            _log(
+                "看门狗：Discord 连续不可用超过 %d 秒，重启机器人以恢复连接"
+                % DISCORD_UNAVAILABLE_GRACE
+            )
+            result = restart_bot()
+            _last_discord_restart_attempt = time.time()
+            _discord_unavailable_since = None
             if result.get("ok"):
-                _last_auto_start = time.time()
-                _log("看门狗自动重启成功 pid=%s" % result.get("pid"))
+                _discord_restart_count = min(_discord_restart_count + 1, 4)
+                _log("看门狗：Discord 自动恢复重启已启动 pid=%s" % result.get("pid"))
             else:
-                _log("看门狗自动重启失败: %s" % result.get("msg"))
+                _log("看门狗：Discord 自动恢复重启失败: %s" % result.get("msg"))
+            continue
 
 
 # ---------------- 转发统计 / 日志级别（机器人侧写入，面板只读） ----------------
@@ -1673,14 +1735,7 @@ def api_bot_stop():
 
 @app.post("/api/bot/restart")
 def api_bot_restart():
-    global _want_running
-    with _BOT_CONTROL_LOCK:
-        stop_result = stop_bot()
-        if not stop_result.get("ok"):
-            _want_running = True
-            return stop_result
-        time.sleep(1.0)
-        return start_bot()
+    return restart_bot()
 
 
 # ---------------- Bot 凭据配置（.env.prod 的 QQ_BOTS / DISCORD_BOTS） ----------------
@@ -2753,6 +2808,7 @@ def _open_browser():
 
 
 def main():
+    global _want_running
     autostart = AUTOSTART_FLAG in sys.argv
     restarting = RESTART_FLAG in sys.argv
 

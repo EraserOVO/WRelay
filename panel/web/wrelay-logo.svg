@@ -1,0 +1,41 @@
+<svg id="图层_1" data-name="图层 1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1197.233 1003.604">
+  <defs>
+    <linearGradient id="未命名的渐变" x1="257.401" y1="1033.401" x2="1295.069" y2="569.977" gradientTransform="matrix(1, 0, 0, -1, -168.767, 1251.989)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#48539c"/>
+      <stop offset="0.52" stop-color="#3c478a"/>
+      <stop offset="1" stop-color="#323b77"/>
+    </linearGradient>
+    <linearGradient id="未命名的渐变_2" data-name="未命名的渐变 2" x1="511.161" y1="1182.789" x2="1229.426" y2="861.328" gradientTransform="matrix(1, -0.007, -0.007, -1, -160.51, 1255.52)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4a55a0"/>
+      <stop offset="0.55" stop-color="#3f498e"/>
+      <stop offset="1" stop-color="#35407d"/>
+    </linearGradient>
+    <linearGradient id="未命名的渐变_3" data-name="未命名的渐变 3" x1="509.988" y1="1172.877" x2="799.988" y2="327.878" gradientTransform="matrix(1, 0.002, 0.002, -1, -170.802, 1251.085)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6977e5"/>
+      <stop offset="0.52" stop-color="#5b69d4"/>
+      <stop offset="1" stop-color="#4e5dc3"/>
+    </linearGradient>
+    <linearGradient id="未命名的渐变_5" data-name="未命名的渐变 5" x1="260.186" y1="1011.452" x2="437.817" y2="468.957" gradientTransform="matrix(1, 0, 0, -1, -168.767, 1251.989)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8b98ff"/>
+      <stop offset="0.55" stop-color="#7c89f7"/>
+      <stop offset="1" stop-color="#717fee"/>
+    </linearGradient>
+    <linearGradient id="未命名的渐变_4" data-name="未命名的渐变 4" x1="805.905" y1="327.989" x2="1291.691" y2="565.924" gradientTransform="matrix(1, 0, 0, -1, -168.767, 1251.989)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4e5dc3"/>
+      <stop offset="0.55" stop-color="#5664ce"/>
+      <stop offset="1" stop-color="#5967cd"/>
+    </linearGradient>
+    <linearGradient id="未命名的渐变_6" data-name="未命名的渐变 6" x1="445.762" y1="469.703" x2="1226.031" y2="859.837" gradientTransform="matrix(1, 0.003, 0.003, -1, -170.364, 1250.426)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#717fee"/>
+      <stop offset="0.56" stop-color="#7a87f5"/>
+      <stop offset="1" stop-color="#8793fc"/>
+    </linearGradient>
+  </defs>
+  <title>wrelay_logo_capsules</title>
+  <line id="capsule-1-rear-lower" x1="85.855" y1="223.603" x2="1129.08" y2="676.996" fill="none" stroke-linecap="round" stroke-width="132" stroke="url(#未命名的渐变)"/>
+  <line id="capsule-2-rear-upper" x1="341.233" y1="71" x2="1064.021" y2="383.822" fill="none" stroke-linecap="round" stroke-width="142" stroke="url(#未命名的渐变_2)"/>
+  <line id="capsule-3-middle-down" x1="341.233" y1="79.099" x2="629.758" y2="924.604" fill="none" stroke-linecap="round" stroke-width="158" stroke="url(#未命名的渐变_3)"/>
+  <line id="capsule-5-front-down" x1="88" y1="245.345" x2="272.468" y2="778.224" fill="none" stroke-linecap="round" stroke-width="176" stroke="url(#未命名的渐变_5)"/>
+  <line id="capsule-4-middle-up" x1="638.829" y1="925.965" x2="1121.233" y2="684.099" fill="none" stroke-linecap="round" stroke-width="152" stroke="url(#未命名的渐变_4)"/>
+  <line id="capsule-6-front-up" x1="278.09" y1="784.477" x2="1057.605" y2="392.679" fill="none" stroke-linecap="round" stroke-width="166" stroke="url(#未命名的渐变_6)"/>
+</svg>

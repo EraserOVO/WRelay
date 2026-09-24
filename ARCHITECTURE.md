@@ -42,13 +42,15 @@ WRelay/
 │   ├── process_manager.py   机器人进程、PID 文件与存活检测
 │   ├── autostart.pyw         开机自启入口
 │   ├── restart_worker.pyw    面板重启 worker
+│   ├── wrelay_panel.ico      Windows 安装器与快捷方式图标
 │   └── web/                  面板前端（纯静态 HTML/JS/CSS）
 │       ├── index.html
 │       ├── app.js
-│       └── style.css
+│       ├── style.css
+│       └── wrelay-logo.svg
 ├── scripts/                  构建、诊断与验证脚本（如 prepare_runtime.ps1）
 ├── data/                     运行时数据（settings、去重记录、统计等）
-├── docs/                     文档（SETUP.md、CHANNELS.md）
+├── docs/                     文档（DESIGN.md、SETUP.md、CHANNELS.md）
 ├── .env.prod                 环境变量（Discord Token、QQ AppID 等，不进版本库）
 ├── .env.example              环境变量示例
 └── pyproject.toml            项目依赖
@@ -360,6 +362,8 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 运行日志卡片内的「消息追踪」按钮打开二级窗口，读取 `message_trace.py` 保存的最近
 50 条投递记录，展示来源、消息摘要、目标群、最终结果与重试次数。机器人状态卡片的
 「连接诊断」按钮只读显示进程、Discord、QQ 连接和待重试投递数量，不会发送测试消息。
+面板看门狗在机器人进程正常但 Discord 连续不可用 2 分钟时重启整个机器人进程，尝试恢复网关连接；
+因此 QQ Bot 也会短暂重连。持续故障时，Discord 自动恢复重启的间隔从 5 分钟逐步延长，最长每小时一次。
 「失败通知」开关控制失败提醒；仅白名单中已启用且勾选「告警」的用户会收到通知，通知按冷却时间合并重复失败。
 
 ---
@@ -495,6 +499,10 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 
 - 面板前端从 `管理面板.pyw` 中分离为独立的 `index.html` + `app.js` + `style.css`。
 - 通过 FastAPI `StaticFiles` 挂载，面板重启后刷新浏览器即可看到最新前端。
+- 页眉和浏览器标签页共用 `wrelay-logo.svg`；安装器与 Windows 快捷方式使用 `panel/wrelay_panel.ico`。
+- 各来源转发组和白名单表格的拖动柄列、启用复选框列固定为 52px、74px，避免表格宽度差异造成左侧错位。
+- 夜间标题使用 `#818DF9`；日间大标题为 `#3C478A`、卡片标题为 `#5E6CD8`。暂停组未选中时使用淡橙色，选中时保留警示橙色，暂停后的播放按钮保持灰色。
+- 桌面端窗口图仅作后续规划参考；当前运行界面仍是本地浏览器面板，概念图保存在 `docs/DESIGN.md`。
 - 好处：改 UI 不需要改 Python 代码，也不需要重启面板进程。
 
 ---
