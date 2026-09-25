@@ -4,7 +4,7 @@
 
 由管理面板 /api/panel/restart 以独立进程方式拉起：
   1. 等待旧面板退出并释放 127.0.0.1:18090（最多 15 秒）
-  2. 按当前面板的启动方式（autostart.pyw 或 管理面板.pyw）重新拉起
+  2. 按当前面板的启动方式（autostart.pyw 或 desktop_app.pyw）重新拉起
 旧面板在返回重启响应后自行退出，因此本脚本只需轮询端口即可，
 避免新旧进程抢 18090 导致新面板起不来。
 """
@@ -57,7 +57,7 @@ def main():
 
     entry = os.path.join(
         BASE,
-        "autostart.pyw" if AUTOSTART else "管理面板.pyw",
+        "autostart.pyw" if AUTOSTART else "desktop_app.pyw",
     )
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     env = os.environ.copy()

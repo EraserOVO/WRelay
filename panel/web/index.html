@@ -3,30 +3,49 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WRelay 管理面板</title>
+<title>WRelay</title>
 <link rel="icon" type="image/svg+xml" href="/wrelay-logo.svg">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
-    <div style="display:flex;flex-direction:column;align-items:flex-start;gap:8px;">
-      <div>
-        <h1 style="display:flex;align-items:center;gap:10px;margin:0 0 4px;">
-          <img src="/wrelay-logo.svg" alt="" aria-hidden="true" width="32" height="27" style="width:32px;height:27px;object-fit:contain;">
-          WRelay 管理面板
-          <button id="btnRestartPanel" class="iconbtn" aria-label="重启面板"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></button>
-        </h1>
-      </div>
-      <div class="pagetabs" id="pageTabs" style="margin-bottom:0;">
-        <button type="button" class="fgtab active" data-kind="pageTab" data-page="discord">Discord → QQ</button>
-        <button type="button" class="fgtab" data-kind="pageTab" data-page="x">X → QQ</button>
-        <button type="button" class="fgtab" data-kind="pageTab" data-page="bilibili">Bilibili → QQ</button>
-        <button type="button" class="fgtab" data-kind="pageTab" data-page="qq">QQ → QQ</button>
-      </div>
+  <div class="desktop-titlebar" aria-label="WRelay 窗口标题栏">
+    <div class="desktop-title-drag pywebview-drag-region"><img src="/wrelay-logo.svg" alt="" aria-hidden="true">WRelay</div>
+    <div class="desktop-window-controls">
+      <button type="button" data-window-action="minimize" aria-label="最小化">—</button>
+      <button type="button" data-window-action="maximize" aria-label="最大化或还原">□</button>
+      <button type="button" data-window-action="hide" aria-label="隐藏到托盘">×</button>
     </div>
-    <div style="display:flex;gap:6px;margin-right:12px;">
+  </div>
+  <aside class="desktop-sidebar">
+    <div class="sidebar-brand"><img src="/wrelay-logo.svg" alt="" aria-hidden="true">WRelay</div>
+    <nav id="pageTabs" aria-label="主要页面">
+      <button type="button" class="nav-item" data-kind="pageTab" data-page="overview"><span class="nav-icon">⌂</span>总览</button>
+      <button type="button" class="nav-item active" data-kind="pageTab" data-page="discord"><span class="nav-icon">◉</span>Discord → QQ</button>
+      <button type="button" class="nav-item" data-kind="pageTab" data-page="x"><span class="nav-icon">↗</span>X → QQ</button>
+      <button type="button" class="nav-item" data-kind="pageTab" data-page="bilibili"><span class="nav-icon">▣</span>Bilibili → QQ</button>
+      <button type="button" class="nav-item" data-kind="pageTab" data-page="qq"><span class="nav-icon">⇄</span>QQ → QQ</button>
+      <div class="sidebar-divider"></div>
+      <button type="button" class="nav-item" data-kind="pageTab" data-page="settings"><span class="nav-icon">⚙</span>设置</button>
+    </nav>
+  </aside>
+  <div class="page-header">
+    <div>
+      <h1 id="activePageTitle">Discord → QQ</h1>
+      <p id="activePageDescription">管理频道、接收群与转发组</p>
+    </div>
+    <div class="page-header-actions">
+      <button id="btnRestartPanel" class="iconbtn" title="重启管理程序" aria-label="重启管理程序"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></button>
       <button id="btnAbout" class="iconbtn" aria-label="关于"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
       <button id="btnTheme" class="iconbtn" aria-label="切换主题"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+    </div>
+  </div>
+
+  <div id="pageOverview" class="page-content" style="display:none">
+    <div class="overview-grid">
+      <button type="button" class="overview-route" data-kind="pageTab" data-page="discord"><span>Discord → QQ</span><strong id="overviewDiscord">检测中…</strong></button>
+      <button type="button" class="overview-route" data-kind="pageTab" data-page="x"><span>X → QQ</span><strong id="overviewX">查看来源与转发组</strong></button>
+      <button type="button" class="overview-route" data-kind="pageTab" data-page="bilibili"><span>Bilibili → QQ</span><strong id="overviewBilibili">查看来源与转发组</strong></button>
+      <button type="button" class="overview-route" data-kind="pageTab" data-page="qq"><span>QQ → QQ</span><strong id="overviewQQ">授权用户手动转发</strong></button>
     </div>
   </div>
 
@@ -140,9 +159,9 @@
         <div class="tablewrap">
           <table id="chanList" style="table-layout:fixed">
             <thead><tr>
-              <th style="width:1.6%"></th>
-              <th style="width:2.3%;text-align:center" class="col-muted" title="启用 = 是否允许该频道转发"><input type="checkbox" id="chanAllEnabled"></th>
-              <th style="width:22.7%">名称</th><th style="width:13%">频道 ID</th><th style="width:10%"></th>
+              <th style="width:52px"></th>
+              <th style="width:54px;text-align:center" class="col-muted" title="启用 = 是否允许该频道转发"><input type="checkbox" id="chanAllEnabled"></th>
+              <th style="width:230px">名称</th><th style="width:268px">频道 ID</th><th style="width:116px"></th>
             </tr></thead>
             <tbody id="chanBody"></tbody>
           </table>
@@ -161,9 +180,9 @@
         <div class="tablewrap">
           <table id="groupList" style="table-layout:fixed">
             <thead><tr>
-              <th style="width:1.6%"></th>
-              <th style="width:2.3%;text-align:center" class="col-muted" title="启用 = 是否允许该群接收转发"><input type="checkbox" id="groupAllEnabled"></th>
-              <th style="width:11.2%">名称</th><th style="width:18%">账号</th><th style="width:13%">Group OpenID</th><th style="width:3.5%"></th>
+              <th style="width:52px"></th>
+              <th style="width:54px;text-align:center" class="col-muted" title="启用 = 是否允许该群接收转发"><input type="checkbox" id="groupAllEnabled"></th>
+              <th style="width:170px">名称</th><th style="width:160px">账号</th><th style="width:310px">Group OpenID</th><th style="width:64px"></th>
             </tr></thead>
             <tbody id="groupBody"></tbody>
           </table>
@@ -436,7 +455,28 @@
     </div>
   </div>
 
-  <div class="card">
+  <div class="card page-content" id="recentMessageCard" style="display:none">
+    <h2>最近消息</h2>
+    <div class="recent-message-row"><span id="recentMessageResult" class="badge off">暂无投递</span><span id="recentMessageText">暂无消息记录</span><time id="recentMessageTime"></time></div>
+  </div>
+
+  <div id="pageSettings" class="page-content" style="display:none">
+    <div class="card">
+      <h2>设置与维护</h2>
+      <p class="settings-description">机器人凭据、翻译服务、开机自启和配置备份。</p>
+      <div class="settings-actions">
+        <button type="button" class="sec" data-settings-target="btnDiscordConfig">Discord Bot 配置</button>
+        <button type="button" class="sec" data-settings-target="btnQQConfig">QQ Bot 配置</button>
+        <button type="button" class="sec" data-settings-target="btnTranslationConfig">翻译服务配置</button>
+        <button type="button" class="sec" data-settings-target="btnAutostart">开机自启</button>
+        <button type="button" class="sec" data-settings-target="btnBackupRestore">备份与恢复</button>
+        <button type="button" class="sec" data-settings-target="btnOpenDiagnostic">连接诊断</button>
+      </div>
+      <p class="settings-description">关闭窗口会隐藏到托盘。托盘菜单选择退出后，机器人继续运行，管理程序不再自动看护。</p>
+    </div>
+  </div>
+
+  <div class="card" id="logCard">
     <h2 style="display:flex;justify-content:space-between;align-items:center;">运行日志</h2>
     <div id="logContent">
       <pre id="log" class="log">加载中…</pre>
@@ -666,5 +706,6 @@
   </div>
 </div>
 <script src="/app.js"></script>
+<script src="/desktop.js"></script>
 </body>
 </html>

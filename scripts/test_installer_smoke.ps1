@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$InstallerPath = "",
     [switch]$KeepInstallDir
@@ -25,6 +25,7 @@ if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
 $smokeRoot = $projectRoot
 $smokePrefix = "WRelay-installer-smoke-"
 $installDir = $smokeRoot + "\" + ($smokePrefix + [Guid]::NewGuid().ToString("N"))
+$installerLog = $installDir + ".setup.log"
 
 function Test-ExpectedFile([string]$relativePath) {
     $path = Join-Path $installDir $relativePath
@@ -43,11 +44,13 @@ try {
         "/NORESTART",
         "/SP-",
         "/NOICONS",
-        ('/DIR="{0}"' -f $installDir)
+        ('/DIR="{0}"' -f $installDir),
+        ('/LOG="{0}"' -f $installerLog)
     )
     $process = Start-Process -FilePath $installer -ArgumentList $arguments -Wait -PassThru
     if ($process.ExitCode -ne 0) {
-        throw "Installer failed with exit code $($process.ExitCode)"
+        $logTail = ((Get-Content -LiteralPath $installerLog -Tail 25 -ErrorAction SilentlyContinue) | Out-String).Trim()
+        throw "Installer failed with exit code $($process.ExitCode). Log: $logTail"
     }
 
     foreach ($file in @(
@@ -55,10 +58,12 @@ try {
         "python\pythonw.exe",
         "bot.py",
         "plugins\sender.py",
+        "panel\desktop_app.pyw",
         "panel\管理面板.pyw",
         "panel\wrelay_panel.ico",
         "panel\web\index.html",
         "panel\web\app.js",
+        "panel\web\desktop.js",
         "panel\web\style.css",
         ".env.prod"
     )) {
@@ -71,6 +76,11 @@ try {
     $mediaProcess = Start-Process -FilePath $runtimePython -ArgumentList @("-c", "m=__import__('PIL.Image',fromlist=['Image']);m.new('RGBA',(1,1))") -WorkingDirectory $installDir -Wait -PassThru -NoNewWindow
     if ($mediaProcess.ExitCode -ne 0) {
         throw "Installed runtime media smoke test failed with exit code $($mediaProcess.ExitCode)"
+    }
+
+    $desktopProcess = Start-Process -FilePath $runtimePython -ArgumentList @("-c", "__import__('webview');__import__('pystray');__import__('clr')") -WorkingDirectory $installDir -Wait -PassThru -NoNewWindow
+    if ($desktopProcess.ExitCode -ne 0) {
+        throw "Installed runtime desktop dependency check failed with exit code $($desktopProcess.ExitCode)"
     }
 
     # 全新安装会生成示例 .env.prod。bot.py 应在凭据检查处退出，
@@ -127,5 +137,7 @@ if ($smokeError) {
 if ($cleanupError) {
     throw $cleanupError
 }
+
+Remove-Item -LiteralPath $installerLog -Force -ErrorAction SilentlyContinue
 
 Write-Host "Installer smoke test passed: install, media, and first-start guard."

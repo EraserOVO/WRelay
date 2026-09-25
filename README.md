@@ -106,9 +106,9 @@ restart                        重启机器人
 list                           查看命令帮助
 ```
 
-### 本地管理面板
+### Windows 桌面管理程序
 
-面板默认地址为 `http://127.0.0.1:18090`，提供：
+桌面窗口通过 WebView2 显示本地管理界面，管理服务仍监听 `http://127.0.0.1:18090`，提供：
 
 - 启动、停止、重启机器人
 - 机器人异常退出后的自动拉起
@@ -131,19 +131,19 @@ list                           查看命令帮助
 - 编辑 QQ Bot 与 Discord Bot 配置
 - 多个 QQ Bot 时通过左上角 QQ Bot 下拉框切换当前工作区；Discord → QQ 与 X → QQ 页面只显示该 Bot 的目标群，
   不需要在每个群行单独选择 Bot
-- 页面标题、浏览器标签页和 Windows 安装快捷方式统一使用 WRelay 主标识；转发组与白名单表格在各页面保持一致的拖动及启用列布局
+- 窗口、导航和 Windows 安装快捷方式统一使用 WRelay 主标识；转发组与白名单表格在各页面保持一致的拖动及启用列布局
 
-桌面端窗口布局目前是规划参考，当前管理面板仍通过浏览器访问；概念图见 [docs/DESIGN.md](docs/DESIGN.md)。
+桌面程序提供总览、Discord → QQ、X → QQ、Bilibili → QQ、QQ → QQ 和设置导航。配置表在窄窗口中可横向滚动，长 ID 会省略显示，悬停可查看完整值。关闭窗口会隐藏到托盘，机器人继续运行；托盘菜单选择「退出管理程序」后，机器人仍运行，但管理程序不再自动看护。浏览器备用入口仍可访问上述本地地址。布局参考见 [docs/DESIGN.md](docs/DESIGN.md)。
 
 ## 快速开始（Windows）
 
-当前安装脚本和管理面板仅支持 Windows，Python 版本要求为 3.10 及以上。
+当前安装脚本和桌面程序仅支持 Windows，Python 版本要求为 3.10 及以上。安装包会在缺少 WebView2 Runtime 时安装该组件。
 
 1. 安装包版本直接使用随包提供的 `python\` 运行时（仅供运行 WRelay，不含 pip、venv 等通用开发工具），并在安装时从 `.env.example` 生成 `.env.prod`；源码目录运行 `install.bat` 时，如果没有内置 Python，则创建 `.venv` 并安装项目依赖。
 2. 源码版本如果不存在 `.env.prod`，安装脚本会从 `.env.example` 生成配置模板。
 3. 编辑 `.env.prod`，填写 QQ 官方机器人和 Discord Bot 配置。
 4. 如需访问 Discord，在 `.env.prod` 中配置 `HTTP_PROXY`。
-5. 双击 `启动面板.bat`，打开 `http://127.0.0.1:18090`。
+5. 双击 `启动面板.bat`，打开 WRelay 桌面窗口；安装包用户可用桌面或开始菜单快捷方式。
 6. 在面板中登记并启用 Discord 频道、X/Bilibili 来源、QQ 群和私聊用户，然后启动机器人。
 
 详细的 Bot 创建、权限、`group_openid`、频道登记、代理和 RSSHub 配置方式见 [docs/SETUP.md](docs/SETUP.md)。
@@ -167,7 +167,7 @@ WRelay/
 ├─ pyproject.toml            # 项目依赖和 NoneBot 配置
 ├─ .env.example              # 环境变量模板
 ├─ install.bat               # Windows 安装脚本
-├─ 启动面板.bat              # 启动管理面板
+├─ 启动面板.bat              # 启动桌面窗口
 ├─ WRelay.iss                # Inno Setup 安装包定义
 ├─ scripts/
 │  ├─ run_tests.py           # 回归测试统一入口
@@ -205,12 +205,13 @@ WRelay/
 │  ├─ stats.py               # 转发统计
 │  └─ json_io.py              # JSON 原子读写
 ├─ panel/
-│  ├─ 管理面板.pyw            # FastAPI 管理面板与启停协调
+│  ├─ desktop_app.pyw        # WebView2 桌面窗口与托盘
+│  ├─ 管理面板.pyw            # FastAPI 管理服务与启停协调
 │  ├─ backup_restore.py      # 配置备份、校验和恢复回滚
 │  ├─ process_manager.py     # 机器人进程与 PID 管理
 │  ├─ autostart.pyw           # 开机自启入口
 │  ├─ wrelay_panel.ico       # Windows 安装器与快捷方式图标
-│  └─ web/                    # 管理面板前端与品牌 SVG
+│  └─ web/                    # 桌面界面、窗口桥与品牌 SVG
 └─ data/                      # 配置、游标、日志和运行时数据
 ```
 
@@ -220,6 +221,7 @@ WRelay/
 - `nonebot-adapter-discord`
 - `nonebot-adapter-qq`
 - FastAPI / Uvicorn
+- PyWebView / WebView2 / PyStray（Windows 桌面窗口与托盘）
 - httpx
 - RSSHub（X/Twitter、Bilibili RSS 来源）
 

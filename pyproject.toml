@@ -19,6 +19,8 @@ dependencies = [
     "Pillow>=12.0,<13.0",
     "nonebot-adapter-qq>=1.7.0,<2.0.0",
     "nonebot-adapter-discord>=1.1.9,<2.0.0",
+    "pywebview>=6.2.1,<7.0.0",
+    "pystray>=0.19.5,<0.20.0",
 ]
 
 

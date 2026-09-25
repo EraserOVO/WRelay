@@ -76,6 +76,8 @@ FORWARDING_GROUP_MAX = 10
 AUTOSTART_VBS_NAME = "WRelayAutostart.vbs"
 AUTOSTART_FLAG = "--autostart"
 RESTART_FLAG = "--restart"
+DESKTOP_FLAG = "--desktop"
+DESKTOP_RESTART_CALLBACK = None
 
 os.makedirs(LOG_DIR, exist_ok=True)
 
@@ -2647,8 +2649,9 @@ def api_panel_restart():
         return {"ok": False, "msg": localize_user_error(f"启动重启进程失败: {exc}", "启动重启进程失败")}
     _log("面板重启：worker 已拉起，本进程 2 秒后退出")
     # 让 HTTP 响应先返回，再退出当前面板进程
-    threading.Timer(2.0, os._exit, args=(0,)).start()
-    return {"ok": True, "msg": "面板正在重启，请稍候刷新页面"}
+    callback = DESKTOP_RESTART_CALLBACK or (lambda: os._exit(0))
+    threading.Timer(2.0, callback).start()
+    return {"ok": True, "msg": "面板正在重启，请稍候重新打开窗口"}
 
 
 @app.get("/api/bot/loglevel")
@@ -2811,6 +2814,7 @@ def main():
     global _want_running
     autostart = AUTOSTART_FLAG in sys.argv
     restarting = RESTART_FLAG in sys.argv
+    desktop = DESKTOP_FLAG in sys.argv
 
     _log("面板启动 autostart=%s" % autostart)
 
@@ -2838,11 +2842,11 @@ def main():
     else:
         # 正常双击打开
         if panel_alive():
-            # 面板已在运行，只需打开浏览器
-            if not restarting:
+            # 旧浏览器入口继续打开浏览器；桌面入口由单实例窗口接管。
+            if not restarting and not desktop:
                 webbrowser.open("http://%s:%d/" % (PANEL_HOST, PANEL_PORT))
             return
-        if not restarting:
+        if not restarting and not desktop:
             threading.Thread(target=_open_browser, daemon=True).start()
 
     # 面板接管时若机器人已在运行，视为期望运行：看门狗继续守护，崩溃后自动拉起
@@ -2855,8 +2859,8 @@ def main():
         uvicorn.run(app, host=PANEL_HOST, port=PANEL_PORT, log_level="info")
     except Exception as exc:
         _log("面板启动失败: %s" % exc)
-        if not autostart and not restarting:
-            # 双击容错：端口被占（面板已由其它实例启动）时也打开浏览器
+        if not autostart and not restarting and not desktop:
+            # 旧浏览器入口双击容错：端口被占时仍尝试打开页面。
             try:
                 webbrowser.open("http://%s:%d/" % (PANEL_HOST, PANEL_PORT))
             except Exception:

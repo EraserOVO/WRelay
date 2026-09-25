@@ -1124,3 +1124,110 @@
     .cardrow .card#xrssCard, .cardrow .card#bilibiliCard { min-width: 0; }
     .cardrow .card#scheduledMessageCard { min-width: 0; }
   }
+
+  /* 桌面布局：左侧工作区导航与顶部窗口栏。浏览器备用入口复用同一页面。 */
+  body:not(.theme-light) {
+    --bg: #171f2e;
+    --card-bg: #222c3e;
+    --field-bg: #1b2434;
+    --panel-border: #354158;
+    --table-border: #354158;
+    --sec-bg: #2b354a;
+  }
+  body { padding: 34px 0 28px; }
+  body.desktop-host { padding-top: 78px; }
+  .desktop-titlebar {
+    display: none; position: fixed; top: 0; left: 0; right: 0; height: 54px;
+    background: #202a3b; border-bottom: 1px solid #354158; z-index: 100;
+    align-items: stretch; justify-content: space-between;
+  }
+  body.desktop-host .desktop-titlebar { display: flex; }
+  .desktop-title-drag {
+    flex: 1; display: flex; align-items: center; gap: 12px; padding-left: 22px;
+    color: #f1f4ff; font-size: 16px; font-weight: 700; user-select: none;
+  }
+  .desktop-title-drag img, .sidebar-brand img { width: 33px; height: 31px; object-fit: contain; }
+  .desktop-window-controls { display: flex; align-items: stretch; }
+  .desktop-window-controls button {
+    width: 48px; padding: 0; border-radius: 0; background: transparent;
+    color: #e8ecf7; font-size: 21px; font-family: Arial, sans-serif;
+  }
+  .desktop-window-controls button:hover { background: #35415a; opacity: 1; }
+  .desktop-window-controls button:last-child:hover { background: #bf4555; }
+  .desktop-sidebar {
+    position: fixed; z-index: 80; top: 0; bottom: 0; left: 0; width: 238px;
+    background: #202a3b; border-right: 1px solid #354158; padding: 24px 13px;
+    overflow-y: auto;
+  }
+  body.desktop-host .desktop-sidebar { top: 54px; }
+  .sidebar-brand { display: flex; align-items: center; gap: 12px; padding: 0 14px 26px; color: #f1f4ff; font-size: 17px; font-weight: 700; }
+  body.desktop-host .sidebar-brand { display: none; }
+  #pageTabs { display: flex; flex-direction: column; gap: 7px; }
+  #pageTabs .nav-item {
+    width: 100%; min-height: 47px; display: flex; align-items: center; gap: 15px;
+    background: transparent; border: 1px solid transparent; color: #e2e8f4;
+    padding: 9px 14px; border-radius: 11px; text-align: left; font-size: 15px;
+  }
+  #pageTabs .nav-item:hover { background: #303c53; opacity: 1; }
+  #pageTabs .nav-item.active {
+    background: linear-gradient(105deg, #495d9d, #3f4d88); border-color: #6977ba;
+    color: #fff; box-shadow: inset 3px 0 #8199ff;
+  }
+  .nav-icon { width: 21px; font-size: 22px; text-align: center; line-height: 1; color: #bdcaff; }
+  .sidebar-divider { height: 1px; background: #445169; margin: 15px 5px 16px; }
+  body > .page-header, body > .page-content, body > .card {
+    width: auto; max-width: none; margin-left: 270px; margin-right: 28px;
+  }
+  .page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+  .page-header h1 { font-size: 27px; color: var(--fg); margin: 0; }
+  body.theme-light .page-header h1 { color: var(--fg); }
+  #activePageDescription { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+  .page-header-actions { display: flex; gap: 7px; flex: none; }
+  .page-header-actions .iconbtn { background: var(--sec-bg); color: var(--fg); border: 1px solid var(--field-border); }
+  .card { border: 1px solid var(--panel-border); border-radius: 14px; }
+  .card h2 { color: var(--fg); font-size: 17px; }
+  .cardrow .card { min-height: 156px; }
+  #fgBody { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 18px; }
+  #fgBody > .fgtabs, #fgBody > .hint { grid-column: 1 / -1; }
+  #fgBody > .fgsection {
+    min-width: 0; border: 1px solid var(--panel-border); border-radius: 12px;
+    padding: 16px; background: var(--field-bg); margin-top: 0;
+  }
+  #fgBody > .fgsection + .fgsection { border: 1px solid var(--panel-border); margin-top: 0; }
+  #fgBody > .fgsection h3.fgh3 { color: var(--fg); font-size: 15px; font-weight: 700; }
+  #fgBody #chanList { min-width: 760px; }
+  #fgBody #groupList { min-width: 900px; }
+  #fgBody #chanList th:nth-child(2), #fgBody #chanList td:nth-child(2),
+  #fgBody #groupList th:nth-child(2), #fgBody #groupList td:nth-child(2) {
+    width: 54px !important;
+  }
+  #fgBody #chanList td:nth-child(4), #fgBody #groupList td:nth-child(5) {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 16px; }
+  .overview-route {
+    min-height: 104px; display: flex; flex-direction: column; align-items: flex-start;
+    justify-content: center; gap: 12px; padding: 18px 20px; text-align: left;
+    color: var(--fg); background: var(--card-bg); border: 1px solid var(--panel-border); border-radius: 14px;
+  }
+  .overview-route span { font-size: 18px; font-weight: 700; }
+  .overview-route strong { font-size: 13px; font-weight: 500; color: var(--muted); }
+  .recent-message-row { display: flex; align-items: center; gap: 18px; min-height: 44px; }
+  #recentMessageText { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+  #recentMessageTime { flex: none; color: var(--muted); font-size: 13px; }
+  .settings-description { color: var(--muted); font-size: 13px; line-height: 1.7; }
+  .settings-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
+  .settings-actions button { border: 1px solid var(--field-border); }
+  body.theme-light .desktop-sidebar { background: #eef1f8; border-color: #d6ddec; }
+  body.theme-light .sidebar-brand, body.theme-light #pageTabs .nav-item { color: #26314a; }
+  body.theme-light #pageTabs .nav-item.active { color: #fff; }
+  body.theme-light .nav-icon { color: #6677b8; }
+  body.theme-light .desktop-titlebar { background: #eef1f8; border-color: #d6ddec; }
+  body.theme-light .desktop-title-drag, body.theme-light .desktop-window-controls button { color: #26314a; }
+  @media (max-width: 1280px) { #fgBody { grid-template-columns: 1fr; row-gap: 12px; } }
+  @media (max-width: 950px) {
+    .desktop-sidebar { width: 190px; }
+    body > .page-header, body > .page-content, body > .card { margin-left: 214px; margin-right: 20px; }
+    #pageTabs .nav-item { font-size: 13px; gap: 8px; }
+    .overview-grid { grid-template-columns: 1fr; }
+  }

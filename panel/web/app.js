@@ -24,17 +24,17 @@ function openAboutLink(url, label) {
     showAlert("关于作者", label + " 链接还未填写，请在 app.js 顶部的 ABOUT_LINKS 中配置。");
     return;
   }
-  window.open(url, "_blank");
+  openExternal(url);
 }
 
 let settings = null;
-// 主题偏好：夜间/日间模式，持久化到 localStorage，默认日间（仅首次使用/未保存偏好时生效）
+// 主题偏好：夜间/日间模式，持久化到 localStorage，首次使用默认夜间。
 const THEME_KEY = "wrelay_theme";
 const THEME_DARK = "dark";
 const THEME_LIGHT = "light";
-// 面板默认主题：日间。只影响"没有保存过主题偏好"的首次打开；
+// 面板默认主题：夜间。只影响"没有保存过主题偏好"的首次打开；
 // 用户已保存的 dark/light 偏好始终照常恢复，不会被默认值覆盖
-const THEME_DEFAULT = THEME_LIGHT;
+const THEME_DEFAULT = THEME_DARK;
 function applyTheme(theme) {
   document.body.classList.toggle("theme-light", theme === THEME_LIGHT);
   const btn = document.getElementById("btnTheme");
@@ -215,7 +215,7 @@ function localizeUserError(message, fallback) {
   return translated;
 }
 
-// ---------------- 主要界面切换（Discord / X / Bilibili / QQ） ----------------
+// ---------------- 主要界面切换 ----------------
 // 每种转发组合一个独立页面，页面选择持久化到 localStorage（与主题/转发组同方式），
 // 刷新后恢复；默认进入 Discord → QQ（不改变原有使用习惯）。
 // 三个页面共用同一份 settings 对象（整体保存、整体拉取），切换只改可见性，
@@ -224,16 +224,29 @@ const PAGE_STORAGE_KEY = "wrelay_active_page";
 let activePage = "discord";
 try {
   const savedPage = localStorage.getItem(PAGE_STORAGE_KEY);
-  if (savedPage === "x" || savedPage === "bilibili" || savedPage === "qq") activePage = savedPage;
+  if (["overview", "discord", "x", "bilibili", "qq", "settings"].includes(savedPage)) activePage = savedPage;
 } catch (e) {}
 
 function setActivePage(page) {
-  activePage = page === "x" || page === "bilibili" || page === "qq" ? page : "discord";
+  const pageInfo = {
+    overview: ["总览", "查看各转发链路与机器人运行状态"],
+    discord: ["Discord → QQ", "管理频道、接收群与转发组"],
+    x: ["X → QQ", "管理 X 来源、接收群与转发组"],
+    bilibili: ["Bilibili → QQ", "管理 Bilibili 来源、接收群与转发组"],
+    qq: ["QQ → QQ", "管理授权用户的手动转发目标"],
+    settings: ["设置", "机器人配置与维护工具"],
+  };
+  activePage = Object.hasOwn(pageInfo, page) ? page : "discord";
   try { localStorage.setItem(PAGE_STORAGE_KEY, activePage); } catch (e) {}
+  document.getElementById("activePageTitle").textContent = pageInfo[activePage][0];
+  document.getElementById("activePageDescription").textContent = pageInfo[activePage][1];
+  document.getElementById("pageOverview").style.display = activePage === "overview" ? "" : "none";
   document.getElementById("pageDiscord").style.display = activePage === "discord" ? "" : "none";
   document.getElementById("pageX").style.display = activePage === "x" ? "" : "none";
   document.getElementById("pageBilibili").style.display = activePage === "bilibili" ? "" : "none";
   document.getElementById("pageQQ").style.display = activePage === "qq" ? "" : "none";
+  document.getElementById("pageSettings").style.display = activePage === "settings" ? "" : "none";
+  document.getElementById("recentMessageCard").style.display = ["overview", "discord"].includes(activePage) ? "" : "none";
   // 顶部第二张卡按页面切换：Discord → 离线补发；X → X RSS 状态；QQ → 不显示
   const backfillCard = document.getElementById("backfillCard");
   if (backfillCard) backfillCard.style.display = activePage === "discord" ? "" : "none";
@@ -245,6 +258,8 @@ function setActivePage(page) {
   if (scheduledCard) scheduledCard.style.display = activePage === "qq" ? "" : "none";
   document.querySelectorAll('#pageTabs [data-kind="pageTab"]').forEach(function (btn) {
     btn.classList.toggle("active", btn.dataset.page === activePage);
+    if (btn.dataset.page === activePage) btn.setAttribute("aria-current", "page");
+    else btn.removeAttribute("aria-current");
   });
 }
 
@@ -403,6 +418,10 @@ function renderStatus(st) {
   if (stick) el.scrollTop = el.scrollHeight;
   renderTranslationRuntimeStatus(st);
   renderAutostart(document.getElementById("btnAutostart"), st.autostart);
+  document.getElementById("overviewDiscord").textContent = !st.running
+    ? "机器人未运行" : h && h.discord && h.qq ? "Discord 与 QQ 已连接" : "连接状态待恢复";
+  document.getElementById("overviewQQ").textContent = !st.running
+    ? "机器人未运行" : h && h.qq ? "QQ 已连接 · 手动转发" : "QQ 未连接";
 }
 
 function renderTranslationRuntimeStatus(st) {
@@ -1241,7 +1260,7 @@ function renderSettings() {
         (gname ? '<div style="color:var(--fg);font-size:12px;word-break:break-all;">' + escapeHtml(gname) + '</div>' : '') +
       '</td>' +
       '<td style="font-size:12px;">' + escapeHtml(gacc) + '</td>' +
-      '<td class="mono">' + escapeHtml(g.openid) + '</td>' +
+      '<td class="mono" title="' + escapeHtml(g.openid) + '">' + escapeHtml(g.openid) + '</td>' +
       '<td style="text-align:right"><button class="danger rowicon" data-kind="fgGroupRemove" data-id="' + escapeHtml(String(g.openid)) + '">' + SVG_TRASH + '</button></td>';
     gb.appendChild(tr);
   });
@@ -1276,7 +1295,7 @@ function renderSettings() {
         '</span>' +
         (realName ? '<div style="color:var(--name-green);font-size:12px;">' + realNameHtml + '</div>' : '') +
       '</td>' +
-      '<td class="mono">' + escapeHtml(c.id) + '</td>' +
+      '<td class="mono" title="' + escapeHtml(c.id) + '">' + escapeHtml(c.id) + '</td>' +
       '<td><div style="display:flex;gap:4px;justify-content:flex-end;">' +
         '<button class="sec rowicon translation-toggle-icon' + (c.translation_enabled ? ' translation-active' : '') + '" title="翻译设置" aria-label="翻译设置" data-kind="chanTranslation" data-i="' + gi + '">' + SVG_TRANSLATE + '</button>' +
         '<button class="sec rowicon' + (channelFilterActive(c) ? ' filter-active' : '') + '" data-kind="chanFilter" data-i="' + gi + '">' + SVG_FUNNEL + '</button>' +
@@ -1781,6 +1800,7 @@ function renderXStatus(st) {
   }
   badge.textContent = badgeText;
   badge.className = badgeCls;
+  document.getElementById("overviewX").textContent = badgeText + " · 来源 " + srcText;
 
   // 摘要行：正常态一行概况（订阅源 / 上次轮询 / 发现 / 发送）；
   // 异常态只突出错误原因，不再堆叠正常信息。
@@ -1850,6 +1870,7 @@ function renderBilibiliStatus(st) {
   }
   badge.textContent = badgeText;
   badge.className = badgeCls;
+  document.getElementById("overviewBilibili").textContent = badgeText + " · 来源 " + srcText;
 
   const summary = document.getElementById("bilibiliSummary");
   if (summary) {
@@ -1925,6 +1946,7 @@ function messageTraceResult(entry) {
 }
 
 function renderMessageTrace(data) {
+  renderRecentMessage(data);
   const body = document.getElementById("messageTraceBody");
   const summary = document.getElementById("messageTraceSummary");
   if (!body || !summary) return;
@@ -1960,6 +1982,26 @@ function renderMessageTrace(data) {
       '<td><span class="message-trace-result ' + result.cls + '">' + escapeHtml(result.text) + '</span>' + note + '</td>' +
       '</tr>';
   }).join("");
+}
+
+function renderRecentMessage(data) {
+  const badge = document.getElementById("recentMessageResult");
+  const text = document.getElementById("recentMessageText");
+  const time = document.getElementById("recentMessageTime");
+  const entry = data && data.ok !== false && Array.isArray(data.entries) ? data.entries[0] : null;
+  if (!entry) {
+    badge.textContent = "暂无投递";
+    badge.className = "badge off";
+    text.textContent = data && data.ok === false ? "机器人未运行，暂时无法读取投递记录" : "暂无消息记录";
+    time.textContent = "";
+    return;
+  }
+  const result = messageTraceResult(entry);
+  const source = messageTraceSource(entry);
+  badge.textContent = result.text;
+  badge.className = "badge " + (result.cls === "ok" ? "on" : result.cls === "failed" ? "off" : "warn");
+  text.textContent = source.name + " · " + (entry.preview || source.id || "消息投递");
+  time.textContent = messageTraceTime(entry.last_at);
 }
 
 async function openMessageTrace() {
@@ -3696,6 +3738,11 @@ async function saveDiscordConfig() {
 document.addEventListener("click", async function (e) {
   const btn = e.target.closest("button");
   if (!btn) return;
+  if (btn.dataset.settingsTarget) {
+    const target = document.getElementById(btn.dataset.settingsTarget);
+    if (target) target.click();
+    return;
+  }
   if (btn.id === "confirmOk") {
     const fn = confirmAction;
     hideConfirm();
@@ -4021,24 +4068,24 @@ document.addEventListener("click", async function (e) {
     return;
   }
   if (btn.id === "btnQQPlatformX") {
-    window.open("https://q.qq.com/qqbot/dashboard/", "_blank");
+    openExternal("https://q.qq.com/qqbot/dashboard/");
     return;
   }
   if (btn.id === "btnQQPlatformBilibili") {
-    window.open("https://q.qq.com/qqbot/dashboard/", "_blank");
+    openExternal("https://q.qq.com/qqbot/dashboard/");
     return;
   }
   if (btn.id === "btnQQPlatformQQ") {
-    window.open("https://q.qq.com/qqbot/dashboard/", "_blank");
+    openExternal("https://q.qq.com/qqbot/dashboard/");
     return;
   }
   if (btn.id === "btnOpenX") {
     // 与 QQ 开放平台管理页同一新标签页跳转方式
-    window.open("https://x.com/", "_blank");
+    openExternal("https://x.com/");
     return;
   }
   if (btn.id === "btnOpenBilibili") {
-    window.open("https://www.bilibili.com/", "_blank");
+    openExternal("https://www.bilibili.com/");
     return;
   }
   if (btn.id === "btnAddXUser") {
@@ -4140,11 +4187,11 @@ document.addEventListener("click", async function (e) {
     // 用户注册审核：自动发现的 openid 只记录，注册后才进入待审名单
     await openRegistrationReview("users");
   } else if (btn.id === "btnQQPlatform") {
-    window.open("https://q.qq.com/qqbot/dashboard/", "_blank");
+    openExternal("https://q.qq.com/qqbot/dashboard/");
   } else if (btn.id === "btnDiscord") {
-    window.open("https://discord.com/channels/@me", "_blank");
+    openExternal("https://discord.com/channels/@me");
   } else if (btn.id === "btnDiscordDev") {
-    window.open("https://discord.com/developers/home", "_blank");
+    openExternal("https://discord.com/developers/home");
   } else if (btn.id === "btnClearLog") {
     const r = await jpost("/api/bot/log/clear");
     if (!r.ok) showAlert("清空失败", r.msg || "清空失败");

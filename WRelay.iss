@@ -4,7 +4,7 @@
 
 #define MyAppName "WRelay"
 #define MyAppVersion "0.1.0"
-#define MyAppExeName "bot.py"
+#define MyAppExeName "desktop_app.pyw"
 #define SourceRoot "."
 
 [Setup]
@@ -35,6 +35,8 @@ Name: "chinesesimplified"; MessagesFile: "compiler:Default.isl"
 Name: "{app}\data"
 
 [Files]
+; 缺少 WebView2 时由 PrepareToInstall 解压并安装，不复制到应用目录。
+Source: ".runtime\prerequisites\MicrosoftEdgeWebview2Setup.exe"; Flags: dontcopy noencryption
 ; ---- 项目源码 ----
 Source: "bot.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "pyproject.toml"; DestDir: "{app}"; Flags: ignoreversion
@@ -64,14 +66,54 @@ Source: "docs\*"; DestDir: "{app}\docs"; Flags: recursesubdirs ignoreversion
 Source: ".runtime\python\*"; DestDir: "{app}\python"; Flags: recursesubdirs ignoreversion; Excludes: "*.pdb,__pycache__,.git,Lib\site-packages\pip\*,Lib\site-packages\pip-*.dist-info\*,Scripts\*,Lib\venv\*,Lib\ensurepip\*,Lib\idlelib\*,include\*,libs\*"
 
 [Icons]
-Name: "{group}\启动 WRelay 管理面板"; Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\panel\管理面板.pyw"""; WorkingDir: "{app}"; IconFilename: "{app}\panel\wrelay_panel.ico"
+Name: "{group}\启动 WRelay"; Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\panel\desktop_app.pyw"""; WorkingDir: "{app}"; IconFilename: "{app}\panel\wrelay_panel.ico"
 Name: "{group}\卸载 WRelay"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\WRelay管理面板"; Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\panel\管理面板.pyw"""; WorkingDir: "{app}"; IconFilename: "{app}\panel\wrelay_panel.ico"
+Name: "{autodesktop}\WRelay"; Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\panel\desktop_app.pyw"""; WorkingDir: "{app}"; IconFilename: "{app}\panel\wrelay_panel.ico"
 
 [Run]
-Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\panel\管理面板.pyw"""; WorkingDir: "{app}"; Description: "启动 WRelay 管理面板"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\panel\desktop_app.pyw"""; WorkingDir: "{app}"; Description: "启动 WRelay"; Flags: postinstall nowait skipifsilent
 
 [Code]
+function WebView2Available: Boolean;
+var
+  Version: string;
+  Key: string;
+begin
+  Key := 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+  Result :=
+    (RegQueryStringValue(HKLM32, Key, 'pv', Version) and (Version <> '') and (Version <> '0.0.0.0')) or
+    (RegQueryStringValue(HKCU, Key, 'pv', Version) and (Version <> '') and (Version <> '0.0.0.0'));
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ExitCode: Integer;
+  Attempt: Integer;
+begin
+  Result := '';
+  if WebView2Available then
+    exit;
+  try
+    ExtractTemporaryFile('MicrosoftEdgeWebview2Setup.exe');
+    if not Exec(ExpandConstant('{tmp}\MicrosoftEdgeWebview2Setup.exe'), '/silent /install', '', SW_HIDE, ewWaitUntilTerminated, ExitCode) then begin
+      Result := '无法启动 WebView2 Runtime 安装程序。';
+      exit;
+    end;
+    if ExitCode <> 0 then begin
+      Result := 'WebView2 Runtime 安装失败（退出码 ' + IntToStr(ExitCode) + '）。';
+      exit;
+    end;
+    for Attempt := 1 to 20 do begin
+      if WebView2Available then
+        exit;
+      Sleep(500);
+    end;
+    Result := 'WebView2 Runtime 尚未就绪，请重新运行安装程序。';
+  except
+    Result := '无法准备 WebView2 Runtime：' + GetExceptionMessage;
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   EnvPath, ExamplePath: string;

@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-rem 启动 WRelay 管理面板（无控制台窗口，自动打开浏览器）
+rem 启动 WRelay 桌面程序（无控制台窗口）
 rem 使用相对路径，可放在项目任意位置双击运行
 cd /d "%~dp0"
 
@@ -13,11 +13,11 @@ if not defined PYTHONW_EXE (
     exit /b 1
 )
 
-if not exist "panel\管理面板.pyw" (
-    echo [错误] 未找到 panel\管理面板.pyw
+if not exist "panel\desktop_app.pyw" (
+    echo [错误] 未找到 panel\desktop_app.pyw
     pause
     exit /b 1
 )
 
-start "" "%PYTHONW_EXE%" "panel\管理面板.pyw"
+start "" "%PYTHONW_EXE%" "panel\desktop_app.pyw"
 exit /b 0

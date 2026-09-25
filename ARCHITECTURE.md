@@ -37,6 +37,7 @@ WRelay/
 │   ├── stats.py              转发统计（成功/失败/当日条数）
 │   └── json_io.py            JSON 原子读写工具
 ├── panel/
+│   ├── desktop_app.pyw       桌面入口（WebView2 窗口 + 托盘 + 单实例）
 │   ├── 管理面板.pyw           管理面板主程序（FastAPI + 进程管理）
 │   ├── backup_restore.py    配置备份、恢复校验、失败回滚
 │   ├── process_manager.py   机器人进程、PID 文件与存活检测
@@ -46,6 +47,7 @@ WRelay/
 │   └── web/                  面板前端（纯静态 HTML/JS/CSS）
 │       ├── index.html
 │       ├── app.js
+│       ├── desktop.js         原生窗口按钮与外部链接桥接
 │       ├── style.css
 │       └── wrelay-logo.svg
 ├── scripts/                  构建、诊断与验证脚本（如 prepare_runtime.ps1）
@@ -65,7 +67,7 @@ WRelay/
 | **Discord 侧** | 接收 Discord 消息事件、通过 REST API 抓取消息内容、下载媒体 |
 | **QQ 侧** | 向 QQ 群发送消息、接收 QQ 私聊命令、自动发现群/用户 OpenID |
 | **Relay** | 自动把 Discord / X RSS / Bilibili RSS 消息转发到 QQ 群；不做 QQ → Discord 或双向同步 |
-| **管理面板** | 本地 Web 界面，管理群/频道/权限的启用状态、启停机器人、查看日志 |
+| **桌面管理程序** | WebView2 窗口显示本地管理界面；FastAPI 管理配置、机器人启停、日志与看护 |
 | **数据文件** | JSON 格式的配置、去重记录、统计、身份信息，是 bot 与面板之间的 IPC 通道 |
 
 ---
@@ -497,12 +499,15 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 
 ### `panel/web/` — 面板前端独立
 
-- 面板前端从 `管理面板.pyw` 中分离为独立的 `index.html` + `app.js` + `style.css`。
-- 通过 FastAPI `StaticFiles` 挂载，面板重启后刷新浏览器即可看到最新前端。
-- 页眉和浏览器标签页共用 `wrelay-logo.svg`；安装器与 Windows 快捷方式使用 `panel/wrelay_panel.ico`。
+- 面板前端从 `管理面板.pyw` 中分离为独立的 `index.html` + `app.js` + `style.css` + `desktop.js`。
+- FastAPI 通过 `StaticFiles` 提供页面与本地 API；`desktop_app.pyw` 在主线程创建 WebView2 窗口，并在后台运行面板服务。旧浏览器入口可作为备用入口。
+- 第二次启动桌面入口会唤回已有窗口；关闭窗口隐藏到托盘，托盘退出保留机器人进程，但看护随管理程序退出而停止。
+- WebView2 的 JavaScript 桥只暴露窗口操作和外链打开方法；窗口引用等内部状态使用私有属性，避免桥接器递归检查窗口对象。
+- 标题栏与界面共用 `wrelay-logo.svg`；安装器、托盘与 Windows 快捷方式使用 `panel/wrelay_panel.ico`。
+- Discord 频道和 QQ 群表格保留操作列所需宽度；窄卡片内横向滚动，长 ID 省略显示并通过悬停标题查看完整值。
 - 各来源转发组和白名单表格的拖动柄列、启用复选框列固定为 52px、74px，避免表格宽度差异造成左侧错位。
 - 夜间标题使用 `#818DF9`；日间大标题为 `#3C478A`、卡片标题为 `#5E6CD8`。暂停组未选中时使用淡橙色，选中时保留警示橙色，暂停后的播放按钮保持灰色。
-- 桌面端窗口图仅作后续规划参考；当前运行界面仍是本地浏览器面板，概念图保存在 `docs/DESIGN.md`。
+- 桌面端窗口以 `docs/DESIGN.md` 的概念图为视觉参考，原有配置字段和消息链路保持独立。
 - 好处：改 UI 不需要改 Python 代码，也不需要重启面板进程。
 
 ---

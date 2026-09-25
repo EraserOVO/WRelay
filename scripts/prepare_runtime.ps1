@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param()
 
 $ErrorActionPreference = "Stop"
@@ -40,7 +40,7 @@ function Assert-RuntimeReady([string]$pythonPath) {
         throw "Runtime must be Python $pythonVersion; found $actualVersion"
     }
 
-    & $pythonPath -c "import fastapi, httpx, nonebot, uvicorn; import nonebot.adapters.discord, nonebot.adapters.qq; import PIL; print('Bundled runtime dependencies complete')"
+    & $pythonPath -c "import fastapi, httpx, nonebot, uvicorn; import nonebot.adapters.discord, nonebot.adapters.qq; import PIL, pystray, webview, clr; print('Bundled runtime dependencies complete')"
     if ($LASTEXITCODE -ne 0) {
         throw "Bundled runtime dependencies are incomplete"
     }
