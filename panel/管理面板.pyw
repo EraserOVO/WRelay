@@ -1159,6 +1159,86 @@ def api_auth_bootstrap():
     return {"ok": True, "token": PANEL_TOKEN}
 
 
+def _application_version():
+    """从项目元数据读取版本，避免桌面设置页与安装包代码各维护一份。"""
+    metadata_file = os.path.join(PROJECT_ROOT, "pyproject.toml")
+    try:
+        with open(metadata_file, "r", encoding="utf-8") as source:
+            match = re.search(r'(?m)^version\s*=\s*["\']([^"\']+)["\']', source.read())
+        return match.group(1) if match else "未知"
+    except OSError:
+        return "未知"
+
+
+def _version_key(value):
+    match = re.match(r"^[vV]?(\d+(?:\.\d+)*)(?:[-+][0-9A-Za-z.-]+)?$", str(value or "").strip())
+    if not match:
+        return None
+    try:
+        parts = [int(part) for part in match.group(1).split(".")]
+        while len(parts) > 1 and parts[-1] == 0:
+            parts.pop()
+        return tuple(parts)
+    except ValueError:
+        return None
+
+
+@app.get("/api/app/info")
+def api_app_info():
+    return {
+        "name": "WRelay",
+        "version": _application_version(),
+        "release_url": "https://github.com/EraserOVO/WRelay/releases/latest",
+    }
+
+
+@app.get("/api/app/update-check")
+def api_app_update_check():
+    """只读查询 GitHub 最新稳定发行版；不下载、不安装更新。"""
+    import urllib.error
+    import urllib.request
+
+    current_version = _application_version()
+    request = urllib.request.Request(
+        "https://api.github.com/repos/EraserOVO/WRelay/releases/latest",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "WRelay-Desktop/" + current_version,
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            release = json.loads(response.read().decode("utf-8"))
+        if not isinstance(release, dict):
+            return {"ok": False, "msg": "GitHub 返回的发布信息格式无效，请稍后重试。"}
+        latest_version = str(release.get("tag_name") or "").strip()
+        current_key = _version_key(current_version)
+        latest_key = _version_key(latest_version)
+        if not latest_version or current_key is None or latest_key is None:
+            return {"ok": False, "msg": "发布版本号格式无法识别，请前往项目发布页查看。"}
+        release_url = str(release.get("html_url") or "")
+        if not release_url.startswith("https://github.com/EraserOVO/WRelay/releases/"):
+            release_url = "https://github.com/EraserOVO/WRelay/releases/latest"
+        return {
+            "ok": True,
+            "current_version": current_version,
+            "latest_version": latest_version.lstrip("vV"),
+            "update_available": latest_key > current_key,
+            "release_url": release_url,
+            "published_at": release.get("published_at"),
+        }
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            message = "项目还没有公开的稳定发行版。"
+        else:
+            message = "GitHub 返回 HTTP %d，请稍后重试。" % exc.code
+        return {"ok": False, "msg": message}
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return {"ok": False, "msg": "连接 GitHub 失败，请检查网络后重试。"}
+    except (ValueError, TypeError):
+        return {"ok": False, "msg": "无法读取 GitHub 发布信息，请稍后重试。"}
+
+
 @app.get("/api/status")
 def api_status():
     st = bot_status()

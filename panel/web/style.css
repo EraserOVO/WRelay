@@ -1187,6 +1187,8 @@
   .card { border: 1px solid var(--panel-border); border-radius: 14px; }
   .card h2 { color: var(--fg); font-size: 17px; }
   .cardrow .card { min-height: 156px; }
+  .desktop-advanced-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  body.desktop-host[data-active-page="overview"] .desktop-advanced-actions { display: none; }
   #fgBody { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 18px; }
   #fgBody > .fgtabs, #fgBody > .hint { grid-column: 1 / -1; }
   #fgBody > .fgsection {
@@ -1204,19 +1206,54 @@
   #fgBody #chanList td:nth-child(4), #fgBody #groupList td:nth-child(5) {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  .overview-intro { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 3px 0 16px; }
+  .overview-kicker { color: #91a5ff; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
+  .overview-intro p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+  .overview-settings-link { display: inline-flex; align-items: center; gap: 10px; }
+  .overview-settings-link span { font-size: 20px; line-height: 1; }
   .overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 16px; }
   .overview-route {
-    min-height: 104px; display: flex; flex-direction: column; align-items: flex-start;
-    justify-content: center; gap: 12px; padding: 18px 20px; text-align: left;
+    min-width: 0; min-height: 122px; display: grid; grid-template-columns: 46px minmax(0, 1fr) 18px;
+    align-items: center; gap: 14px; padding: 18px 19px; text-align: left;
     color: var(--fg); background: var(--card-bg); border: 1px solid var(--panel-border); border-radius: 14px;
+    transition: border-color .15s ease, transform .15s ease, background .15s ease;
   }
-  .overview-route span { font-size: 18px; font-weight: 700; }
-  .overview-route strong { font-size: 13px; font-weight: 500; color: var(--muted); }
+  .overview-route:hover { border-color: #7187d8; background: color-mix(in srgb, var(--card-bg) 88%, #637de5); transform: translateY(-1px); opacity: 1; }
+  .overview-route-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 13px; background: #39486b; color: #dce4ff; font-size: 22px; font-weight: 700; }
+  .x-icon { background: #303b4e; }
+  .bili-icon { background: #4a365e; color: #e9d7ff; }
+  .qq-icon { background: #304b61; color: #d1f0ff; }
+  .overview-route-copy { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+  .overview-route-copy strong { color: var(--fg); font-size: 16px; }
+  .overview-route-copy b { overflow: hidden; color: #aebfff; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+  .overview-route-copy small { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+  .overview-route-arrow { color: #9eadd8; font-size: 25px; line-height: 1; }
+  body.theme-light .overview-kicker { color: #5869bd; }
+  body.theme-light .overview-route-copy b { color: #5869bd; }
   .recent-message-row { display: flex; align-items: center; gap: 18px; min-height: 44px; }
   #recentMessageText { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
   #recentMessageTime { flex: none; color: var(--muted); font-size: 13px; }
-  .settings-description { color: var(--muted); font-size: 13px; line-height: 1.7; }
-  .settings-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
+  .desktop-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
+  .settings-card { min-width: 0; margin: 0 0 14px; padding: 20px; }
+  .settings-card h2 { margin: 0 0 12px; }
+  .settings-card-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+  .settings-description { margin: 5px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+  .app-version { flex: none; padding: 7px 11px; border: 1px solid var(--panel-border); border-radius: 999px; background: var(--field-bg); color: var(--fg); font-size: 13px; font-weight: 700; }
+  .update-check-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; padding: 15px; border: 1px solid var(--panel-border); border-radius: 11px; background: var(--field-bg); }
+  .update-check-row > div:first-child { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+  .update-check-row strong { color: var(--fg); font-size: 14px; }
+  .update-check-row small, .settings-select-row small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+  .update-actions { display: flex; flex: none; align-items: center; gap: 8px; }
+  .update-actions button, .release-link { border: 1px solid var(--field-border); white-space: nowrap; }
+  .release-link { display: inline-flex; align-items: center; text-decoration: none; }
+  .settings-footnote { margin: 11px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+  .settings-select-row, .settings-note-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 58px; padding: 10px 0; border-top: 1px solid var(--panel-border); }
+  .settings-select-row > span { display: flex; flex-direction: column; gap: 4px; }
+  .settings-select-row strong, .settings-note-row strong { color: var(--fg); font-size: 13px; }
+  .settings-select-row select { flex: none; width: 130px; }
+  .settings-note-row { align-items: flex-start; }
+  .settings-note-row span { max-width: 68%; color: var(--muted); font-size: 12px; line-height: 1.6; text-align: right; }
+  .settings-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 0; }
   .settings-actions button { border: 1px solid var(--field-border); }
   body.theme-light .desktop-sidebar { background: #eef1f8; border-color: #d6ddec; }
   body.theme-light .sidebar-brand, body.theme-light #pageTabs .nav-item { color: #26314a; }
@@ -1230,4 +1267,12 @@
     body > .page-header, body > .page-content, body > .card { margin-left: 214px; margin-right: 20px; }
     #pageTabs .nav-item { font-size: 13px; gap: 8px; }
     .overview-grid { grid-template-columns: 1fr; }
+    .desktop-settings-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 620px) {
+    .overview-intro, .update-check-row { align-items: flex-start; flex-direction: column; }
+    .update-actions { flex-wrap: wrap; }
+    .overview-route { min-height: 108px; padding: 14px; }
+    .settings-note-row { flex-direction: column; gap: 6px; }
+    .settings-note-row span { max-width: none; text-align: left; }
   }

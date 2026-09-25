@@ -137,7 +137,7 @@ def main():
         api = DesktopApi()
         window = webview.create_window(
             WINDOW_TITLE,
-            "http://%s:%d/" % (panel.PANEL_HOST, panel.PANEL_PORT),
+            "http://%s:%d/?desktop=1" % (panel.PANEL_HOST, panel.PANEL_PORT),
             width=1360,
             height=880,
             min_size=(960, 640),

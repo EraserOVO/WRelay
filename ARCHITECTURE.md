@@ -47,7 +47,7 @@ WRelay/
 │   └── web/                  面板前端（纯静态 HTML/JS/CSS）
 │       ├── index.html
 │       ├── app.js
-│       ├── desktop.js         原生窗口按钮与外部链接桥接
+│       ├── desktop.js         桌面入口标记、原生窗口按钮与外部链接桥接
 │       ├── style.css
 │       └── wrelay-logo.svg
 ├── scripts/                  构建、诊断与验证脚本（如 prepare_runtime.ps1）
@@ -501,6 +501,8 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 
 - 面板前端从 `管理面板.pyw` 中分离为独立的 `index.html` + `app.js` + `style.css` + `desktop.js`。
 - FastAPI 通过 `StaticFiles` 提供页面与本地 API；`desktop_app.pyw` 在主线程创建 WebView2 窗口，并在后台运行面板服务。旧浏览器入口可作为备用入口。
+- 桌面入口使用 `?desktop=1` 标记，独立保存桌面导航状态并首次进入运行总览；浏览器备用入口首次进入默认打开 Discord → QQ。
+- `/api/app/info` 从 `pyproject.toml` 读取当前应用版本；`/api/app/update-check` 只读查询 GitHub 最新稳定发行版并返回发布页，不下载或安装更新。
 - 第二次启动桌面入口会唤回已有窗口；关闭窗口隐藏到托盘，托盘退出保留机器人进程，但看护随管理程序退出而停止。
 - WebView2 的 JavaScript 桥只暴露窗口操作和外链打开方法；窗口引用等内部状态使用私有属性，避免桥接器递归检查窗口对象。
 - 标题栏与界面共用 `wrelay-logo.svg`；安装器、托盘与 Windows 快捷方式使用 `panel/wrelay_panel.ico`。

@@ -1,6 +1,7 @@
 /* 原生窗口与浏览器备用入口共用页面；桌面桥只负责窗口和外部链接。 */
 function markDesktopHost() {
-  if (window.pywebview && window.pywebview.api) {
+  if (new URLSearchParams(window.location.search).get("desktop") === "1"
+      || (window.pywebview && window.pywebview.api)) {
     document.body.classList.add("desktop-host");
   }
 }

@@ -41,6 +41,8 @@ function applyTheme(theme) {
   if (btn) {
     btn.innerHTML = theme === THEME_LIGHT ? SVG_SUN : SVG_MOON;
   }
+  const themeMode = document.getElementById("themeMode");
+  if (themeMode) themeMode.value = theme === THEME_LIGHT ? THEME_LIGHT : THEME_DARK;
   try { localStorage.setItem(THEME_KEY, theme); } catch (e) {}
 }
 function toggleTheme() {
@@ -216,12 +218,13 @@ function localizeUserError(message, fallback) {
 }
 
 // ---------------- 主要界面切换 ----------------
-// 每种转发组合一个独立页面，页面选择持久化到 localStorage（与主题/转发组同方式），
-// 刷新后恢复；默认进入 Discord → QQ（不改变原有使用习惯）。
+// 桌面端首次进入运行总览；浏览器备用入口沿用原 Discord 页面默认值。
 // 三个页面共用同一份 settings 对象（整体保存、整体拉取），切换只改可见性，
 // 不会丢失任何已保存/未保存的修改。
-const PAGE_STORAGE_KEY = "wrelay_active_page";
-let activePage = "discord";
+const IS_DESKTOP_HOST = new URLSearchParams(window.location.search).get("desktop") === "1";
+if (IS_DESKTOP_HOST) document.body.classList.add("desktop-host");
+const PAGE_STORAGE_KEY = IS_DESKTOP_HOST ? "wrelay_desktop_active_page" : "wrelay_active_page";
+let activePage = IS_DESKTOP_HOST ? "overview" : "discord";
 try {
   const savedPage = localStorage.getItem(PAGE_STORAGE_KEY);
   if (["overview", "discord", "x", "bilibili", "qq", "settings"].includes(savedPage)) activePage = savedPage;
@@ -234,9 +237,10 @@ function setActivePage(page) {
     x: ["X → QQ", "管理 X 来源、接收群与转发组"],
     bilibili: ["Bilibili → QQ", "管理 Bilibili 来源、接收群与转发组"],
     qq: ["QQ → QQ", "管理授权用户的手动转发目标"],
-    settings: ["设置", "机器人配置与维护工具"],
+    settings: ["设置", "应用偏好、版本与更新"],
   };
   activePage = Object.hasOwn(pageInfo, page) ? page : "discord";
+  document.body.dataset.activePage = activePage;
   try { localStorage.setItem(PAGE_STORAGE_KEY, activePage); } catch (e) {}
   document.getElementById("activePageTitle").textContent = pageInfo[activePage][0];
   document.getElementById("activePageDescription").textContent = pageInfo[activePage][1];
@@ -246,6 +250,10 @@ function setActivePage(page) {
   document.getElementById("pageBilibili").style.display = activePage === "bilibili" ? "" : "none";
   document.getElementById("pageQQ").style.display = activePage === "qq" ? "" : "none";
   document.getElementById("pageSettings").style.display = activePage === "settings" ? "" : "none";
+  const runtimeCards = document.querySelector(".cardrow");
+  if (runtimeCards) runtimeCards.style.display = activePage === "settings" ? "none" : "";
+  const logCard = document.getElementById("logCard");
+  if (logCard) logCard.style.display = ["overview", "settings"].includes(activePage) ? "none" : "";
   document.getElementById("recentMessageCard").style.display = ["overview", "discord"].includes(activePage) ? "" : "none";
   // 顶部第二张卡按页面切换：Discord → 离线补发；X → X RSS 状态；QQ → 不显示
   const backfillCard = document.getElementById("backfillCard");
@@ -261,6 +269,80 @@ function setActivePage(page) {
     if (btn.dataset.page === activePage) btn.setAttribute("aria-current", "page");
     else btn.removeAttribute("aria-current");
   });
+  renderOverviewCounts();
+}
+
+function enabledTotal(field) {
+  const items = settings && Array.isArray(settings[field]) ? settings[field] : [];
+  return {
+    enabled: items.filter(function (item) { return item && item.enabled !== false; }).length,
+    total: items.length,
+  };
+}
+
+function renderOverviewCounts() {
+  const groups = enabledTotal("qq_group_openids");
+  const users = enabledTotal("qq_user_openids");
+  const routes = [
+    ["overviewDiscordMeta", enabledTotal("discord_channels"), "频道"],
+    ["overviewXMeta", enabledTotal("x_rss_sources"), "来源"],
+    ["overviewBilibiliMeta", enabledTotal("bilibili_sources"), "来源"],
+  ];
+  routes.forEach(function (route) {
+    const el = document.getElementById(route[0]);
+    if (el) el.textContent = "启用" + route[2] + " " + route[1].enabled + "/" + route[1].total
+      + " · 接收群 " + groups.enabled + "/" + groups.total;
+  });
+  const qqMeta = document.getElementById("overviewQQMeta");
+  if (qqMeta) qqMeta.textContent = "授权用户 " + users.enabled + "/" + users.total
+    + " · 目标群 " + groups.enabled + "/" + groups.total;
+}
+
+async function loadAppInfo() {
+  const versionEl = document.getElementById("appVersion");
+  if (!versionEl) return;
+  try {
+    const info = await jget("/api/app/info");
+    versionEl.textContent = info && info.version && info.version !== "未知" ? "v" + info.version : "版本未知";
+  } catch (err) {
+    versionEl.textContent = "版本信息不可用";
+  }
+}
+
+async function checkForUpdates() {
+  const button = document.getElementById("btnCheckUpdates");
+  const status = document.getElementById("updateStatus");
+  const detail = document.getElementById("updateDetail");
+  const releaseLink = document.getElementById("btnOpenRelease");
+  if (!button || !status || !detail || !releaseLink) return;
+  button.disabled = true;
+  releaseLink.href = "https://github.com/EraserOVO/WRelay/releases/latest";
+  releaseLink.textContent = "查看发布页";
+  status.textContent = "正在检查…";
+  detail.textContent = "正在连接 GitHub 官方发布页。";
+  try {
+    const result = await jget("/api/app/update-check");
+    if (!result || !result.ok) throw new Error((result && result.msg) || "暂时无法检查更新");
+    const current = String(result.current_version || "未知");
+    const latest = String(result.latest_version || "未知");
+    if (result.update_available) {
+      status.textContent = "发现新版本 v" + latest;
+      detail.textContent = "当前版本 v" + current + " · 可查看更新说明并下载安装。";
+      const url = String(result.release_url || "");
+      if (/^https:\/\/github\.com\/EraserOVO\/WRelay\/releases\//i.test(url)) {
+        releaseLink.href = url;
+        releaseLink.textContent = "查看新版本";
+      }
+    } else {
+      status.textContent = "当前已是最新版本";
+      detail.textContent = "当前版本 v" + current + " · 最新稳定版 v" + latest + "。";
+    }
+  } catch (err) {
+    status.textContent = "检查更新失败";
+    detail.textContent = err && err.message ? err.message : "请检查网络后重试，也可以打开项目发布页查看。";
+  } finally {
+    button.disabled = false;
+  }
 }
 
 let panelToken = "";
@@ -357,14 +439,14 @@ function renderStatus(st) {
   qqBotStatusKnown = !!(h && Array.isArray(h.qq_bots));
   connectedQQBotIds = qqBotStatusKnown ? h.qq_bots.map(String) : [];
   renderQQBotWorkspace();
+  const selectedBot = currentQQBotId();
+  const selectedBotConnected = selectedBot
+    ? (qqBotStatusKnown ? connectedQQBotIds.includes(selectedBot) : !!(h && h.qq))
+    : !!(h && h.qq);
   if (st.running) {
     document.getElementById("btnStart").disabled = true;
     document.getElementById("btnStop").disabled = false;
     document.getElementById("btnRestart").disabled = false;
-    const selectedBot = currentQQBotId();
-    const selectedBotConnected = selectedBot
-      ? (qqBotStatusKnown ? connectedQQBotIds.includes(selectedBot) : !!(h && h.qq))
-      : !!(h && h.qq);
     if (activePage === "x" || activePage === "qq") {
       // X → QQ / QQ → QQ 页面只关心 QQ 连接状态，不显示无关的 Discord 状态。
       if (h && selectedBotConnected) {
@@ -419,9 +501,14 @@ function renderStatus(st) {
   renderTranslationRuntimeStatus(st);
   renderAutostart(document.getElementById("btnAutostart"), st.autostart);
   document.getElementById("overviewDiscord").textContent = !st.running
-    ? "机器人未运行" : h && h.discord && h.qq ? "Discord 与 QQ 已连接" : "连接状态待恢复";
+    ? "机器人未运行"
+    : h && h.discord && selectedBotConnected ? "Discord 与当前 QQ Bot 已连接"
+      : h && h.discord ? "当前 QQ Bot 未连接"
+        : h ? "Discord 未连接" : "机器人运行中 · 连接状态待恢复";
   document.getElementById("overviewQQ").textContent = !st.running
-    ? "机器人未运行" : h && h.qq ? "QQ 已连接 · 手动转发" : "QQ 未连接";
+    ? "机器人未运行"
+    : h && selectedBotConnected ? "QQ 已连接 · 手动转发可用"
+      : h ? (selectedBot ? "当前 QQ Bot 未连接" : "QQ 未连接") : "连接状态待恢复";
 }
 
 function renderTranslationRuntimeStatus(st) {
@@ -444,7 +531,14 @@ function renderAutostart(btn, on) {
   var icon = on
     ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
     : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
-  btn.innerHTML = icon + "<span>开机自启</span>";
+  btn.innerHTML = icon + "<span>随 Windows 启动</span>";
+  const settingsButton = document.getElementById("btnSettingsAutostart");
+  if (settingsButton) {
+    settingsButton.dataset.on = on ? "1" : "0";
+    settingsButton.textContent = "机器人随 Windows 启动 · " + (on ? "已开启" : "已关闭");
+    settingsButton.setAttribute("aria-pressed", on ? "true" : "false");
+    settingsButton.disabled = false;
+  }
 }
 
 // 离线补发开关按钮：与开机自启同款（√/× SVG + 文字），data-on 记录状态供点击切换
@@ -3738,8 +3832,8 @@ async function saveDiscordConfig() {
 document.addEventListener("click", async function (e) {
   const btn = e.target.closest("button");
   if (!btn) return;
-  if (btn.dataset.settingsTarget) {
-    const target = document.getElementById(btn.dataset.settingsTarget);
+  if (btn.dataset.actionTarget) {
+    const target = document.getElementById(btn.dataset.actionTarget);
     if (target) target.click();
     return;
   }
@@ -4240,11 +4334,18 @@ document.addEventListener("click", async function (e) {
   } else if (btn.id === "btnRestart") {
     await runBotAction("/api/bot/restart", "重启失败", "重启机器人失败");
     await sleep(1500); await refreshStatus();
-  } else if (btn.id === "btnAutostart") {
-    const enabled = btn.dataset.on !== "1";
-    const r = await jpost("/api/autostart/set", {enabled: enabled});
-    if (!r.ok) showAlert("设置失败", "设置开机自启失败");
-    renderAutostart(btn, !!r.enabled);
+  } else if (btn.id === "btnAutostart" || btn.id === "btnSettingsAutostart") {
+    const stateButton = document.getElementById("btnAutostart");
+    const enabled = stateButton.dataset.on !== "1";
+    btn.disabled = true;
+    stateButton.disabled = true;
+    let r;
+    try { r = await jpost("/api/autostart/set", {enabled: enabled}); }
+    catch (err) { r = {ok: false}; }
+    if (!r || !r.ok) showAlert("设置失败", "设置机器人随 Windows 启动失败");
+    renderAutostart(stateButton, r && r.ok ? !!r.enabled : stateButton.dataset.on === "1");
+    stateButton.disabled = false;
+    btn.disabled = false;
   } else if (btn.id === "btnBackfillToggle") {
     settings.backfill_enabled = btn.dataset.on !== "1";
     await saveAndReload();
@@ -4262,6 +4363,8 @@ document.addEventListener("click", async function (e) {
       source.translation_enabled = enabled;
     });
     await saveAndReload();
+  } else if (btn.id === "btnCheckUpdates") {
+    await checkForUpdates();
   } else if (btn.id === "btnAbout") {
     document.getElementById("aboutModal").style.display = "flex";
   } else if (btn.id === "aboutQq") {
@@ -4292,6 +4395,10 @@ document.addEventListener("click", async function (e) {
 
 document.addEventListener("change", async function (e) {
   const el = e.target;
+  if (el.id === "themeMode") {
+    applyTheme(el.value === THEME_LIGHT ? THEME_LIGHT : THEME_DARK);
+    return;
+  }
   if (el.id === "aiProfileSelect") {
     if (aiProfileDraft) {
       captureAiApiKeyDraft();
@@ -4648,14 +4755,16 @@ async function init() {
   // 轮询定时器只创建一套，避免 /api/status → /api/health 出现多重轮询。
   if (pollingStarted) return;
   pollingStarted = true;
-  // 恢复上一次选择的界面（默认 Discord → QQ）
+  // 桌面端默认总览，浏览器备用入口默认 Discord → QQ；各自单独记忆页面。
   setActivePage(activePage);
   try {
     settings = await jget("/api/settings");
     const qqConfig = await jget("/api/bot/qq-config");
     qqBotIds = qqConfig && qqConfig.ok && Array.isArray(qqConfig.bot_ids) ? qqConfig.bot_ids.map(String) : [];
     renderSettings();
+    renderOverviewCounts();
   } catch (err) { /* ignore */ }
+  await loadAppInfo();
   await refreshChannelNames();
   await refreshStatus();
   setInterval(refreshStatus, 3000);

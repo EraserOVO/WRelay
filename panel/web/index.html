@@ -20,7 +20,7 @@
     <div class="sidebar-brand"><img src="/wrelay-logo.svg" alt="" aria-hidden="true">WRelay</div>
     <nav id="pageTabs" aria-label="主要页面">
       <button type="button" class="nav-item" data-kind="pageTab" data-page="overview"><span class="nav-icon">⌂</span>总览</button>
-      <button type="button" class="nav-item active" data-kind="pageTab" data-page="discord"><span class="nav-icon">◉</span>Discord → QQ</button>
+      <button type="button" class="nav-item" data-kind="pageTab" data-page="discord"><span class="nav-icon">◉</span>Discord → QQ</button>
       <button type="button" class="nav-item" data-kind="pageTab" data-page="x"><span class="nav-icon">↗</span>X → QQ</button>
       <button type="button" class="nav-item" data-kind="pageTab" data-page="bilibili"><span class="nav-icon">▣</span>Bilibili → QQ</button>
       <button type="button" class="nav-item" data-kind="pageTab" data-page="qq"><span class="nav-icon">⇄</span>QQ → QQ</button>
@@ -40,15 +40,6 @@
     </div>
   </div>
 
-  <div id="pageOverview" class="page-content" style="display:none">
-    <div class="overview-grid">
-      <button type="button" class="overview-route" data-kind="pageTab" data-page="discord"><span>Discord → QQ</span><strong id="overviewDiscord">检测中…</strong></button>
-      <button type="button" class="overview-route" data-kind="pageTab" data-page="x"><span>X → QQ</span><strong id="overviewX">查看来源与转发组</strong></button>
-      <button type="button" class="overview-route" data-kind="pageTab" data-page="bilibili"><span>Bilibili → QQ</span><strong id="overviewBilibili">查看来源与转发组</strong></button>
-      <button type="button" class="overview-route" data-kind="pageTab" data-page="qq"><span>QQ → QQ</span><strong id="overviewQQ">授权用户手动转发</strong></button>
-    </div>
-  </div>
-
   <div class="cardrow page-content">
     <div class="card">
       <h2 style="display:flex;align-items:center;gap:6px;">机器人状态 <button class="hintbtn" data-hint="managedHint" data-title="机器人状态">?</button></h2>
@@ -62,10 +53,12 @@
         <button id="btnStart" class="panel-action-icon" type="button" title="启动机器人" aria-label="启动机器人"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 5 11 7-11 7z"/></svg></button>
         <button id="btnStop" class="danger panel-action-icon" type="button" title="停止机器人" aria-label="停止机器人"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg></button>
         <button id="btnRestart" class="sec panel-action-icon" type="button" title="重启机器人" aria-label="重启机器人"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></button>
-        <button id="btnBackupRestore" class="sec panel-action-icon" type="button" title="安全备份与恢复" aria-label="安全备份与恢复"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M14 3v5h5M8 13h8M8 17h8"/></svg></button>
-        <button id="btnOpenDiagnostic" class="sec panel-action-icon" type="button" title="连接诊断" aria-label="连接诊断"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M12 11v5M9.5 13.5h5"/></svg></button>
-        <button id="btnFailureNotificationToggle" class="sec" type="button"><span>失败通知</span></button>
-        <button id="btnAutostart" class="sec"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg><span>开机自启</span></button>
+        <span class="desktop-advanced-actions">
+          <button id="btnBackupRestore" class="sec panel-action-icon" type="button" title="安全备份与恢复" aria-label="安全备份与恢复"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M14 3v5h5M8 13h8M8 17h8"/></svg></button>
+          <button id="btnOpenDiagnostic" class="sec panel-action-icon" type="button" title="连接诊断" aria-label="连接诊断"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M12 11v5M9.5 13.5h5"/></svg></button>
+          <button id="btnFailureNotificationToggle" class="sec" type="button"><span>失败通知</span></button>
+          <button id="btnAutostart" class="sec"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg><span>随 Windows 启动</span></button>
+        </span>
       </div>
       <div class="hint" id="managedHint" style="display:none"></div>
     </div>
@@ -140,6 +133,38 @@
         <button id="btnScheduledMessageEdit" class="rowicon sec" type="button" title="管理定时消息" aria-label="管理定时消息"></button>
         <button id="btnScheduledMessageToggle" class="sec" type="button"><span>启用定时发送</span></button>
       </div>
+    </div>
+  </div>
+
+  <div id="pageOverview" class="page-content" style="display:none">
+    <div class="overview-intro">
+      <div>
+        <span class="overview-kicker">运行概况</span>
+        <p>查看转发服务状态，选择一条链路继续管理。</p>
+      </div>
+      <button type="button" class="sec overview-settings-link" data-kind="pageTab" data-page="settings">桌面端设置 <span aria-hidden="true">›</span></button>
+    </div>
+    <div class="overview-grid">
+      <button type="button" class="overview-route" data-kind="pageTab" data-page="discord">
+        <span class="overview-route-icon discord-icon" aria-hidden="true">◉</span>
+        <span class="overview-route-copy"><strong>Discord → QQ</strong><b id="overviewDiscord">检测中…</b><small id="overviewDiscordMeta">正在读取频道和群配置</small></span>
+        <span class="overview-route-arrow" aria-hidden="true">›</span>
+      </button>
+      <button type="button" class="overview-route" data-kind="pageTab" data-page="x">
+        <span class="overview-route-icon x-icon" aria-hidden="true">𝕏</span>
+        <span class="overview-route-copy"><strong>X → QQ</strong><b id="overviewX">等待状态</b><small id="overviewXMeta">正在读取来源和群配置</small></span>
+        <span class="overview-route-arrow" aria-hidden="true">›</span>
+      </button>
+      <button type="button" class="overview-route" data-kind="pageTab" data-page="bilibili">
+        <span class="overview-route-icon bili-icon" aria-hidden="true">▣</span>
+        <span class="overview-route-copy"><strong>Bilibili → QQ</strong><b id="overviewBilibili">等待状态</b><small id="overviewBilibiliMeta">正在读取来源和群配置</small></span>
+        <span class="overview-route-arrow" aria-hidden="true">›</span>
+      </button>
+      <button type="button" class="overview-route" data-kind="pageTab" data-page="qq">
+        <span class="overview-route-icon qq-icon" aria-hidden="true">⇄</span>
+        <span class="overview-route-copy"><strong>QQ → QQ</strong><b id="overviewQQ">授权用户手动转发</b><small id="overviewQQMeta">只响应已授权用户的手动转发</small></span>
+        <span class="overview-route-arrow" aria-hidden="true">›</span>
+      </button>
     </div>
   </div>
 
@@ -456,23 +481,54 @@
   </div>
 
   <div class="card page-content" id="recentMessageCard" style="display:none">
-    <h2>最近消息</h2>
+    <h2 style="display:flex;align-items:center;justify-content:space-between;gap:10px;">最近消息 <button type="button" class="sec" data-action-target="btnOpenMessageTrace">更多 ›</button></h2>
     <div class="recent-message-row"><span id="recentMessageResult" class="badge off">暂无投递</span><span id="recentMessageText">暂无消息记录</span><time id="recentMessageTime"></time></div>
   </div>
 
   <div id="pageSettings" class="page-content" style="display:none">
-    <div class="card">
-      <h2>设置与维护</h2>
-      <p class="settings-description">机器人凭据、翻译服务、开机自启和配置备份。</p>
-      <div class="settings-actions">
-        <button type="button" class="sec" data-settings-target="btnDiscordConfig">Discord Bot 配置</button>
-        <button type="button" class="sec" data-settings-target="btnQQConfig">QQ Bot 配置</button>
-        <button type="button" class="sec" data-settings-target="btnTranslationConfig">翻译服务配置</button>
-        <button type="button" class="sec" data-settings-target="btnAutostart">开机自启</button>
-        <button type="button" class="sec" data-settings-target="btnBackupRestore">备份与恢复</button>
-        <button type="button" class="sec" data-settings-target="btnOpenDiagnostic">连接诊断</button>
-      </div>
-      <p class="settings-description">关闭窗口会隐藏到托盘。托盘菜单选择退出后，机器人继续运行，管理程序不再自动看护。</p>
+    <div class="desktop-settings-grid">
+      <section class="card settings-card app-info-card">
+        <div class="settings-card-heading">
+          <div><h2>WRelay 桌面端</h2><p class="settings-description">应用版本与发行信息</p></div>
+          <span id="appVersion" class="app-version">读取中…</span>
+        </div>
+        <div class="update-check-row" aria-live="polite">
+          <div><strong id="updateStatus">尚未检查更新</strong><small id="updateDetail">检查 GitHub 官方发布页上的最新稳定版本。</small></div>
+          <div class="update-actions">
+            <button id="btnCheckUpdates" class="sec" type="button">检查更新</button>
+            <a id="btnOpenRelease" class="sec release-link" href="https://github.com/EraserOVO/WRelay/releases/latest" target="_blank" rel="noopener noreferrer">查看发布页</a>
+          </div>
+        </div>
+        <p class="settings-footnote">检查更新不会自动下载或安装。发现新版本后，可前往发布页查看说明并下载安装包。</p>
+      </section>
+
+      <section class="card settings-card">
+        <h2>外观与窗口</h2>
+        <label class="settings-select-row" for="themeMode"><span><strong>界面主题</strong><small>保存在本机，不改动机器人配置</small></span>
+          <select id="themeMode"><option value="dark">深色</option><option value="light">浅色</option></select>
+        </label>
+        <div class="settings-note-row"><strong>关闭窗口</strong><span>关闭后收起到系统托盘，机器人继续运行；从托盘退出管理程序后，机器人仍会运行。</span></div>
+      </section>
+
+      <section class="card settings-card">
+        <h2>机器人连接与服务</h2>
+        <p class="settings-description">这些操作管理机器人账号和转发服务配置。</p>
+        <div class="settings-actions">
+          <button type="button" class="sec" data-action-target="btnDiscordConfig">Discord Bot 配置</button>
+          <button type="button" class="sec" data-action-target="btnQQConfig">QQ Bot 配置</button>
+          <button type="button" class="sec" data-action-target="btnTranslationConfig">翻译服务配置</button>
+        </div>
+      </section>
+
+      <section class="card settings-card">
+        <h2>数据与维护</h2>
+        <p class="settings-description">管理机器人启动方式、配置备份和连接排查。</p>
+        <div class="settings-actions">
+          <button id="btnSettingsAutostart" type="button" class="sec" disabled>机器人随 Windows 启动 · 读取状态中…</button>
+          <button type="button" class="sec" data-action-target="btnBackupRestore">备份与恢复</button>
+          <button type="button" class="sec" data-action-target="btnOpenDiagnostic">连接诊断</button>
+        </div>
+      </section>
     </div>
   </div>
 
