@@ -2916,9 +2916,11 @@ def main():
         if panel_alive():
             # 面板已由其它实例启动：只需确保机器人在跑
             _log("面板已在运行，仅确保机器人启动")
-            _ensure_bot_running()
+            if not restarting:
+                _ensure_bot_running()
             return
-        threading.Thread(target=_autostart_bot_after_up, daemon=True).start()
+        if not restarting:
+            threading.Thread(target=_autostart_bot_after_up, daemon=True).start()
     else:
         # 正常双击打开
         if panel_alive():

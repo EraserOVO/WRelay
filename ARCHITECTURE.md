@@ -38,6 +38,9 @@ WRelay/
 │   └── json_io.py            JSON 原子读写工具
 ├── panel/
 │   ├── desktop_app.pyw       桌面入口（WebView2 窗口 + 托盘 + 单实例）
+│   ├── desktop_controls.py  关闭偏好、动态托盘菜单与操作互斥
+│   ├── windows_titlebar.py   自定义标题栏的 .NET 装载入口
+│   ├── windows_titlebar.cs   原生命中测试、标题栏绘制与系统窗口命令
 │   ├── 管理面板.pyw           管理面板主程序（FastAPI + 进程管理）
 │   ├── backup_restore.py    配置备份、恢复校验、失败回滚
 │   ├── process_manager.py   机器人进程、PID 文件与存活检测
@@ -47,7 +50,10 @@ WRelay/
 │   └── web/                  面板前端（纯静态 HTML/JS/CSS）
 │       ├── index.html
 │       ├── app.js
-│       ├── desktop.js         桌面入口标记、原生窗口按钮与外部链接桥接
+│       ├── desktop.js         桌面入口标记、窗口主题与外部链接桥接
+│       ├── discord-page.js    转发页展示与可访问交互
+│       ├── ui-components.js   公共外链按钮与 Modal 展示层
+│       ├── ui-components.css  公共组件及根滚动条规则
 │       ├── style.css
 │       └── wrelay-logo.svg
 ├── scripts/                  构建、诊断与验证脚本（如 prepare_runtime.ps1）
@@ -361,8 +367,8 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 
 ### 7.4 运行日志、消息追踪与连接诊断
 
-运行日志卡片内的「消息追踪」按钮打开二级窗口，读取 `message_trace.py` 保存的最近
-50 条投递记录，展示来源、消息摘要、目标群、最终结果与重试次数。机器人状态卡片的
+设置 → 启动与维护 → 运行日志窗口内的「消息追踪」按钮打开二级窗口，读取 `message_trace.py` 保存的最近
+50 条投递记录，展示来源、消息摘要、目标群、最终结果与重试次数。设置 → 启动与维护中的
 「连接诊断」按钮只读显示进程、Discord、QQ 连接和待重试投递数量，不会发送测试消息。
 面板看门狗在机器人进程正常但 Discord 连续不可用 2 分钟时重启整个机器人进程，尝试恢复网关连接；
 因此 QQ Bot 也会短暂重连。持续故障时，Discord 自动恢复重启的间隔从 5 分钟逐步延长，最长每小时一次。
@@ -500,14 +506,19 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 ### `panel/web/` — 面板前端独立
 
 - 面板前端从 `管理面板.pyw` 中分离为独立的 `index.html` + `app.js` + `style.css` + `desktop.js`。
+- `ui-components.js` / `ui-components.css` 是公共展示层：复用既有节点、ID 和事件，统一外链按钮与 13 个网页 Modal 的 Header / Body / Footer；导航、表单、状态行和提示样式共用当前主题变量。小/中/大窗口宽度为 520/640/880px，最高 85vh，仅 Body 滚动。普通配置支持遮罩关闭，确认与恢复窗口保留明确关闭操作；不调用 API 或改变配置结构。
 - FastAPI 通过 `StaticFiles` 提供页面与本地 API；`desktop_app.pyw` 在主线程创建 WebView2 窗口，并在后台运行面板服务。旧浏览器入口可作为备用入口。
 - 桌面入口使用 `?desktop=1` 标记，独立保存桌面导航状态并首次进入运行总览；浏览器备用入口首次进入默认打开 Discord → QQ。
 - `/api/app/info` 从 `pyproject.toml` 读取当前应用版本；`/api/app/update-check` 只读查询 GitHub 最新稳定发行版并返回发布页，不下载或安装更新。
-- 第二次启动桌面入口会唤回已有窗口；关闭窗口隐藏到托盘，托盘退出保留机器人进程，但看护随管理程序退出而停止。
-- WebView2 的 JavaScript 桥只暴露窗口操作和外链打开方法；窗口引用等内部状态使用私有属性，避免桥接器递归检查窗口对象。
-- 标题栏与界面共用 `wrelay-logo.svg`；安装器、托盘与 Windows 快捷方式使用 `panel/wrelay_panel.ico`。
-- Discord 频道和 QQ 群表格保留操作列所需宽度；窄卡片内横向滚动，长 ID 省略显示并通过悬停标题查看完整值。
-- 各来源转发组和白名单表格的拖动柄列、启用复选框列固定为 52px、74px，避免表格宽度差异造成左侧错位。
+- 第二次启动桌面入口会唤回已有窗口；关闭行为在设置中选择托盘/退出/每次询问，默认托盘。偏好单独保存在 `data/desktop_preferences.json` 并通过桌面 JS 桥立即生效；普通退出保留机器人，确认后的停止并退出复用既有停止 API，停止失败则不退出。
+- 桌面窗口保留 PyWebView 可缩放窗口样式和 960×640 最小尺寸；`windows_titlebar.py` 使用现有 .NET 运行时在内存中编译 `windows_titlebar.cs`，绘制 38px（按 DPI 缩放）的 Windows 标题栏。原生命中测试将拖动、边缘缩放和系统菜单交给 Windows，最大化区域返回 HTMAXBUTTON 供系统 Snap 使用；按钮通过 WM_SYSCOMMAND 操作，关闭统一进入桌面关闭偏好处理。最大化图标直接读取 IsZoomed。JS 桥负责主题同步及关闭偏好读写，不承接拖动/resize。模块加载失败时记录桌面日志并保留系统标题栏。
+- 窗口位置、尺寸与最大化状态保存到 `data/desktop_window.json`。启动时以 PyWebView 的逻辑像素坐标核对可用显示器，旧位置不可见时将窗口放到当前可用屏幕。
+- 原生窗口从最大化或最小化还原时，标题栏模块在同步窗口位置消息期间保留 Windows 已选定的外部尺寸，阻止 WinForms 将已移除的标准边框高度再次叠加；不覆盖位置，也不约束后续普通缩放。相关回归检查位于 `scripts/test_desktop_titlebar.py`。
+- `panel/web/discord-page.js` 为四个转发功能页共用的展示适配层（沿用 Discord 模板文件名），通过页面配置管理共用控件位置还原、离线补发参数/操作分组、状态栏连接/统计分组、定时消息入口及开关可访问状态；不调用 API 或修改 settings。CSS 在 `desktop-host` 下复用同一套功能页规则，总览及设置不采用该布局。表格渲染、复制、排序及保存仍由原 `app.js` 处理。机器人进程控制主入口在总览，Windows 原生托盘提供快捷操作；全局配置与维护按钮直接归属设置页，使用原 ID 与事件处理，不再由功能页的运行工具容器搬运。Discord/QQ/翻译配置入口均唯一，设置页提供失败通知开关、重启管理程序和关于作者行。全局运行日志从设置的“启动与维护”打开 `runtimeLogModal`，保留原日志节点 ID 与请求处理，消息追踪/清空确认位于日志窗口上层；功能页不再创建日志卡片。根滚动容器为 HTML，使用 scrollbar-gutter: stable，不支持时回退 overflow-y: scroll。
+- 桌面自定义标题栏与任务栏/托盘使用 `panel/wrelay_panel.ico`；应用内品牌标识使用 `wrelay-logo.svg`。
+- 转发组、来源、接收群和白名单表格共用列宽、行高、状态复选框与操作按钮规则；表格按卡片宽度布局，不设置强制最小宽度。长 ID 显示省略号、悬停查看完整值，并提供复制按钮。
+- 桌面窗口在窄宽度下将侧栏收起为图标导航、转发列表切换单栏；更窄时隐藏次要的 QQ 账号列，保持主要 ID 和操作可见。
+- 桌面页面共用颜色、间距、圆角和控件尺寸 tokens；机器人统计与控制区分行显示，转发组操作集中在标签右侧。
 - 夜间标题使用 `#818DF9`；日间大标题为 `#3C478A`、卡片标题为 `#5E6CD8`。暂停组未选中时使用淡橙色，选中时保留警示橙色，暂停后的播放按钮保持灰色。
 - 桌面端窗口以 `docs/DESIGN.md` 的概念图为视觉参考，原有配置字段和消息链路保持独立。
 - 好处：改 UI 不需要改 Python 代码，也不需要重启面板进程。
@@ -526,3 +537,6 @@ QQ 私聊的 `backfill on/off` 走字段级接口 `POST /api/settings/backfill-t
 | `qq_identities.json` | 纯身份资料库（昵称、群名、管理员备注），只用于面板展示，**绝不参与任何权限判断** |
 | 不存在主动反查群名 | QQ 官方 API 不提供群名/昵称查询接口。群名只在机器人收到群消息时从事件中提取并记录，无法通过 openid 主动查询 |
 | 自动转发方向 | 自动链路为 Discord → QQ、X RSS → QQ、Bilibili RSS → QQ；项目不做 QQ → Discord 或双向同步；QQ → QQ 仅限授权用户手动 relay 命令 |
+
+
+桌面偏好与托盘补充：`panel/desktop_controls.py` 封装原子偏好写入、关闭选择、动态菜单和操作互斥；`desktop_app.pyw` 负责 PyStray 原生 Windows 菜单、WinForms 确认框、既有窗口恢复与 JS 页面切换。托盘每 3 秒读取现有进程状态与健康缓存，更新状态项和 Tooltip；进程操作调用既有认证本地 API，不新增转发 API。菜单回调在后台线程执行，原生确认在窗口 UI 线程执行，关闭事件先取消默认关闭再调度选择，避免事件/UI 线程互相等待。退出会停止托盘轮询并销毁窗口，不主动终止机器人；停止并退出必须确认且验证机器人确已停止。管理程序 `--autostart --restart` 分支不再拉起已停止机器人，保留仍运行机器人的看护意图。设置中的失败通知依旧是授权 QQ 私聊提醒，并非系统 Toast。

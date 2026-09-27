@@ -6,26 +6,19 @@
 <title>WRelay</title>
 <link rel="icon" type="image/svg+xml" href="/wrelay-logo.svg">
 <link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/ui-components.css">
 </head>
 <body>
-  <div class="desktop-titlebar" aria-label="WRelay 窗口标题栏">
-    <div class="desktop-title-drag pywebview-drag-region"><img src="/wrelay-logo.svg" alt="" aria-hidden="true">WRelay</div>
-    <div class="desktop-window-controls">
-      <button type="button" data-window-action="minimize" aria-label="最小化">—</button>
-      <button type="button" data-window-action="maximize" aria-label="最大化或还原">□</button>
-      <button type="button" data-window-action="hide" aria-label="隐藏到托盘">×</button>
-    </div>
-  </div>
   <aside class="desktop-sidebar">
     <div class="sidebar-brand"><img src="/wrelay-logo.svg" alt="" aria-hidden="true">WRelay</div>
     <nav id="pageTabs" aria-label="主要页面">
-      <button type="button" class="nav-item" data-kind="pageTab" data-page="overview"><span class="nav-icon">⌂</span>总览</button>
-      <button type="button" class="nav-item" data-kind="pageTab" data-page="discord"><span class="nav-icon">◉</span>Discord → QQ</button>
-      <button type="button" class="nav-item" data-kind="pageTab" data-page="x"><span class="nav-icon">↗</span>X → QQ</button>
-      <button type="button" class="nav-item" data-kind="pageTab" data-page="bilibili"><span class="nav-icon">▣</span>Bilibili → QQ</button>
-      <button type="button" class="nav-item" data-kind="pageTab" data-page="qq"><span class="nav-icon">⇄</span>QQ → QQ</button>
+      <button type="button" class="nav-item" data-kind="pageTab" data-page="overview" title="总览" aria-label="总览"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 10 9-7 9 7M5 9v12h14V9M9 21v-8h6v8"/></svg></span>总览</button>
+      <button type="button" class="nav-item" data-kind="pageTab" data-page="discord" title="Discord → QQ" aria-label="Discord → QQ"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5Z"/></svg></span>Discord → QQ</button>
+      <button type="button" class="nav-item" data-kind="pageTab" data-page="x" title="X → QQ" aria-label="X → QQ"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.9 2H22l-6.8 7.8 8 10.2h-6.3l-5-6.5-5.7 6.5H3.1l7.3-8.4L2.7 2h6.5l4.5 5.9L18.9 2Zm-1.1 16.2h1.7L8.5 3.9H6.6l11.2 14.3Z"/></svg></span>X → QQ</button>
+      <button type="button" class="nav-item" data-kind="pageTab" data-page="bilibili" title="Bilibili → QQ" aria-label="Bilibili → QQ"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="15" rx="3"/><path d="m8 2 2 3m6-3-2 3M9 11v3m6-3v3"/></svg></span>Bilibili → QQ</button>
+      <button type="button" class="nav-item" data-kind="pageTab" data-page="qq" title="QQ → QQ" aria-label="QQ → QQ"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16m-4-4 4 4-4 4M20 17H4m4-4-4 4 4 4"/></svg></span>QQ → QQ</button>
       <div class="sidebar-divider"></div>
-      <button type="button" class="nav-item" data-kind="pageTab" data-page="settings"><span class="nav-icon">⚙</span>设置</button>
+      <button type="button" class="nav-item" data-kind="pageTab" data-page="settings" title="设置" aria-label="设置"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="19.46,12.74 21.09,14.76 20.38,16.48 17.80,16.76 16.76,17.80 16.48,20.38 14.76,21.09 12.74,19.46 11.26,19.46 9.24,21.09 7.52,20.38 7.24,17.80 6.20,16.76 3.62,16.48 2.91,14.76 4.54,12.74 4.54,11.26 2.91,9.24 3.62,7.52 6.20,7.24 7.24,6.20 7.52,3.62 9.24,2.91 11.26,4.54 12.74,4.54 14.76,2.91 16.48,3.62 16.76,6.20 17.80,7.24 20.38,7.52 21.09,9.24 19.46,11.26"/><circle cx="12" cy="12" r="3"/></svg></span>设置</button>
     </nav>
   </aside>
   <div class="page-header">
@@ -33,38 +26,31 @@
       <h1 id="activePageTitle">Discord → QQ</h1>
       <p id="activePageDescription">管理频道、接收群与转发组</p>
     </div>
-    <div class="page-header-actions">
-      <button id="btnRestartPanel" class="iconbtn" title="重启管理程序" aria-label="重启管理程序"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></button>
-      <button id="btnAbout" class="iconbtn" aria-label="关于"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
-      <button id="btnTheme" class="iconbtn" aria-label="切换主题"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
-    </div>
   </div>
 
   <div class="cardrow page-content">
-    <div class="card">
-      <h2 style="display:flex;align-items:center;gap:6px;">机器人状态 <button class="hintbtn" data-hint="managedHint" data-title="机器人状态">?</button></h2>
+    <div class="card overview-status-card">
+      <h2 style="display:flex;align-items:center;gap:6px;">机器人状态 <button class="hintbtn" data-hint="managedHint" data-title="机器人状态" title="机器人状态说明" aria-label="机器人状态说明"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
       <div class="row robot-status-summary">
-        <span id="badge" class="badge off">检测中…</span>
+        <span id="badge" class="badge neutral">检测中…</span>
         <label class="auto-translation-field qq-bot-workspace-field"><select id="qqBotWorkspace" aria-label="选择 QQ Bot"></select></label>
-        <span id="pidinfo" class="pid"></span>
-        <span id="stats" class="pid"></span>
+        <span class="robot-stat robot-pid-stat" title="机器人进程标识"><small>PID</small><strong id="pidinfo">—</strong></span>
+        <span class="robot-stat" title="今日成功转发数量"><small>今日转发</small><strong id="statsToday">—</strong></span>
+        <span class="robot-stat" title="累计成功转发数量"><small>累计</small><strong id="statsTotal">—</strong></span>
+        <span class="robot-stat" title="累计失败数量"><small>失败</small><strong id="statsFailed">—</strong></span>
       </div>
-      <div class="row" style="margin-top:10px;">
-        <button id="btnStart" class="panel-action-icon" type="button" title="启动机器人" aria-label="启动机器人"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 5 11 7-11 7z"/></svg></button>
+      <div class="row robot-status-actions">
+        <span class="robot-core-actions">
+        <button id="btnStart" class="panel-action-icon" type="button" title="启动机器人" aria-label="启动机器人" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 5 11 7-11 7z"/></svg></button>
         <button id="btnStop" class="danger panel-action-icon" type="button" title="停止机器人" aria-label="停止机器人"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg></button>
         <button id="btnRestart" class="sec panel-action-icon" type="button" title="重启机器人" aria-label="重启机器人"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></button>
-        <span class="desktop-advanced-actions">
-          <button id="btnBackupRestore" class="sec panel-action-icon" type="button" title="安全备份与恢复" aria-label="安全备份与恢复"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M14 3v5h5M8 13h8M8 17h8"/></svg></button>
-          <button id="btnOpenDiagnostic" class="sec panel-action-icon" type="button" title="连接诊断" aria-label="连接诊断"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M12 11v5M9.5 13.5h5"/></svg></button>
-          <button id="btnFailureNotificationToggle" class="sec" type="button"><span>失败通知</span></button>
-          <button id="btnAutostart" class="sec"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg><span>随 Windows 启动</span></button>
         </span>
       </div>
       <div class="hint" id="managedHint" style="display:none"></div>
     </div>
 
     <div class="card" id="backfillCard">
-      <h2 style="display:flex;align-items:center;gap:6px;">离线补发 <button class="hintbtn" data-hint="hint-backfill" data-title="离线补发">?</button></h2>
+      <h2 style="display:flex;align-items:center;gap:6px;">离线补发 <button class="hintbtn" data-hint="hint-backfill" data-title="离线补发"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
       <div id="backfillContent">
         <div class="row bf-row" style="padding:0 6px;">
           <span class="row bf-limit-row">
@@ -91,12 +77,12 @@
 
     <!-- X RSS 状态：仅 X → QQ 页显示（占离线补发的位置，见 setActivePage） -->
     <div class="card" id="xrssCard" style="display:none">
-      <h2 style="display:flex;align-items:center;gap:6px;">X RSS 状态 <button class="hintbtn" data-hint="hint-xrss" data-title="X RSS 状态">?</button></h2>
-      <div class="row" style="flex-wrap:wrap;">
-        <span id="xrssBadge" class="badge off">检测中…</span>
+      <h2 style="display:flex;align-items:center;gap:6px;">X RSS 状态 <button class="hintbtn" data-hint="hint-xrss" data-title="X RSS 状态"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
+      <div class="row rss-status-line">
+        <span id="xrssBadge" class="badge neutral">检测中…</span>
         <span id="xrssSummary" class="xrss-summary">—</span>
       </div>
-      <div class="row" style="margin-top:10px;">
+      <div class="row rss-config-row" style="margin-top:10px;">
         <span class="bf-limit-label">RSSHub 地址</span>
         <input type="text" id="xRsshubBase" style="flex:none;width:168px;">
         <span class="bf-limit-label">轮询间隔</span>
@@ -107,12 +93,12 @@
     </div>
 
     <div class="card" id="bilibiliCard" style="display:none">
-      <h2 style="display:flex;align-items:center;gap:6px;">Bilibili RSS 状态 <button class="hintbtn" data-hint="hint-bilibili" data-title="Bilibili RSS 状态">?</button></h2>
-      <div class="row" style="flex-wrap:wrap;">
-        <span id="bilibiliBadge" class="badge off">检测中…</span>
+      <h2 style="display:flex;align-items:center;gap:6px;">Bilibili RSS 状态 <button class="hintbtn" data-hint="hint-bilibili" data-title="Bilibili RSS 状态"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
+      <div class="row rss-status-line">
+        <span id="bilibiliBadge" class="badge neutral">检测中…</span>
         <span id="bilibiliSummary" class="xrss-summary">—</span>
       </div>
-      <div class="row bilibili-rss-config-row" style="margin-top:10px;">
+      <div class="row bilibili-rss-config-row rss-config-row" style="margin-top:10px;">
         <span class="bf-limit-label">RSSHub 地址</span>
         <input type="text" id="bilibiliRsshubBase" style="flex:none;width:168px;">
         <span class="bf-limit-label">轮询间隔</span>
@@ -126,8 +112,8 @@
     </div>
 
     <div class="card" id="scheduledMessageCard" style="display:none">
-      <h2 style="display:flex;align-items:center;gap:6px;">定时消息 <button class="hintbtn" data-hint="hint-scheduled-message" data-title="定时消息">?</button></h2>
-      <div class="hint" id="hint-scheduled-message" style="display:none">点击笔图标可添加多条消息，并分别设置间隔或日历发送计划；仅当前启用的目标群会接收消息。</div>
+      <h2 style="display:flex;align-items:center;gap:6px;">定时消息 <button class="hintbtn" data-hint="hint-scheduled-message" data-title="定时消息"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
+      <div class="hint" id="hint-scheduled-message" style="display:none">点击添加或编辑可配置多条消息，并分别设置间隔或日历发送计划；仅当前启用的目标群会接收消息。</div>
       <div id="scheduledMessageSummary" class="scheduled-message-summary">尚未添加消息</div>
       <div class="row scheduled-message-actions">
         <button id="btnScheduledMessageEdit" class="rowicon sec" type="button" title="管理定时消息" aria-label="管理定时消息"></button>
@@ -140,37 +126,35 @@
     <div class="overview-intro">
       <div>
         <span class="overview-kicker">运行概况</span>
-        <p>查看转发服务状态，选择一条链路继续管理。</p>
       </div>
-      <button type="button" class="sec overview-settings-link" data-kind="pageTab" data-page="settings">桌面端设置 <span aria-hidden="true">›</span></button>
     </div>
     <div class="overview-grid">
       <button type="button" class="overview-route" data-kind="pageTab" data-page="discord">
         <span class="overview-route-icon discord-icon" aria-hidden="true">◉</span>
         <span class="overview-route-copy"><strong>Discord → QQ</strong><b id="overviewDiscord">检测中…</b><small id="overviewDiscordMeta">正在读取频道和群配置</small></span>
-        <span class="overview-route-arrow" aria-hidden="true">›</span>
+        <span class="overview-route-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 5 7 7-7 7"/></svg></span>
       </button>
       <button type="button" class="overview-route" data-kind="pageTab" data-page="x">
         <span class="overview-route-icon x-icon" aria-hidden="true">𝕏</span>
         <span class="overview-route-copy"><strong>X → QQ</strong><b id="overviewX">等待状态</b><small id="overviewXMeta">正在读取来源和群配置</small></span>
-        <span class="overview-route-arrow" aria-hidden="true">›</span>
+        <span class="overview-route-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 5 7 7-7 7"/></svg></span>
       </button>
       <button type="button" class="overview-route" data-kind="pageTab" data-page="bilibili">
         <span class="overview-route-icon bili-icon" aria-hidden="true">▣</span>
         <span class="overview-route-copy"><strong>Bilibili → QQ</strong><b id="overviewBilibili">等待状态</b><small id="overviewBilibiliMeta">正在读取来源和群配置</small></span>
-        <span class="overview-route-arrow" aria-hidden="true">›</span>
+        <span class="overview-route-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 5 7 7-7 7"/></svg></span>
       </button>
       <button type="button" class="overview-route" data-kind="pageTab" data-page="qq">
         <span class="overview-route-icon qq-icon" aria-hidden="true">⇄</span>
         <span class="overview-route-copy"><strong>QQ → QQ</strong><b id="overviewQQ">授权用户手动转发</b><small id="overviewQQMeta">只响应已授权用户的手动转发</small></span>
-        <span class="overview-route-arrow" aria-hidden="true">›</span>
+        <span class="overview-route-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 5 7 7-7 7"/></svg></span>
       </button>
     </div>
   </div>
 
   <div id="pageDiscord" class="page-content">
   <div class="card">
-    <h2 style="display:flex;align-items:center;gap:6px;">转发组 <button class="hintbtn" data-hint="hint-fg" data-title="转发组">?</button></h2>
+    <h2 style="display:flex;align-items:center;gap:6px;">转发组 <button class="hintbtn" data-hint="hint-fg" data-title="转发组"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
     <div id="fgBody">
       <div class="fgtabs" id="fgTabs">
         <!-- 转发组 tab 由 app.js 动态渲染（步骤3），当前组加 .active；此处仅占位展示结构 -->
@@ -192,11 +176,11 @@
           </table>
         </div>
         <div class="row addrow">
-          <button id="btnAddFgChan">＋ 新增</button>
-          <button id="btnScanChannels" class="sec">从全部可读频道注册</button>
-          <button id="btnDiscord" class="sec linkbtn" style="margin-left:auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.37a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.058a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>Discord</button>
-          <button id="btnDiscordDev" class="sec linkbtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.37a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.058a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>Discord开发者门户</button>
-          <button id="btnDiscordConfig" class="sec iconbtn" title="Discord Bot 配置" aria-label="Discord Bot 配置"><svg width="20" height="20" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10.5" cy="17.5" r="7" stroke="currentColor" stroke-width="2.1"/><line x1="15.9834" y1="11.9145" x2="24.398" y2="3.49992" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="23.5054" y1="5.83398" x2="26.1453" y2="8.47385" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="20.5894" y1="8.75" x2="22.5693" y2="10.7299" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg></button>
+          <span class="pane-main-actions">
+            <button id="btnAddFgChan">＋ 新增</button>
+            <button id="btnScanChannels" class="sec">从全部可读频道注册</button>
+          </span>
+          <button id="btnDiscordDev" class="sec linkbtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.37a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.058a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>Discord 开发者门户</button>
         </div>
       </div>
 
@@ -213,17 +197,18 @@
           </table>
         </div>
         <div class="row addrow">
-          <button id="btnAddFgGroup">＋ 新增</button>
-          <button id="btnSync" class="sec">注册审核</button>
-          <button id="btnQQPlatform" class="sec linkbtn" style="margin-left:auto"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.50039 11.1504C9.96983 11.1504 10.3504 11.5309 10.3504 12.0004V14.0004C10.3504 14.4698 9.96983 14.8504 9.50039 14.8504C9.03095 14.8504 8.65039 14.4698 8.65039 14.0004V12.0004C8.65039 11.5309 9.03095 11.1504 9.50039 11.1504Z" fill="currentColor"/><path d="M14.5004 11.1504C14.9698 11.1504 15.3504 11.5309 15.3504 12.0004V14.0004C15.3504 14.4698 14.9698 14.8504 14.5004 14.8504C14.0309 14.8504 13.6504 14.4698 13.6504 14.0004V12.0004C13.6504 11.5309 14.0309 11.1504 14.5004 11.1504Z" fill="currentColor"/><path fill-rule="evenodd" clip-rule="evenodd" d="M12.8504 5.3109C13.5299 4.99138 14.0004 4.30063 14.0004 3.5C14.0004 2.39543 13.1049 1.5 12.0004 1.5C10.8958 1.5 10.0004 2.39543 10.0004 3.5C10.0004 4.30065 10.4708 4.99141 11.1504 5.31092V6.18851C6.38487 6.61795 2.65039 10.6231 2.65039 15.5004V17.0004C2.65039 19.679 4.82181 21.8504 7.50039 21.8504H16.5004C19.179 21.8504 21.3504 19.679 21.3504 17.0004V15.5004C21.3504 10.6231 17.6159 6.61795 12.8504 6.18851V5.3109ZM12.0004 7.85039C7.77541 7.85039 4.35039 11.2754 4.35039 15.5004V17.0004C4.35039 18.7401 5.76069 20.1504 7.50039 20.1504H16.5004C18.2401 20.1504 19.6504 18.7401 19.6504 17.0004V15.5004C19.6504 11.2754 16.2254 7.85039 12.0004 7.85039Z" fill="currentColor"/></svg>QQ机器人</button>
-          <button id="btnQQConfig" class="sec iconbtn" title="QQ Bot 配置" aria-label="QQ Bot 配置"><svg width="20" height="20" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10.5" cy="17.5" r="7" stroke="currentColor" stroke-width="2.1"/><line x1="15.9834" y1="11.9145" x2="24.398" y2="3.49992" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="23.5054" y1="5.83398" x2="26.1453" y2="8.47385" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="20.5894" y1="8.75" x2="22.5693" y2="10.7299" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg></button>
+          <span class="pane-main-actions">
+            <button id="btnAddFgGroup">＋ 新增</button>
+            <button id="btnSync" class="sec">注册审核</button>
+          </span>
+          <button id="btnQQPlatform" class="sec linkbtn" style="margin-left:auto"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.50039 11.1504C9.96983 11.1504 10.3504 11.5309 10.3504 12.0004V14.0004C10.3504 14.4698 9.96983 14.8504 9.50039 14.8504C9.03095 14.8504 8.65039 14.4698 8.65039 14.0004V12.0004C8.65039 11.5309 9.03095 11.1504 9.50039 11.1504Z" fill="currentColor"/><path d="M14.5004 11.1504C14.9698 11.1504 15.3504 11.5309 15.3504 12.0004V14.0004C15.3504 14.4698 14.9698 14.8504 14.5004 14.8504C14.0309 14.8504 13.6504 14.4698 13.6504 14.0004V12.0004C13.6504 11.5309 14.0309 11.1504 14.5004 11.1504Z" fill="currentColor"/><path fill-rule="evenodd" clip-rule="evenodd" d="M12.8504 5.3109C13.5299 4.99138 14.0004 4.30063 14.0004 3.5C14.0004 2.39543 13.1049 1.5 12.0004 1.5C10.8958 1.5 10.0004 2.39543 10.0004 3.5C10.0004 4.30065 10.4708 4.99141 11.1504 5.31092V6.18851C6.38487 6.61795 2.65039 10.6231 2.65039 15.5004V17.0004C2.65039 19.679 4.82181 21.8504 7.50039 21.8504H16.5004C19.179 21.8504 21.3504 19.679 21.3504 17.0004V15.5004C21.3504 10.6231 17.6159 6.61795 12.8504 6.18851V5.3109ZM12.0004 7.85039C7.77541 7.85039 4.35039 11.2754 4.35039 15.5004V17.0004C4.35039 18.7401 5.76069 20.1504 7.50039 20.1504H16.5004C18.2401 20.1504 19.6504 18.7401 19.6504 17.0004V15.5004C19.6504 11.2754 16.2254 7.85039 12.0004 7.85039Z" fill="currentColor"/></svg>QQ 机器人平台</button>
         </div>
       </div>
     </div>
   </div>
 
   <div class="card">
-    <h2 style="display:flex;justify-content:space-between;align-items:center;"><span style="display:flex;align-items:center;gap:6px;">白名单 <button class="hintbtn" data-hint="hint-user" data-title="白名单">?</button></span> <button class="foldbtn" data-fold="userList" aria-label="展开/折叠"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 5l8 14H4z"/></svg></button></h2>
+    <h2 style="display:flex;justify-content:space-between;align-items:center;"><span style="display:flex;align-items:center;gap:6px;">白名单 <button class="hintbtn" data-hint="hint-user" data-title="白名单"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></span> <button class="foldbtn" data-fold="userList" aria-label="展开/折叠"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 5l8 14H4z"/></svg></button></h2>
     <div id="userContent">
       <table id="userList" style="table-layout:fixed">
         <thead><tr><th style="width:1.6%"></th><th style="width:2.3%;text-align:center"><input type="checkbox" id="userAllEnabled"></th><th style="width:11.2%">名称</th><th style="width:18%">账号</th><th style="width:13%">User OpenID</th><th style="width:8%"></th></tr></thead>
@@ -239,7 +224,7 @@
 
   <div class="relay-translation-row">
   <div class="card" id="relayLinkCard">
-    <h2 style="display:flex;align-items:center;gap:6px;">手动转发 <button class="hintbtn" data-hint="hint-relay-link" data-title="手动转发">?</button></h2>
+    <h2 style="display:flex;align-items:center;gap:6px;">手动转发 <button class="hintbtn" data-hint="hint-relay-link" data-title="手动转发"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
     <div class="hint" id="hint-relay-link" style="display:none">白名单账户可通过 relay 序号选择目标 QQ 群，再发送下一条 Discord 消息链接；筛选设置对所有手动转发链接生效。</div>
     <div class="relay-link-description">私聊发送 relay 序号后，下一条 Discord 链接将转发到选定的目标群。</div>
     <div class="row relay-link-actions">
@@ -248,7 +233,7 @@
     </div>
   </div>
   <div class="card" id="autoTranslationCard">
-    <h2 style="display:flex;align-items:center;gap:6px;">自动翻译 <button class="hintbtn" data-hint="hint-auto-translation" data-title="自动翻译">?</button></h2>
+    <h2 style="display:flex;align-items:center;gap:6px;">自动翻译 <button class="hintbtn" data-hint="hint-auto-translation" data-title="自动翻译"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
     <div class="auto-translation-section">
       <div class="row auto-translation-fields">
         <label class="auto-translation-field"><span>首选方式</span><select id="translationProvider"><option value="tencent_tmt">腾讯 TMT</option><option value="ai">AI API</option></select></label>
@@ -259,7 +244,6 @@
       <div class="hint" id="hint-auto-translation" style="display:none">Discord 和 X 共用这里选择的翻译服务路由；左侧开关可一次启用或关闭全部 Discord 转发频道的翻译，每个频道可通过表格中的翻译图标单独设置。</div>
       <button id="btnTranslationToggle" class="sec translation-toggle" type="button"><span>启用翻译</span></button>
       <span class="auto-translation-action-buttons">
-        <button id="btnTranslationConfig" class="sec iconbtn" title="翻译服务配置" aria-label="翻译服务配置"><svg width="20" height="20" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10.5" cy="17.5" r="7" stroke="currentColor" stroke-width="2.1"/><line x1="15.9834" y1="11.9145" x2="24.398" y2="3.49992" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="23.5054" y1="5.83398" x2="26.1453" y2="8.47385" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="20.5894" y1="8.75" x2="22.5693" y2="10.7299" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg></button>
       </span>
     </div>
   </div>
@@ -291,7 +275,7 @@
 
   <div id="pageX" class="page-content" style="display:none">
     <div class="card">
-      <h2 style="display:flex;align-items:center;gap:6px;">转发组 <button class="hintbtn" data-hint="hint-xfg" data-title="转发组">?</button></h2>
+      <h2 style="display:flex;align-items:center;gap:6px;">转发组 <button class="hintbtn" data-hint="hint-xfg" data-title="转发组"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
       <div id="xFgBody">
         <div class="fgtabs" id="xFgTabs">
           <!-- X 转发组 tab 由 app.js 动态渲染；此处仅占位展示结构 -->
@@ -314,9 +298,11 @@
               </table>
             </div>
             <div class="row addrow">
-              <button id="btnAddXFgSource">＋ 新增</button>
-              <button id="btnAddXSource" class="sec">注册</button>
-              <button id="btnOpenX" class="sec linkbtn" style="margin-left:auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>主页</button>
+              <span class="pane-main-actions">
+                <button id="btnAddXFgSource">＋ 新增</button>
+                <button id="btnAddXSource" class="sec">注册</button>
+              </span>
+              <button id="btnOpenX" class="sec linkbtn" style="margin-left:auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>X 主页</button>
             </div>
           </div>
         </div>
@@ -335,10 +321,11 @@
               </table>
             </div>
             <div class="row addrow">
-              <button id="btnAddXFgGroup">＋ 新增</button>
-              <button id="btnSyncXGroups" class="sec">注册审核</button>
-              <button id="btnQQPlatformX" class="sec linkbtn" style="margin-left:auto"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.50039 11.1504C9.96983 11.1504 10.3504 11.5309 10.3504 12.0004V14.0004C10.3504 14.4698 9.96983 14.8504 9.50039 14.8504C9.03095 14.8504 8.65039 14.4698 8.65039 14.0004V12.0004C8.65039 11.5309 9.03095 11.1504 9.50039 11.1504Z" fill="currentColor"/><path d="M14.5004 11.1504C14.9698 11.1504 15.3504 11.5309 15.3504 12.0004V14.0004C15.3504 14.4698 14.9698 14.8504 14.5004 14.8504C14.0309 14.8504 13.6504 14.4698 13.6504 14.0004V12.0004C13.6504 11.5309 14.0309 11.1504 14.5004 11.1504Z" fill="currentColor"/><path fill-rule="evenodd" clip-rule="evenodd" d="M12.8504 5.3109C13.5299 4.99138 14.0004 4.30063 14.0004 3.5C14.0004 2.39543 13.1049 1.5 12.0004 1.5C10.8958 1.5 10.0004 2.39543 10.0004 3.5C10.0004 4.30065 10.4708 4.99141 11.1504 5.31092V6.18851C6.38487 6.61795 2.65039 10.6231 2.65039 15.5004V17.0004C2.65039 19.679 4.82181 21.8504 7.50039 21.8504H16.5004C19.179 21.8504 21.3504 19.679 21.3504 17.0004V15.5004C21.3504 10.6231 17.6159 6.61795 12.8504 6.18851V5.3109ZM12.0004 7.85039C7.77541 7.85039 4.35039 11.2754 4.35039 15.5004V17.0004C4.35039 18.7401 5.76069 20.1504 7.50039 20.1504H16.5004C18.2401 20.1504 19.6504 18.7401 19.6504 17.0004V15.5004C19.6504 11.2754 16.2254 7.85039 12.0004 7.85039Z" fill="currentColor"/></svg>QQ机器人</button>
-              <button id="btnQQConfig" class="sec iconbtn" title="QQ Bot 配置" aria-label="QQ Bot 配置"><svg width="20" height="20" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10.5" cy="17.5" r="7" stroke="currentColor" stroke-width="2.1"/><line x1="15.9834" y1="11.9145" x2="24.398" y2="3.49992" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="23.5054" y1="5.83398" x2="26.1453" y2="8.47385" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="20.5894" y1="8.75" x2="22.5693" y2="10.7299" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg></button>
+              <span class="pane-main-actions">
+                <button id="btnAddXFgGroup">＋ 新增</button>
+                <button id="btnSyncXGroups" class="sec">注册审核</button>
+              </span>
+              <button id="btnQQPlatformX" class="sec linkbtn" style="margin-left:auto"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.50039 11.1504C9.96983 11.1504 10.3504 11.5309 10.3504 12.0004V14.0004C10.3504 14.4698 9.96983 14.8504 9.50039 14.8504C9.03095 14.8504 8.65039 14.4698 8.65039 14.0004V12.0004C8.65039 11.5309 9.03095 11.1504 9.50039 11.1504Z" fill="currentColor"/><path d="M14.5004 11.1504C14.9698 11.1504 15.3504 11.5309 15.3504 12.0004V14.0004C15.3504 14.4698 14.9698 14.8504 14.5004 14.8504C14.0309 14.8504 13.6504 14.4698 13.6504 14.0004V12.0004C13.6504 11.5309 14.0309 11.1504 14.5004 11.1504Z" fill="currentColor"/><path fill-rule="evenodd" clip-rule="evenodd" d="M12.8504 5.3109C13.5299 4.99138 14.0004 4.30063 14.0004 3.5C14.0004 2.39543 13.1049 1.5 12.0004 1.5C10.8958 1.5 10.0004 2.39543 10.0004 3.5C10.0004 4.30065 10.4708 4.99141 11.1504 5.31092V6.18851C6.38487 6.61795 2.65039 10.6231 2.65039 15.5004V17.0004C2.65039 19.679 4.82181 21.8504 7.50039 21.8504H16.5004C19.179 21.8504 21.3504 19.679 21.3504 17.0004V15.5004C21.3504 10.6231 17.6159 6.61795 12.8504 6.18851V5.3109ZM12.0004 7.85039C7.77541 7.85039 4.35039 11.2754 4.35039 15.5004V17.0004C4.35039 18.7401 5.76069 20.1504 7.50039 20.1504H16.5004C18.2401 20.1504 19.6504 18.7401 19.6504 17.0004V15.5004C19.6504 11.2754 16.2254 7.85039 12.0004 7.85039Z" fill="currentColor"/></svg>QQ 机器人平台</button>
             </div>
           </div>
         </div>
@@ -346,7 +333,7 @@
     </div>
 
     <div class="card">
-      <h2 style="display:flex;justify-content:space-between;align-items:center;"><span style="display:flex;align-items:center;gap:6px;">白名单 <button class="hintbtn" data-hint="hint-xuser" data-title="白名单">?</button></span> <button class="foldbtn" data-fold="xUserContent" aria-label="展开/折叠"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 5l8 14H4z"/></svg></button></h2>
+      <h2 style="display:flex;justify-content:space-between;align-items:center;"><span style="display:flex;align-items:center;gap:6px;">白名单 <button class="hintbtn" data-hint="hint-xuser" data-title="白名单"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></span> <button class="foldbtn" data-fold="xUserContent" aria-label="展开/折叠"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 5l8 14H4z"/></svg></button></h2>
       <div id="xUserContent">
         <table id="xUserList" style="table-layout:fixed">
           <thead><tr><th style="width:1.6%"></th><th style="width:2.3%;text-align:center"><input type="checkbox" id="xUserAllEnabled"></th><th style="width:11.2%">名称</th><th style="width:18%">账号</th><th style="width:13%">User OpenID</th><th style="width:3.5%"></th></tr></thead>
@@ -362,7 +349,7 @@
 
     <div class="relay-translation-row">
     <div class="card" id="xRelayLinkCard">
-      <h2 style="display:flex;align-items:center;gap:6px;">手动转发 <button class="hintbtn" data-hint="hint-x-relay-link" data-title="手动转发">?</button></h2>
+      <h2 style="display:flex;align-items:center;gap:6px;">手动转发 <button class="hintbtn" data-hint="hint-x-relay-link" data-title="手动转发"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
       <div class="hint" id="hint-x-relay-link" style="display:none">白名单账户可通过 relay 序号选择目标 QQ 群，再发送下一条 X 消息链接；筛选设置对所有 X 手动转发链接生效。</div>
       <div class="relay-link-description">私聊发送 relay 序号后，下一条 X 链接将转发到选定的目标群。</div>
       <div class="row relay-link-actions">
@@ -370,8 +357,8 @@
         <button id="btnXRelayFilter" class="sec iconbtn" type="button" title="消息筛选" aria-label="消息筛选"></button>
       </div>
     </div>
-    <div class="card">
-      <h2 style="display:flex;align-items:center;gap:6px;">自动翻译 <button class="hintbtn" data-hint="hint-x-auto-translation" data-title="自动翻译">?</button></h2>
+    <div class="card" id="xAutoTranslationCard">
+      <h2 style="display:flex;align-items:center;gap:6px;">自动翻译 <button class="hintbtn" data-hint="hint-x-auto-translation" data-title="自动翻译"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
       <div class="auto-translation-section">
         <div class="row auto-translation-fields">
         <label class="auto-translation-field"><span>首选方式</span><select id="xTranslationProvider"><option value="tencent_tmt">腾讯 TMT</option><option value="ai">AI API</option></select></label>
@@ -382,7 +369,6 @@
         <div class="hint" id="hint-x-auto-translation" style="display:none">这里与上方“自动翻译”共用首选/次选服务；左侧开关可一次启用或关闭全部 X 转发账号的翻译，每个账号可通过表格中的翻译图标单独设置。</div>
         <button id="btnXTranslationToggle" class="sec translation-toggle" type="button"><span>启用翻译</span></button>
         <span class="auto-translation-action-buttons">
-          <button id="btnXTranslationConfig" class="sec iconbtn" title="翻译服务配置（共享）" aria-label="翻译服务配置（共享）"><svg width="20" height="20" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10.5" cy="17.5" r="7" stroke="currentColor" stroke-width="2.1"/><line x1="15.9834" y1="11.9145" x2="24.398" y2="3.49992" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="23.5054" y1="5.83398" x2="26.1453" y2="8.47385" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><line x1="20.5894" y1="8.75" x2="22.5693" y2="10.7299" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg></button>
         </span>
       </div>
     </div>
@@ -391,7 +377,7 @@
 
   <div id="pageBilibili" class="page-content" style="display:none">
     <div class="card">
-      <h2 style="display:flex;align-items:center;gap:6px;">转发组 <button class="hintbtn" data-hint="hint-bilibili-fg" data-title="Bilibili 转发组">?</button></h2>
+      <h2 style="display:flex;align-items:center;gap:6px;">转发组 <button class="hintbtn" data-hint="hint-bilibili-fg" data-title="Bilibili 转发组"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
       <div id="bilibiliFgBody">
         <div class="fgtabs" id="bilibiliFgTabs">
           <button type="button" class="fgtab active" data-kind="fgTab" data-ctx="bilibili" data-id="bilibili_default">转发组1</button>
@@ -413,8 +399,10 @@
               </table>
             </div>
             <div class="row addrow">
-              <button id="btnAddBilibiliFgSource">＋ 新增</button>
-              <button id="btnAddBilibiliSource" class="sec">注册来源</button>
+              <span class="pane-main-actions">
+                <button id="btnAddBilibiliFgSource">＋ 新增</button>
+                <button id="btnAddBilibiliSource" class="sec">注册来源</button>
+              </span>
               <button id="btnOpenBilibili" class="sec linkbtn" style="margin-left:auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.813 4.653h.854c1.51.054 2.769.578 3.773 1.574 1.004.995 1.524 2.249 1.56 3.76v7.36c-.036 1.51-.556 2.769-1.56 3.773s-2.262 1.524-3.773 1.56H5.333c-1.51-.036-2.769-.556-3.773-1.56S.036 18.858 0 17.347v-7.36c.036-1.511.556-2.765 1.56-3.76 1.004-.996 2.262-1.52 3.773-1.574h.774l-1.174-1.12a1.234 1.234 0 0 1-.373-.906c0-.356.124-.658.373-.907l.027-.027c.267-.249.573-.373.92-.373.347 0 .653.124.92.373L9.653 4.44c.071.071.134.142.187.213h4.267a.836.836 0 0 1 .16-.213l2.853-2.747c.267-.249.573-.373.92-.373.347 0 .662.151.929.4.267.249.391.551.391.907 0 .355-.124.657-.373.906zM5.333 7.24c-.746.018-1.373.276-1.88.773-.506.498-.769 1.13-.786 1.894v7.52c.017.764.28 1.395.786 1.893.507.498 1.134.756 1.88.773h13.334c.746-.017 1.373-.275 1.88-.773.506-.498.769-1.129.786-1.893v-7.52c-.017-.765-.28-1.396-.786-1.894-.507-.497-1.134-.755-1.88-.773zM8 11.107c.373 0 .684.124.933.373.25.249.383.569.4.96v1.173c-.017.391-.15.711-.4.96-.249.25-.56.374-.933.374s-.684-.125-.933-.374c-.25-.249-.383-.569-.4-.96V12.44c0-.373.129-.689.386-.947.258-.257.574-.386.947-.386zm8 0c.373 0 .684.124.933.373.25.249.383.569.4.96v1.173c-.017.391-.15.711-.4.96-.249.25-.56.374-.933.374s-.684-.125-.933-.374c-.25-.249-.383-.569-.4-.96V12.44c.017-.391.15-.711.4-.96.249-.249.56-.373.933-.373Z"/></svg>打开 Bilibili</button>
             </div>
           </div>
@@ -434,8 +422,10 @@
               </table>
             </div>
             <div class="row addrow">
-              <button id="btnAddBilibiliFgGroup">＋ 新增</button>
-              <button id="btnSyncBilibiliGroups" class="sec">注册审核</button>
+              <span class="pane-main-actions">
+                <button id="btnAddBilibiliFgGroup">＋ 新增</button>
+                <button id="btnSyncBilibiliGroups" class="sec">注册审核</button>
+              </span>
               <button id="btnQQPlatformBilibili" class="sec linkbtn" style="margin-left:auto"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9.50039 11.1504C9.96983 11.1504 10.3504 11.5309 10.3504 12.0004V14.0004C10.3504 14.4698 9.96983 14.8504 9.50039 14.8504C9.03095 14.8504 8.65039 14.4698 8.65039 14.0004V12.0004C8.65039 11.5309 9.03095 11.1504 9.50039 11.1504Z" fill="currentColor"/><path d="M14.5004 11.1504C14.9698 11.1504 15.3504 11.5309 15.3504 12.0004V14.0004C15.3504 14.4698 14.9698 14.8504 14.5004 14.8504C14.0309 14.8504 13.6504 14.4698 13.6504 14.0004V12.0004C13.6504 11.5309 14.0309 11.1504 14.5004 11.1504Z" fill="currentColor"/><path fill-rule="evenodd" clip-rule="evenodd" d="M12.8504 5.3109C13.5299 4.99138 14.0004 4.30063 14.0004 3.5C14.0004 2.39543 13.1049 1.5 12.0004 1.5C10.8958 1.5 10.0004 2.39543 10.0004 3.5C10.0004 4.30065 10.4708 4.99141 11.1504 5.31092V6.18851C6.38487 6.61795 2.65039 10.6231 2.65039 15.5004V17.0004C2.65039 19.679 4.82181 21.8504 7.50039 21.8504H16.5004C19.179 21.8504 21.3504 19.679 21.3504 17.0004V15.5004C21.3504 10.6231 17.6159 6.61795 12.8504 6.18851V5.3109ZM12.0004 7.85039C7.77541 7.85039 4.35039 11.2754 4.35039 15.5004V17.0004C4.35039 18.7401 5.76069 20.1504 7.50039 20.1504H16.5004C18.2401 20.1504 19.6504 18.7401 19.6504 17.0004V15.5004C19.6504 11.2754 16.2254 7.85039 12.0004 7.85039Z" fill="currentColor"/></svg>QQ 机器人平台</button>
             </div>
           </div>
@@ -446,7 +436,7 @@
 
   <div id="pageQQ" class="page-content" style="display:none">
     <div class="card">
-      <h2 style="display:flex;align-items:center;gap:6px;">转发组 <button class="hintbtn" data-hint="hint-qqfg" data-title="转发组">?</button></h2>
+      <h2 style="display:flex;align-items:center;gap:6px;">转发组 <button class="hintbtn" data-hint="hint-qqfg" data-title="转发组"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
       <div id="qqFgBody">
         <div class="fgtabs" id="qqFgTabs">
           <!-- QQ→QQ 转发组 tab 由 app.js 动态渲染；每组只保存 QQ 群成员。 -->
@@ -469,9 +459,11 @@
               </table>
             </div>
             <div class="row addrow">
-              <button id="btnAddQQFgGroup">＋ 新增</button>
-              <button id="btnSyncQQGroups" class="sec">注册审核</button>
-              <button id="btnQQPlatformQQ" class="sec linkbtn" style="margin-left:auto">QQ机器人</button>
+              <span class="pane-main-actions">
+                <button id="btnAddQQFgGroup">＋ 新增</button>
+                <button id="btnSyncQQGroups" class="sec">注册审核</button>
+              </span>
+              <button id="btnQQPlatformQQ" class="sec linkbtn" style="margin-left:auto">QQ 机器人平台</button>
             </div>
           </div>
         </div>
@@ -482,69 +474,109 @@
 
   <div class="card page-content" id="recentMessageCard" style="display:none">
     <h2 style="display:flex;align-items:center;justify-content:space-between;gap:10px;">最近消息 <button type="button" class="sec" data-action-target="btnOpenMessageTrace">更多 ›</button></h2>
-    <div class="recent-message-row"><span id="recentMessageResult" class="badge off">暂无投递</span><span id="recentMessageText">暂无消息记录</span><time id="recentMessageTime"></time></div>
+    <div class="recent-message-row"><span id="recentMessageResult" class="badge neutral">暂无投递</span><span id="recentMessageText">暂无消息记录</span><time id="recentMessageTime"></time></div>
   </div>
 
   <div id="pageSettings" class="page-content" style="display:none">
     <div class="desktop-settings-grid">
-      <section class="card settings-card app-info-card">
-        <div class="settings-card-heading">
-          <div><h2>WRelay 桌面端</h2><p class="settings-description">应用版本与发行信息</p></div>
-          <span id="appVersion" class="app-version">读取中…</span>
+      <section class="card settings-card">
+        <h2>应用</h2>
+        <div class="settings-row">
+          <div class="settings-item-copy"><strong>WRelay 桌面端</strong><small>当前版本与发布信息</small></div>
+          <span id="appVersion" class="settings-static-value version-badge">读取中…</span>
         </div>
-        <div class="update-check-row" aria-live="polite">
-          <div><strong id="updateStatus">尚未检查更新</strong><small id="updateDetail">检查 GitHub 官方发布页上的最新稳定版本。</small></div>
-          <div class="update-actions">
-            <button id="btnCheckUpdates" class="sec" type="button">检查更新</button>
-            <a id="btnOpenRelease" class="sec release-link" href="https://github.com/EraserOVO/WRelay/releases/latest" target="_blank" rel="noopener noreferrer">查看发布页</a>
-          </div>
+        <div class="settings-row" aria-live="polite">
+          <div class="settings-item-copy"><strong>检查更新</strong><small><span id="updateStatus">尚未检查更新</span><span id="updateDetail">检查 GitHub 官方稳定版，不会自动下载安装。</span></small></div>
+          <button id="btnCheckUpdates" class="sec" type="button">检查更新</button>
         </div>
-        <p class="settings-footnote">检查更新不会自动下载或安装。发现新版本后，可前往发布页查看说明并下载安装包。</p>
+        <div class="settings-row">
+          <div class="settings-item-copy"><strong>发布页面</strong><small>查看版本说明与安装包</small></div>
+          <a id="btnOpenRelease" class="sec release-link linkbtn" href="https://github.com/EraserOVO/WRelay/releases/latest" target="_blank" rel="noopener noreferrer">打开</a>
+        </div>
+        <div class="settings-row">
+          <div class="settings-item-copy"><strong>关于作者</strong><small>查看作者与项目相关链接</small></div>
+          <button id="btnAbout" class="sec linkbtn" type="button" title="打开关于作者" aria-label="打开关于作者">打开</button>
+        </div>
       </section>
-
       <section class="card settings-card">
         <h2>外观与窗口</h2>
-        <label class="settings-select-row" for="themeMode"><span><strong>界面主题</strong><small>保存在本机，不改动机器人配置</small></span>
+        <label class="settings-row" for="themeMode">
+          <span class="settings-item-copy"><strong>界面主题</strong><small>控制应用界面配色</small></span>
           <select id="themeMode"><option value="dark">深色</option><option value="light">浅色</option></select>
         </label>
-        <div class="settings-note-row"><strong>关闭窗口</strong><span>关闭后收起到系统托盘，机器人继续运行；从托盘退出管理程序后，机器人仍会运行。</span></div>
+        <label class="settings-row" for="closeBehavior">
+          <span class="settings-item-copy"><strong>关闭窗口行为</strong><small>设置关闭主窗口后的操作</small></span>
+          <select id="closeBehavior" disabled title="仅在 WRelay 桌面窗口中可配置">
+            <option value="tray">收起到系统托盘</option>
+            <option value="exit">退出桌面端</option>
+            <option value="ask">每次询问</option>
+          </select>
+        </label>
       </section>
-
       <section class="card settings-card">
-        <h2>机器人连接与服务</h2>
-        <p class="settings-description">这些操作管理机器人账号和转发服务配置。</p>
-        <div class="settings-actions">
-          <button type="button" class="sec" data-action-target="btnDiscordConfig">Discord Bot 配置</button>
-          <button type="button" class="sec" data-action-target="btnQQConfig">QQ Bot 配置</button>
-          <button type="button" class="sec" data-action-target="btnTranslationConfig">翻译服务配置</button>
+        <h2>机器人与服务</h2>
+        <div class="settings-row">
+          <div class="settings-item-copy"><strong>Discord Bot</strong><small>管理机器人凭据与连接</small></div>
+          <button type="button" class="sec" id="btnDiscordConfig" aria-label="配置 Discord Bot">配置 ›</button>
+        </div>
+        <div class="settings-row">
+          <div class="settings-item-copy"><strong>QQ Bot</strong><small>管理 QQ 机器人账号与连接</small></div>
+          <button type="button" class="sec" id="btnQQConfig" aria-label="配置 QQ Bot">配置 ›</button>
+        </div>
+        <div class="settings-row">
+          <div class="settings-item-copy"><strong>翻译服务</strong><small>管理翻译服务与凭据</small></div>
+          <button type="button" class="sec" id="btnTranslationConfig" aria-label="配置翻译服务">配置 ›</button>
         </div>
       </section>
-
       <section class="card settings-card">
-        <h2>数据与维护</h2>
-        <p class="settings-description">管理机器人启动方式、配置备份和连接排查。</p>
-        <div class="settings-actions">
-          <button id="btnSettingsAutostart" type="button" class="sec" disabled>机器人随 Windows 启动 · 读取状态中…</button>
-          <button type="button" class="sec" data-action-target="btnBackupRestore">备份与恢复</button>
-          <button type="button" class="sec" data-action-target="btnOpenDiagnostic">连接诊断</button>
+        <h2>启动与维护</h2>
+        <div class="settings-row">
+          <div class="settings-item-copy"><strong>失败通知</strong><small>转发失败时向授权 QQ 用户发送提醒</small></div>
+          <button id="btnFailureNotificationToggle" type="button" class="sec settings-switch" role="switch" aria-checked="false" aria-label="失败通知"><span class="settings-switch-track" aria-hidden="true"></span></button>
+        </div>
+        <div class="settings-row">
+          <div class="settings-item-copy"><strong>随 Windows 启动</strong><small>登录 Windows 后启动 WRelay 与机器人</small></div>
+          <button id="btnSettingsAutostart" type="button" class="sec" disabled aria-label="机器人随 Windows 启动" aria-pressed="false"><span class="settings-switch-track" aria-hidden="true"></span></button>
+        </div>
+        <div class="settings-row">
+          <div class="settings-item-copy"><strong>备份与恢复</strong><small>备份或恢复配置数据</small></div>
+          <button type="button" class="sec" id="btnBackupRestore" aria-label="打开备份与恢复">打开 ›</button>
+        </div>
+        <div class="settings-row">
+          <div class="settings-item-copy"><strong>连接诊断</strong><small>检查机器人及相关服务连接</small></div>
+          <button type="button" class="sec" id="btnOpenDiagnostic" aria-label="打开连接诊断">打开 ›</button>
+        </div>
+        <div class="settings-row">
+          <div class="settings-item-copy"><strong>运行日志</strong><small>查看全局机器人日志与消息追踪</small></div>
+          <button type="button" class="sec" id="btnOpenRuntimeLog">查看 ›</button>
+        </div>
+        <div class="settings-row">
+          <div class="settings-item-copy"><strong>重启管理程序</strong><small>重新加载 WRelay 桌面管理程序，不停止机器人</small></div>
+          <button id="btnRestartPanel" class="sec" type="button">重启 ›</button>
         </div>
       </section>
     </div>
   </div>
 
-  <div class="card" id="logCard">
-    <h2 style="display:flex;justify-content:space-between;align-items:center;">运行日志</h2>
-    <div id="logContent">
+  <div id="runtimeLogModal" style="display:none;">
+    <div>
+      <button type="button" class="modal-x" data-close="runtimeLogModal" aria-label="关闭">×</button>
+      <h3>运行日志</h3>
       <pre id="log" class="log">加载中…</pre>
-      <div class="row" style="margin-top:10px;">
+      <div class="log-toolbar-group log-toolbar-left">
+        <label for="logLevel">级别</label>
         <select id="logLevel" title="日志级别（选择后立即生效）">
           <option value="DEBUG">DEBUG</option>
-          <option value="INFO">INFO</option>
+          <option value="INFO" selected>INFO</option>
           <option value="WARNING">WARNING</option>
           <option value="ERROR">ERROR</option>
         </select>
         <button id="btnOpenMessageTrace" class="sec" type="button">消息追踪</button>
-        <button id="btnClearLog" class="sec">清空日志</button>
+        <button id="btnLogAutoScroll" class="sec log-auto-scroll" type="button" aria-pressed="true">自动滚动：开</button>
+      </div>
+      <div>
+        <button id="btnCopyLog" class="sec" type="button">复制日志</button>
+        <button id="btnClearLog" class="danger">清空日志</button>
       </div>
   </div>
 </div>
@@ -582,12 +614,13 @@
   </div>
 </div>
 
-<div id="confirmModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;align-items:center;justify-content:center;">
+<div id="confirmModal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;align-items:center;justify-content:center;">
   <div style="position:relative;background:var(--modal-bg);border:1px solid var(--modal-border);border-radius:10px;padding:18px;max-width:480px;width:90%;max-height:70vh;display:flex;flex-direction:column;">
     <button type="button" class="modal-x" data-close="confirmModal" aria-label="关闭">×</button>
     <h3 id="confirmTitle" style="margin:0 0 10px;"></h3>
     <div id="confirmBody" style="overflow:auto;flex:1;margin:0 0 12px;line-height:1.8;"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button id="confirmCancel" class="sec" data-close="confirmModal" hidden>取消</button>
       <button id="confirmOk">确认添加</button>
     </div>
   </div>
@@ -763,5 +796,7 @@
 </div>
 <script src="/app.js"></script>
 <script src="/desktop.js"></script>
+<script src="/ui-components.js"></script>
+<script src="/discord-page.js"></script>
 </body>
 </html>
