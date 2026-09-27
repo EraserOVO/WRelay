@@ -45,6 +45,8 @@ Source: ".env.example"; DestDir: "{app}"; Flags: ignoreversion
 Source: "install.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "启动面板.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
+; 保留本地依赖补丁、来源说明与上游许可证。
+Source: "vendor\*"; DestDir: "{app}\vendor"; Flags: recursesubdirs ignoreversion
 
 ; ---- 面板 ----
 ; Excludes 排除开发环境运行产生的 __pycache__ 字节码缓存

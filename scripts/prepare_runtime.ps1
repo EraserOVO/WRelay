@@ -35,6 +35,10 @@ function Install-LockedDependencies([string]$pythonPath) {
 }
 
 function Assert-RuntimeReady([string]$pythonPath) {
+    & $pythonPath (Join-Path $PSScriptRoot "check_security_dependencies.py")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Bundled security dependencies do not match the validated versions"
+    }
     $actualVersion = Get-RuntimeVersion $pythonPath
     if ($actualVersion -ne $pythonVersion) {
         throw "Runtime must be Python $pythonVersion; found $actualVersion"

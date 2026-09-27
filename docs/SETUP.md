@@ -8,7 +8,7 @@ QQ 私聊命令执行的 QQ → QQ 手动转发。不提供 QQ → Discord 自�
 ## 1. 前置条件
 
 - Windows 10 / 11
-- Python 3.10 或更高版本（安装时勾选 **Add to PATH**，可到 [python.org](https://www.python.org/downloads/) 下载）
+- 64 位 Python 3.10 或更高版本（安装时勾选 **Add to PATH**，可到 [python.org](https://www.python.org/downloads/) 下载）
 - 能访问 Discord（国内网络需要代理，见第 6 节）
 
 ---
@@ -40,6 +40,19 @@ QQ 私聊命令执行的 QQ → QQ 手动转发。不提供 QQ → Discord 自�
 ---
 
 ## 3. 开发者构建安装包
+
+安全依赖使用 `cryptography==50.0.1` 与 QQ 适配器 `1.7.2+wrelay.1` 本地元数据补丁，
+完整来源、摘要与复现方法见 [vendor/README.md](../vendor/README.md)。源码安装需保留 `vendor/wheels/`，
+并始终配合 `requirements-lock.txt` 安装；仅执行 `pip install -e .` 无法从 PyPI 找到本地补丁版本。
+补丁不改变 QQ 适配器的运行代码。升级依赖后必须重新运行下方准备脚本；构建脚本会拒绝旧依赖，
+避免把仍含漏洞的 `.runtime/python` 打进新安装包。
+
+源码用户应先停止机器人与桌面端，再使用 `.venv/Scripts/python.exe -m pip install -r requirements-lock.txt -e .`
+更新运行环境，执行 `.venv/Scripts/python.exe -m pip check` 后重新启动。
+安装包用户需重新构建并安装新包；Git 提交或推送本身不会更新已经安装的程序。
+
+离线兼容验证：`python scripts/test_qq_crypto_compat.py`。该测试已加入统一回归入口，
+检查握手签名、回调验签及拒绝伪造请求，不连接真实 QQ 或 Discord。
 
 需要联网下载运行时和依赖，并先安装 Inno Setup。首次准备内置 Python 时，在项目根目录执行：
 

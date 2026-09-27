@@ -23,6 +23,11 @@ foreach ($relativePath in $requiredFiles) {
     }
 }
 
+& $runtimePython (Join-Path $PSScriptRoot "check_security_dependencies.py")
+if ($LASTEXITCODE -ne 0) {
+    throw "Stale security dependencies. Run scripts/prepare_runtime.ps1 before building."
+}
+
 # 只在目标机器缺少 WebView2 时运行。构建时固定打包一份微软签名的
 # Evergreen Bootstrapper，避免安装器现场下载并执行未经校验的文件。
 if (-not (Test-Path -LiteralPath $webViewBootstrapper -PathType Leaf)) {
