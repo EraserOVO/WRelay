@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "WRelay"
+version = "0.1.0"
+description = "WRelay"
+readme = "README.md"
+requires-python = ">=3.10, <4.0"
+license = { file = "LICENSE" }
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: Microsoft :: Windows",
+]
+
+dependencies = [
+    # [fastapi] = FastAPI + uvicorn[standard]（含 websockets），
+    #             供 NoneBot 默认 FastAPI 驱动、面板与适配器 WebSocket 连接使用
+    # [httpx]    = 项目 plugins 与 NoneBot HTTP 客户端驱动直接使用；
+    #              启用 SOCKS extra，以支持 .env.prod 中的 socks5 代理
+    "nonebot2[fastapi,httpx]>=2.5.0,<3.0.0",
+    "httpx[socks]>=0.28.1,<0.29.0",
+    "Pillow>=12.0,<13.0",
+    # Metadata-only compatibility patch; install with requirements-lock.txt.
+    "nonebot-adapter-qq==1.7.2+wrelay.1",
+    "cryptography>=50.0.1,<51.0.0",
+    "nonebot-adapter-discord>=1.1.9,<2.0.0",
+    "pywebview>=6.2.1,<7.0.0",
+    "pystray>=0.19.5,<0.20.0",
+]
+
+
+[tool.nonebot]
+plugin_dirs = []
+builtin_plugins = []
+
+
+[tool.nonebot.adapters]
+
+nonebot-adapter-qq = [
+    { name = "QQ", module_name = "nonebot.adapters.qq" }
+]
+
+nonebot-adapter-discord = [
+    { name = "Discord", module_name = "nonebot.adapters.discord" }
+]
+
+
+[tool.nonebot.plugins]
+
+"@local" = []
+
+
+[tool.setuptools.packages.find]
+
+include = ["plugins*"]
+exclude = ["data*"]

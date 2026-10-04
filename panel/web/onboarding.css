@@ -1,0 +1,29 @@
+/* 首次配置沿用桌面端的 modal-shell、设计变量和标准控件。 */
+#onboardingModal .onboarding-steps { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 0; margin: 0 0 20px; list-style: none; color: var(--muted); font-size: 12px; }
+#onboardingModal .onboarding-steps [aria-current="step"] { color: var(--fg); font-weight: 600; text-decoration: underline; text-decoration-color: var(--primary); text-underline-offset: 5px; }
+#onboardingForm { border: 0; padding: 0; margin: 0; min-width: 0; }
+#onboardingForm h4 { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
+#onboardingForm p { line-height: 1.7; }
+.onboarding-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+#onboardingModal .onboarding-option { display: flex; align-items: flex-start; gap: 10px; padding: 16px; border: 1px solid var(--field-border); border-radius: var(--radius-card); background: var(--card-bg); color: var(--fg); cursor: pointer; }
+#onboardingModal .onboarding-option:has(input:checked) { border-color: var(--primary); }
+.onboarding-option input { margin-top: 4px; flex: none; }
+.onboarding-option strong, .onboarding-option small { display: block; }
+.onboarding-option small { color: var(--muted); margin-top: 6px; line-height: 1.6; }
+.onboarding-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 16px 0; }
+.onboarding-fields label { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 13px; color: var(--muted); }
+.onboarding-fields :is(input, select) { width: 100%; }
+.onboarding-wide { grid-column: 1 / -1; }
+.onboarding-list { display: grid; gap: 8px; margin: 16px 0; }
+.onboarding-list label, .onboarding-entry { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px; border: 1px solid var(--field-border); border-radius: var(--radius-control); }
+.onboarding-entry > span, .onboarding-list label > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.onboarding-entry small, .onboarding-list small { display: block; color: var(--muted); margin-top: 4px; }
+.onboarding-entry button { flex: none; }
+.onboarding-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+#onboardingNotice { white-space: pre-line; overflow-wrap: anywhere; margin: 16px 0 0; padding: 12px; border-radius: var(--radius-control); background: var(--sec-bg); color: var(--muted); line-height: 1.6; }
+#onboardingNotice:empty { display: none; }
+#onboardingNotice[data-error="true"] { color: var(--error); }
+#onboardingModal .onboarding-summary { margin: 16px 0; padding: 16px; background: var(--card-bg); border: 1px solid var(--panel-border); border-radius: var(--radius-card); line-height: 1.8; overflow-wrap: anywhere; }
+#onboardingModal code { overflow-wrap: anywhere; user-select: text; }
+#onboardingLater { margin-right: auto; }
+@media (max-width: 620px) { .onboarding-options, .onboarding-fields { grid-template-columns: minmax(0, 1fr); } }

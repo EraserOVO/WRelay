@@ -1,0 +1,4 @@
+# Build-only tools; application dependencies stay in requirements-lock.txt.
+Nuitka==4.2.2
+ordered-set==4.1.0
+zstandard==0.25.0
