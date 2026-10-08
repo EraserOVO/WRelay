@@ -174,7 +174,10 @@ def _extract_video_id(link, guid):
     avid = None
     match = _BVID_RE.search(value)
     if match:
-        bvid = match.group(1).upper()
+        # BV 号大小写敏感（base58 变体）。大写化会得到另一个不存在的投稿号，
+        # 让 view / playurl 接口返回 -400「请求错误」；_BVID_RE 已带 re.I，
+        # 匹配不受影响，这里必须保留链接中的原始大小写。
+        bvid = match.group(1)
     match = _AVID_RE.search(value)
     if match:
         avid = match.group(1)

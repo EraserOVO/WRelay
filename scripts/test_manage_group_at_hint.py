@@ -14,9 +14,11 @@ from plugins import manage
 
 
 class FakeSegment:
-    def __init__(self, text, segment_type="text"):
+    def __init__(self, text, segment_type="text", is_bot=None):
         self.type = segment_type
         self.data = {"text": text}
+        if is_bot is not None:
+            self.data["is_bot"] = is_bot
 
 
 class FakeGroupMessage:
@@ -41,6 +43,12 @@ class FakeGroupMessage:
 
 
 class FakeGroupAtMessage(FakeGroupMessage):
+    def __init__(self, plaintext="", segments=None, author_bot=False):
+        segments = list(segments or [])
+        if not any(segment.type == "mention_user" for segment in segments):
+            segments.insert(0, FakeSegment("", "mention_user", is_bot=True))
+        super().__init__(plaintext, segments, author_bot)
+
     def is_tome(self):
         return True
 
@@ -58,16 +66,14 @@ async def main():
     with (
         mock.patch.object(manage, "QQBot", FakeQQBot),
         mock.patch.object(manage, "GroupMessageCreateEvent", FakeGroupMessage),
-        mock.patch.object(
-            manage,
-            "GroupAtMessageCreateEvent",
-            FakeGroupAtMessage,
-        ),
         mock.patch.object(manage.qq_fwd, "has_pending", return_value=False) as has_pending,
     ):
         unknown_at = FakeGroupAtMessage(
             "你会做什么？",
-            [FakeSegment("你会做什么？")],
+            [
+                FakeSegment("", "mention_user", is_bot=True),
+                FakeSegment("你会做什么？"),
+            ],
         )
         await manage.handle_group_at_hint(bot, unknown_at)
         assert bot.messages == [
@@ -75,6 +81,16 @@ async def main():
         ]
 
         bot.messages.clear()
+        unrelated_at = FakeGroupAtMessage(
+            "你会做什么？",
+            [
+                FakeSegment("", "mention_user", is_bot=False),
+                FakeSegment("你会做什么？"),
+            ],
+        )
+        await manage.handle_group_at_hint(bot, unrelated_at)
+        assert not bot.messages, "@其他成员不应触发未知命令提示"
+
         await manage.handle_group_at_hint(
             bot,
             FakeGroupMessage("普通群聊", [FakeSegment("普通群聊")]),
@@ -103,9 +119,7 @@ async def main():
             [FakeSegment("")],
         )
         await manage.handle_group_at_hint(bot, legacy_blank)
-        assert bot.messages == [
-            (legacy_blank, "未知命令，输入 list 查看可用命令")
-        ], "保留旧适配器的空文本 @ 兼容路径"
+        assert not bot.messages, "无法确认 @ 目标的旧空文本消息不应触发提示"
 
         bot.messages.clear()
         has_pending.return_value = True

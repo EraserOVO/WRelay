@@ -16,3 +16,6 @@ WRelay-Test-Setup.exe
 /dist/
 gui-test-screenshots/
 .codex-remote-attachments/
+
+# Local diagnosis scratch data must never enter source releases.
+/wrelay_bilibili_test_*/

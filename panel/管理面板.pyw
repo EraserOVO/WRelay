@@ -162,6 +162,8 @@ from panel.backup_restore import (
     RestoreRollbackError,
 )
 from panel.process_manager import BotProcessManager
+from panel.maintenance import MaintenanceService
+from panel.desktop_guardian import remember_running, running_intent
 
 # X 转发组：复用 bot 侧的归一化结果（GET 注入默认组）与 source key 派生
 # （保存时清理悬空引用）。导入失败时用最小回退（等价于不做注入/清理）。
@@ -691,9 +693,15 @@ MIN_AUTO_RESTART_GAP = 30.0  # 两次自动重启至少间隔 30 秒，连续崩
 DISCORD_UNAVAILABLE_GRACE = 120.0  # Discord 连续不可用 2 分钟后重启机器人
 DISCORD_RESTART_BASE_GAP = 300.0  # Discord 自动恢复重启从 5 分钟冷却开始
 DISCORD_RESTART_MAX_GAP = 3600.0  # 持续故障时逐步延长冷却，最多每小时一次
+QQ_UNAVAILABLE_GRACE = 120.0  # QQ 连续不可用 2 分钟后重启机器人
+QQ_RESTART_BASE_GAP = 300.0  # QQ 自动恢复重启从 5 分钟冷却开始
+QQ_RESTART_MAX_GAP = 3600.0  # 持续故障时逐步延长冷却，最多每小时一次
 _discord_unavailable_since = None
 _last_discord_restart_attempt = 0.0
 _discord_restart_count = 0
+_qq_unavailable_since = None
+_last_qq_restart_attempt = 0.0
+_qq_restart_count = 0
 
 
 def port_open(port):
@@ -741,12 +749,20 @@ def _process_manager():
     )
 
 
+def _save_running_intent():
+    try:
+        remember_running(_want_running)
+    except Exception as exc:
+        _log("保存机器人运行意图失败: %s" % exc)
+
+
 def start_bot():
     global _want_running
     with _BOT_CONTROL_LOCK:
         result = _process_manager().start_bot()
         if result.get("ok"):
             _want_running = True
+            _save_running_intent()
         return result
 
 
@@ -756,19 +772,28 @@ def stop_bot():
         result = _process_manager().stop_bot()
         if result.get("ok"):
             _want_running = False
+            _save_running_intent()
         return result
 
 
 def restart_bot():
     """重启机器人并保留面板的运行意图，供 API 与看门狗共用。"""
-    global _want_running, _discord_unavailable_since
+    global _want_running, _discord_unavailable_since, _qq_unavailable_since
+    global _last_discord_restart_attempt, _last_qq_restart_attempt
     with _BOT_CONTROL_LOCK:
         _discord_unavailable_since = None
+        _qq_unavailable_since = None
+        # QQ/Discord 共用同一个 Bot 进程，重启任一连接都会打断另一个连接。
+        # 同步冷却时间，避免双链路同时掉线时连续触发两次重启。
+        restart_time = time.monotonic()
+        _last_discord_restart_attempt = restart_time
+        _last_qq_restart_attempt = restart_time
         stop_result = stop_bot()
         if not stop_result.get("ok"):
             _want_running = True
             return stop_result
         _want_running = True
+        _save_running_intent()
         time.sleep(1.0)
         return start_bot()
 
@@ -968,9 +993,10 @@ def _ensure_bot_running():
 
 
 def _watchdog_loop():
-    """保持机器人进程与 Discord 网关连接；手动停止后不自动拉起。"""
-    global _last_auto_start, _discord_unavailable_since
+    """保持机器人进程与 QQ/Discord 网关连接；手动停止后不自动拉起。"""
+    global _last_auto_start, _discord_unavailable_since, _qq_unavailable_since
     global _last_discord_restart_attempt, _discord_restart_count
+    global _last_qq_restart_attempt, _qq_restart_count
     while True:
         time.sleep(WATCHDOG_INTERVAL)
         with _BOT_CONTROL_LOCK:
@@ -980,6 +1006,7 @@ def _watchdog_loop():
             status = bot_status()
             if not status["running"]:
                 _discord_unavailable_since = None
+                _qq_unavailable_since = None
                 if time.monotonic() - _last_auto_start < MIN_AUTO_RESTART_GAP:
                     continue
                 _log("看门狗：检测到机器人已停止，自动重启")
@@ -992,6 +1019,42 @@ def _watchdog_loop():
                 continue
 
             health = _bot_health_cached()
+            if not isinstance(health, dict):
+                _qq_unavailable_since = None
+                _discord_unavailable_since = None
+                continue
+
+            qq_connected = health.get("qq")
+            if qq_connected is True:
+                _qq_unavailable_since = None
+                _qq_restart_count = 0
+                _last_qq_restart_attempt = 0.0
+            elif qq_connected is False:
+                now = time.monotonic()
+                if _qq_unavailable_since is None:
+                    _qq_unavailable_since = now
+                elif now - _qq_unavailable_since >= QQ_UNAVAILABLE_GRACE:
+                    cooldown = min(
+                        QQ_RESTART_BASE_GAP * (2 ** min(_qq_restart_count, 4)),
+                        QQ_RESTART_MAX_GAP,
+                    )
+                    if now - _last_qq_restart_attempt >= cooldown:
+                        _log(
+                            "看门狗：QQ 连续不可用超过 %d 秒，重启机器人以恢复连接"
+                            % QQ_UNAVAILABLE_GRACE
+                        )
+                        result = restart_bot()
+                        _last_qq_restart_attempt = time.monotonic()
+                        _qq_unavailable_since = None
+                        if result.get("ok"):
+                            _qq_restart_count = min(_qq_restart_count + 1, 4)
+                            _log("看门狗：QQ 自动恢复重启已启动 pid=%s" % result.get("pid"))
+                        else:
+                            _log("看门狗：QQ 自动恢复重启失败: %s" % result.get("msg"))
+                        continue
+            else:
+                _qq_unavailable_since = None
+
             discord_config = _read_discord_bots()
             if discord_config is None or not any(discord_ready(bot) for bot in discord_config[0]):
                 _discord_unavailable_since = None
@@ -1227,6 +1290,23 @@ def api_status():
         # bot 进程活着不代表网关连上；询问 bot 自身连接状态（带 3 秒缓存，防多页面轮询放大）
         health = _bot_health_cached()
     settings = load_settings()
+    scheduled_message = settings.get("scheduled_message", {})
+    if isinstance(scheduled_message, dict):
+        scheduled_message = dict(scheduled_message)
+        messages = scheduled_message.get("messages")
+        if not isinstance(messages, list):
+            messages = []
+        scheduled_message["messages"] = [
+            {
+                key: value
+                for key, value in message.items()
+                if key != "image_data"
+            }
+            for message in messages
+            if isinstance(message, dict)
+        ]
+    else:
+        scheduled_message = {}
     return {
         "running": st["running"],
         "pid": st["pid"],
@@ -1240,7 +1320,8 @@ def api_status():
         "backfill_seq": _backfill_seq,
         "backfill_enabled": settings.get("backfill_enabled", True),
         "backfill_limit": settings.get("backfill_limit", 10),
-        "scheduled_message": settings.get("scheduled_message", {}),
+        # status 每 3 秒轮询；图片附件仍由 /api/settings 单独读取，避免反复传 Base64。
+        "scheduled_message": scheduled_message,
     }
 
 
@@ -3009,6 +3090,91 @@ def api_channels_refresh():
     return data
 
 
+def _notify_maintenance(alert_id, message):
+    import urllib.request
+    try:
+        request = urllib.request.Request(BOT_API_BASE + "/api/maintenance/alert",
+            data=json.dumps({"id": alert_id, "message": message}).encode("utf-8"),
+            headers={"X-WRelay-Token": PANEL_TOKEN, "Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.load(response)
+    except Exception:
+        return None
+
+
+_maintenance = MaintenanceService(_backup_service, DATA_DIR, bot_api_get, _notify_maintenance, _log)
+
+
+@app.get("/api/maintenance/ping")
+def api_maintenance_ping():
+    return {"ok": True}
+
+
+@app.get("/api/maintenance/status")
+def api_maintenance_status():
+    return _maintenance.status()
+
+
+@app.get("/api/maintenance/backups")
+def api_maintenance_backups():
+    with _maintenance.lock:
+        return {"ok": True, "backups": _maintenance.list_backups()}
+
+
+@app.post("/api/maintenance/settings")
+async def api_maintenance_settings(request: Request):
+    data = await request.json()
+    if not isinstance(data, dict) or type(data.get("enabled")) is not bool:
+        return JSONResponse({"ok": False, "msg": "自动备份开关无效"}, status_code=400)
+    await asyncio.to_thread(_maintenance.set_enabled, data["enabled"])
+    return {"ok": True}
+
+
+@app.post("/api/maintenance/backup")
+def api_maintenance_backup():
+    try:
+        return {"ok": True, "name": _maintenance.backup_now()}
+    except Exception:
+        return JSONResponse({"ok": False, "msg": "备份校验失败，请检查数据文件或磁盘空间，原有备份已保留"}, status_code=400)
+
+
+def _restore_automatic_backup(name):
+    with _maintenance.lock, _BOT_CONTROL_LOCK:
+        try:
+            payload = _maintenance.read_backup(name)
+        except Exception:
+            return JSONResponse({"ok": False, "msg": "备份不存在或校验失败，未修改当前数据"}, status_code=400)
+        was_running = bool(bot_status()["running"])
+        if was_running:
+            stopped = stop_bot()
+            if not stopped.get("ok"):
+                return {"ok": False, "msg": "机器人未能停止，未开始恢复"}
+        try:
+            result = _restore_backup_payload(payload, True, True)
+        except Exception:
+            if was_running:
+                start_bot()
+            raise
+        if isinstance(result, dict) and result.get("ok"):
+            if was_running:
+                restarted = start_bot()
+                if not restarted.get("ok"):
+                    result["msg"] += "；机器人未能重新启动，请点击启动"
+        elif was_running:
+            # Rollback failure requires inspection; do not overwrite uncertain data.
+            if getattr(result, "status_code", 500) < 500 or "当前文件已恢复到操作前状态".encode("utf-8") in getattr(result, "body", b""):
+                start_bot()
+        return result
+
+
+@app.post("/api/maintenance/restore")
+async def api_maintenance_restore(request: Request):
+    data = await request.json()
+    if not isinstance(data, dict) or data.get("confirmed") is not True or not isinstance(data.get("name"), str):
+        return JSONResponse({"ok": False, "msg": "恢复需要选择备份并确认"}, status_code=400)
+    return await run_in_thread_to_completion(_restore_automatic_backup, data["name"])
+
+
 # ---------------- 静态页面 ----------------
 from panel.onboarding_api import install_onboarding
 install_onboarding(app, globals())
@@ -3038,10 +3204,15 @@ def main():
     # 面板接管时若机器人已在运行，视为期望运行：看门狗继续守护，崩溃后自动拉起
     if bot_status()["running"]:
         _want_running = True
+        _save_running_intent()
     # 看门狗：面板期望机器人运行时，崩溃/被杀后自动拉起
     threading.Thread(target=_watchdog_loop, daemon=True).start()
 
-    if autostart and RESTART_FLAG not in sys.argv:
+    _maintenance.start()
+    if "--recover-desktop" in sys.argv and running_intent():
+        _want_running = True
+        threading.Thread(target=_ensure_bot_running, daemon=True).start()
+    elif autostart and RESTART_FLAG not in sys.argv:
         threading.Thread(target=_ensure_bot_running, daemon=True).start()
 
 

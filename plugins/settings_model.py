@@ -8,6 +8,11 @@ from copy import deepcopy
 from datetime import date, datetime
 import re
 
+from plugins.scheduled_message_media import (
+    SCHEDULED_IMAGES_TOTAL_MAX_BYTES,
+    decode_scheduled_image_data,
+)
+
 AI_TIMEOUT_SECONDS_MAX = 300
 AI_OUTPUT_TOKENS_MAX = 1_000_000
 
@@ -620,6 +625,7 @@ def _validate_scheduled_messages(data):
     messages = scheduled.get("messages")
     if not isinstance(messages, list):
         return "scheduled_message.messages 必须是列表"
+    total_image_bytes = 0
     for index, message in enumerate(messages, start=1):
         prefix = "scheduled_message.messages[%d]" % index
         if not isinstance(message, dict):
@@ -631,10 +637,26 @@ def _validate_scheduled_messages(data):
         content = message.get("content")
         if not isinstance(content, str):
             return prefix + ".content 必须是字符串"
-        if not content.strip():
-            return prefix + ".content 不能为空"
         if len(content) > 20000:
             return prefix + ".content 不能超过 20000 个字符"
+        image_data = message.get("image_data", "")
+        if not isinstance(image_data, str):
+            return prefix + ".image_data 必须是字符串"
+        image_name = message.get("image_name", "")
+        if not isinstance(image_name, str) or len(image_name) > 255:
+            return prefix + ".image_name 必须是 255 个字符以内的字符串"
+        if image_data:
+            try:
+                image_bytes, _mime_type = decode_scheduled_image_data(image_data)
+            except ValueError as exc:
+                return prefix + ".image_data " + str(exc)
+            total_image_bytes += len(image_bytes)
+            if total_image_bytes > SCHEDULED_IMAGES_TOTAL_MAX_BYTES:
+                return "定时消息图片总大小不能超过 3 MiB"
+        elif image_name:
+            return prefix + ".image_name 不能在没有图片时填写"
+        if not content.strip() and not image_data:
+            return prefix + ".content 不能为空（仅图片消息除外）"
         schedule_type = message.get("schedule_type")
         if schedule_type not in ("interval", "calendar"):
             return prefix + ".schedule_type 必须是 interval 或 calendar"

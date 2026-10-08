@@ -111,6 +111,10 @@ def runtime_status():
     return dict(_runtime_status)
 
 
+class BilibiliProtectionError(RuntimeError):
+    """本地投递保护状态不可用，不能继续投递或推进游标。"""
+
+
 def _short_error(error, limit=160):
     return " ".join(str(error or "").split())[:limit]
 
@@ -220,6 +224,27 @@ async def _signed_wbi_params(params):
     return values
 
 
+# view 接口的业务错误码。这些返回的 message 通常就是数字本身，直接抛给用户
+# 无法理解；码值含义来自 Bilibili 官方接口文档（video/info.md）。
+_VIEW_ERROR_TEXT = {
+    -400: "投稿链接或请求参数无效",
+    -403: "访问权限不足",
+    -404: "投稿不存在或已删除",
+    62002: "稿件不可见",
+    62004: "稿件审核中",
+    62012: "仅UP主自己可见",
+}
+
+
+def _view_error_text(payload):
+    """把 view 接口的业务错误码翻译成可读原因；未知码保留原始 message。"""
+    code = payload.get("code")
+    text = _VIEW_ERROR_TEXT.get(code)
+    if text:
+        return "%s：%s" % (text, code)
+    return str(payload.get("message") or "读取 Bilibili 投稿失败")
+
+
 async def _fetch_view_data(video_ref):
     """通过公开 view API 获取投稿与分 P 的 cid。"""
     params = {}
@@ -237,7 +262,7 @@ async def _fetch_view_data(video_ref):
     response.raise_for_status()
     payload = response.json()
     if payload.get("code") != 0 or not isinstance(payload.get("data"), dict):
-        raise RuntimeError(str(payload.get("message") or "读取 Bilibili 投稿失败"))
+        raise RuntimeError(_view_error_text(payload))
     return payload["data"]
 
 
@@ -980,13 +1005,13 @@ async def _send_posts(source, posts):
     async with _protection_lock:
         _, load_error = await _load_protection_state_async()
         if load_error:
-            raise RuntimeError(load_error)
+            raise BilibiliProtectionError(load_error)
         await _ensure_baseline(channel_key, active_groups, latest_id)
         await _flush_deferred_skips(source_id, active_groups)
 
         state, load_error = await _load_protection_state_async()
         if load_error:
-            raise RuntimeError(load_error)
+            raise BilibiliProtectionError(load_error)
         bucket = _protection_bucket(state, source_id)
         queued_ids = {item["id"] for item in bucket["items"]}
         deferred_ids = {item["id"] for item in bucket["deferred_skips"]}
@@ -1228,6 +1253,7 @@ async def _poll_all():
         seen_source_ids.add(source_id)
         sources.append(source)
     if not sources:
+        _runtime_status["source_health"] = []
         return
     sem = asyncio.Semaphore(BILIBILI_POLL_CONCURRENCY)
 
@@ -1235,11 +1261,20 @@ async def _poll_all():
         async with sem:
             try:
                 return await _poll_source(source)
+            except BilibiliProtectionError as exc:
+                return {"result": "protection_failed", "error": _short_error(exc), "new": 0, "sent": 0, "failed": 0}
             except Exception as exc:
                 logger.exception("Bilibili 来源轮询异常: {} ({})", source["name"], source["id"])
                 return {"result": "fetch_failed", "error": _short_error(exc), "new": 0, "sent": 0, "failed": 0}
 
     results = await asyncio.gather(*(poll_one(source) for source in sources))
+    previous = {item["id"]: item for item in _runtime_status.get("source_health", [])}
+    health = []
+    for source, result in zip(sources, results):
+        identity = str(source["id"])
+        count = 0 if result.get("result") == "ok" else previous.get(identity, {}).get("consecutive_failures", 0) + 1
+        health.append({"id": identity, "name": source["name"], "consecutive_failures": count})
+    _runtime_status["source_health"] = health
     new_total = sent_total = failed_total = 0
     bad_result = ""
     bad_error = ""
@@ -1345,7 +1380,8 @@ async def api_bilibili_status():
             if isinstance(bucket, dict)
         ),
     })
+    data["protection_error"] = protection_load_error
     if protection_load_error:
-        data["last_result"] = "fetch_failed"
+        data["last_result"] = "protection_failed"
         data["last_error"] = protection_load_error
     return data

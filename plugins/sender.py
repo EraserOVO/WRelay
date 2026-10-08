@@ -458,8 +458,9 @@ async def _send_ordered_emoji_parts(
 
 async def send_media_items(qq_bot, groups, media_items, channel_id="", message_id=""):
     """发送媒体到指定群；返回 {group_openid: 是否送达}
-    媒体上传重试后仍失败时，降级为文字 + 原链接（该降级视为已送达）；
-    只有降级也失败才记为失败。"""
+    有来源链接的媒体上传重试后仍失败时，降级为文字 + 原链接（该降级视为已送达）；
+    本地附件没有可用的来源链接，失败时仍记为投递失败；
+    成功上传或成功降级才视为送达。"""
     ok_map = {group: True for group in groups}
 
     for item in media_items:
@@ -480,6 +481,18 @@ async def send_media_items(qq_bot, groups, media_items, channel_id="", message_i
         pending = [group for group, ok in results.items() if not ok]
 
         if not pending:
+            continue
+
+        if not item.get("url"):
+            logger.warning(
+                "本地图片上传失败，无法降级为链接: {} 频道{} 消息{} 失败群{}",
+                item["kind"],
+                channel_id or "-",
+                message_id or "-",
+                pending,
+            )
+            for group in pending:
+                ok_map[group] = False
             continue
 
         # 重试后仍失败：降级为链接

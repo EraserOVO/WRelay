@@ -386,7 +386,72 @@ async function runBotAction(url, title, fallback) {
 
 function openBackupRestore() {
   document.getElementById("backupRestoreModal").style.display = "flex";
+  refreshAutomaticBackups();
+  refreshMaintenance();
 }
+var maintenanceEnabled = true;
+async function refreshMaintenance() {
+  try {
+    const st = await jget("/api/maintenance/status");
+    if (!st.ok) return;
+    maintenanceEnabled = st.enabled;
+    const alerts = Array.isArray(st.alerts) ? st.alerts : [];
+    const last = st.last_backup_ts ? new Date(st.last_backup_ts * 1000).toLocaleString() : "尚未成功备份";
+    document.getElementById("maintenanceStatus").textContent = alerts.length ? "有 " + alerts.length + " 项维护提醒，请查看" : (st.enabled ? "自动备份已开启 · 最近备份 " + last : "自动备份已关闭");
+    const toggle = document.getElementById("btnAutoBackupToggle");
+    toggle.textContent = st.enabled ? "已开启" : "已关闭";
+    toggle.setAttribute("aria-pressed", String(st.enabled));
+    document.getElementById("maintenanceDetail").textContent = alerts.length ? alerts.map(function (a) { return a.message; }).join("\n") : "维护检查正常。最近备份：" + last;
+    const banner = document.getElementById("maintenanceBanner");
+    banner.style.display = alerts.length ? "block" : "none";
+    document.getElementById("maintenanceBannerText").textContent = alerts.length ? alerts[0].message : "";
+  } catch (error) { /* Retry on the next refresh. */ }
+}
+async function refreshAutomaticBackups() {
+  const select = document.getElementById("autoBackupSelect");
+  try {
+    const st = await jget("/api/maintenance/backups");
+    select.innerHTML = "";
+    const entries = st.backups || [];
+    if (!entries.length) select.add(new Option("暂无自动备份", ""));
+    entries.forEach(function (entry) {
+      const option = new Option(new Date(entry.timestamp * 1000).toLocaleString() + (entry.valid ? " · 已校验" : " · 无效"), entry.name);
+      option.disabled = !entry.valid;
+      select.add(option);
+    });
+    const valid = entries.find(function (entry) { return entry.valid; });
+    if (valid) select.value = valid.name;
+  } catch (error) {
+    select.innerHTML = "";
+    select.add(new Option("无法读取备份，请稍后重试", ""));
+  }
+}
+async function runMaintenanceAction(button) {
+  button.disabled = true;
+  try {
+    let result;
+    if (button.id === "btnAutoBackupToggle") {
+      result = await jpost("/api/maintenance/settings", {enabled: !maintenanceEnabled});
+    } else if (button.id === "btnAutoBackupNow") {
+      result = await jpost("/api/maintenance/backup");
+    } else {
+      const name = document.getElementById("autoBackupSelect").value;
+      if (!name) throw new Error("请选择有效的自动备份");
+      if (!confirm("恢复会将配置和运行状态退回所选时间，可能造成重复投递或漏发。程序会先校验备份、停止机器人，并保存恢复前副本。恢复成功后会恢复原来的运行状态。确定继续吗？")) return;
+      result = await jpost("/api/maintenance/restore", {name: name, confirmed: true});
+    }
+    if (!result.ok) throw new Error(result.msg || "维护操作失败");
+    if (button.id === "btnAutoBackupRestore") {
+      await refreshSettings();
+      showAlert("恢复备份", result.msg || "恢复完成");
+    }
+    await refreshMaintenance();
+    await refreshAutomaticBackups();
+  } catch (error) {
+    showAlert("维护与备份", error.message || "操作失败，原有备份已保留");
+  } finally { button.disabled = false; }
+}
+
 function closeBackupRestore() {
   document.getElementById("backupRestoreModal").style.display = "none";
 }
@@ -654,6 +719,8 @@ function newScheduledMessage() {
   return {
     id: "message-" + Date.now() + "-" + scheduledMessageId,
     content: "",
+    image_data: "",
+    image_name: "",
     schedule_type: "interval",
     interval_days: 1,
     interval_hours: 0,
@@ -723,6 +790,13 @@ function scheduledOptionMarkup(message, index) {
     '<button type="button" class="rowicon sec scheduled-message-remove" title="删除消息" aria-label="删除消息">' + SVG_ORIGINAL_OFF + '</button></div>' +
     '<label class="scheduled-message-entry-label">消息正文' +
     '<textarea class="scheduled-message-entry-content" data-field="content" maxlength="20000" placeholder="输入消息正文"></textarea></label>' +
+    '<div class="scheduled-message-image-row">' +
+    '<input type="file" data-field="image_file_input" accept="image/png,image/jpeg,image/gif,image/webp" hidden>' +
+    '<button type="button" class="sec scheduled-message-image-pick">选择图片</button>' +
+    '<button type="button" class="sec scheduled-message-image-remove">移除图片</button>' +
+    '<span class="scheduled-message-image-name"></span>' +
+    '</div>' +
+    '<div class="scheduled-message-image-hint">可附加一张 PNG、JPEG、GIF 或 WebP 图片；单张不超过 2 MiB，所有定时消息图片合计不超过 3 MiB。正文可留空以仅发送图片。</div>' +
     '<div class="scheduled-message-entry-row">' +
     '<label>发送方式<select class="scheduled-message-entry-select" data-field="schedule_type">' +
     '<option value="interval">按间隔发送</option><option value="calendar">按日历发送</option></select></label>' +
@@ -774,6 +848,12 @@ function renderScheduledMessageEditor() {
   container.querySelectorAll(".scheduled-message-entry").forEach(function (entry, index) {
     const message = messages[index];
     entry.querySelector('[data-field="content"]').value = message.content || "";
+    const imageName = entry.querySelector(".scheduled-message-image-name");
+    if (imageName) imageName.textContent = message.image_data ? (message.image_name || "已附加图片") : "未附加图片";
+    const imageRemove = entry.querySelector(".scheduled-message-image-remove");
+    if (imageRemove) imageRemove.disabled = !message.image_data;
+    const imagePick = entry.querySelector(".scheduled-message-image-pick");
+    if (imagePick) imagePick.textContent = message.image_data ? "更换图片" : "选择图片";
     entry.querySelector('[data-field="schedule_type"]').value = message.schedule_type;
     ["anchor_at", "interval_days", "interval_hours", "interval_minutes", "day_of_month", "month", "day", "send_time", "calendar_type"].forEach(function (key) {
       const field = entry.querySelector('[data-field="' + key + '"]');
@@ -795,6 +875,8 @@ function readScheduledMessageEditor() {
     const message = {
       id: (scheduledMessageDraft[index] && scheduledMessageDraft[index].id) || ("message-" + (index + 1)),
       content: get("content").value,
+      image_data: (scheduledMessageDraft[index] && scheduledMessageDraft[index].image_data) || "",
+      image_name: (scheduledMessageDraft[index] && scheduledMessageDraft[index].image_name) || "",
       schedule_type: type,
       interval_days: Number(get("interval_days").value) || 0,
       interval_hours: Number(get("interval_hours").value) || 0,
@@ -822,11 +904,21 @@ function openScheduledMessageEditor() {
 }
 
 async function confirmScheduledMessageEditor() {
+  if (scheduledImageReadPending) {
+    showAlert("定时消息", "请等待图片读取完成后再保存");
+    return;
+  }
   const messages = readScheduledMessageEditor();
+  let totalImageBytes = 0;
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
-    if (!message.content.trim()) {
-      showAlert("定时消息", "消息 " + (index + 1) + " 的正文不能为空");
+    if (!message.content.trim() && !message.image_data) {
+      showAlert("定时消息", "消息 " + (index + 1) + " 需要填写正文或附加图片");
+      return;
+    }
+    totalImageBytes += scheduledImageDataSize(message.image_data);
+    if (totalImageBytes > 3 * 1024 * 1024) {
+      showAlert("定时消息", "所有定时消息图片合计不能超过 3 MiB");
       return;
     }
     if (message.schedule_type === "interval" && !message.interval_days && !message.interval_hours && !message.interval_minutes) {
@@ -857,6 +949,26 @@ async function confirmScheduledMessageEditor() {
   }
 }
 
+let scheduledImageReadPending = false;
+
+function scheduledImageDataSize(dataUrl) {
+  if (typeof dataUrl !== "string" || !dataUrl) return 0;
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) return 0;
+  const encoded = dataUrl.slice(comma + 1);
+  const padding = encoded.endsWith("==") ? 2 : (encoded.endsWith("=") ? 1 : 0);
+  return Math.max(0, Math.floor(encoded.length * 3 / 4) - padding);
+}
+
+function readScheduledImageFile(file) {
+  return new Promise(function (resolve, reject) {
+    const reader = new FileReader();
+    reader.onload = function () { resolve(String(reader.result || "")); };
+    reader.onerror = function () { reject(new Error("图片读取失败")); };
+    reader.readAsDataURL(file);
+  });
+}
+
 function initScheduledPickers() {
   const editButton = document.getElementById("btnScheduledMessageEdit");
   if (editButton) {
@@ -864,11 +976,33 @@ function initScheduledPickers() {
     editButton.addEventListener("click", openScheduledMessageEditor);
   }
   document.getElementById("btnAddScheduledMessage").addEventListener("click", function () {
+    if (scheduledImageReadPending) return;
     scheduledMessageDraft = readScheduledMessageEditor();
     scheduledMessageDraft.push(newScheduledMessage());
     renderScheduledMessageEditor();
   });
   document.getElementById("scheduledMessageEntries").addEventListener("click", function (event) {
+    if (scheduledImageReadPending) return;
+    const imagePick = event.target.closest(".scheduled-message-image-pick");
+    if (imagePick) {
+      const entry = imagePick.closest(".scheduled-message-entry");
+      const input = entry && entry.querySelector('[data-field="image_file_input"]');
+      if (input) input.click();
+      return;
+    }
+    const imageRemove = event.target.closest(".scheduled-message-image-remove");
+    if (imageRemove) {
+      const entry = imageRemove.closest(".scheduled-message-entry");
+      if (!entry) return;
+      scheduledMessageDraft = readScheduledMessageEditor();
+      const message = scheduledMessageDraft[Number(entry.dataset.index)];
+      if (message) {
+        message.image_data = "";
+        message.image_name = "";
+        renderScheduledMessageEditor();
+      }
+      return;
+    }
     const remove = event.target.closest(".scheduled-message-remove");
     if (!remove) return;
     const entry = remove.closest(".scheduled-message-entry");
@@ -880,8 +1014,59 @@ function initScheduledPickers() {
       renderScheduledMessageEditor();
     }, "删除");
   });
-  document.getElementById("scheduledMessageEntries").addEventListener("change", function (event) {
+  document.getElementById("scheduledMessageEntries").addEventListener("change", async function (event) {
     const entry = event.target.closest(".scheduled-message-entry");
+    if (entry && event.target.dataset.field === "image_file_input") {
+      if (scheduledImageReadPending) {
+        event.target.value = "";
+        return;
+      }
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const allowedTypes = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+      if (!allowedTypes.includes(String(file.type || "").toLowerCase())) {
+        showAlert("定时消息", "仅支持 PNG、JPEG、GIF 或 WebP 图片");
+        event.target.value = "";
+        return;
+      }
+      if (file.size <= 0 || file.size > 2 * 1024 * 1024) {
+        showAlert("定时消息", "单张图片大小必须大于 0 且不超过 2 MiB");
+        event.target.value = "";
+        return;
+      }
+      scheduledMessageDraft = readScheduledMessageEditor();
+      const index = Number(entry.dataset.index);
+      const usedByOthers = scheduledMessageDraft.reduce(function (total, message, messageIndex) {
+        return total + (messageIndex === index ? 0 : scheduledImageDataSize(message.image_data));
+      }, 0);
+      if (usedByOthers + file.size > 3 * 1024 * 1024) {
+        showAlert("定时消息", "所有定时消息图片合计不能超过 3 MiB");
+        event.target.value = "";
+        return;
+      }
+      scheduledImageReadPending = true;
+      try {
+        const imageData = await readScheduledImageFile(file);
+        scheduledMessageDraft = readScheduledMessageEditor();
+        const latest = scheduledMessageDraft[index];
+        latest.image_data = imageData;
+        latest.image_name = file.name;
+        if (scheduledImageDataSize(latest.image_data) > 2 * 1024 * 1024) {
+          latest.image_data = "";
+          latest.image_name = "";
+          showAlert("定时消息", "单张图片大小必须不超过 2 MiB");
+        } else {
+          renderScheduledMessageEditor();
+        }
+      } catch (error) {
+        scheduledMessageDraft = readScheduledMessageEditor();
+        showAlert("定时消息", "图片读取失败，请重新选择");
+      } finally {
+        scheduledImageReadPending = false;
+      }
+      event.target.value = "";
+      return;
+    }
     if (entry && (event.target.dataset.field === "schedule_type" || event.target.dataset.field === "calendar_type")) {
       updateScheduledMessageEntryVisibility(entry);
     }
@@ -925,6 +1110,23 @@ function renderScheduledMessage(config) {
     }
   }
   renderScheduledMessageToggle(value.enabled === true);
+}
+
+function preserveScheduledMessageAttachments(statusConfig, currentConfig) {
+  const currentMessages = normalizeScheduledMessages(currentConfig);
+  const currentById = new Map(currentMessages.map(function (message) {
+    return [message.id, message];
+  }));
+  const next = Object.assign({}, statusConfig || {});
+  next.messages = normalizeScheduledMessages(statusConfig).map(function (message, index) {
+    const previous = currentById.get(message.id) || currentMessages[index];
+    if (!message.image_data && previous && previous.image_data) {
+      message.image_data = previous.image_data;
+      message.image_name = previous.image_name || "";
+    }
+    return message;
+  });
+  return next;
 }
 
 async function saveScheduledMessageSettings(enabled) {
@@ -2091,6 +2293,10 @@ function renderBilibiliStatus(st) {
   } else if (!st.running) {
     badgeText = "等待 QQ 连接";
     badgeCls = "badge warn";
+  } else if (st.protection_error || st.last_result === "protection_failed") {
+    badgeText = "投递保护异常";
+    badgeCls = "badge off";
+    failed = true;
   } else if (!st.qq_connected) {
     if (!pollTs) badgeText = "等待 QQ 连接";
     else if (st.last_result === "ok") badgeText = "RSS 正常 · QQ 未连接";
@@ -2110,7 +2316,7 @@ function renderBilibiliStatus(st) {
   }
   badge.textContent = badgeText;
   badge.className = badgeCls;
-  badge.title = st.last_error || st.msg || badgeText;
+  badge.title = st.protection_error || st.last_error || st.msg || badgeText;
   setStatusCardAmbient(badge, badgeCls === "badge on");
   const overviewBilibili = document.getElementById("overviewBilibili");
   setOverviewRouteStatus(overviewBilibili, badgeText, "Bilibili RSS",
@@ -2120,11 +2326,14 @@ function renderBilibiliStatus(st) {
   if (summary) {
     const sendFailed = Number(st.last_failed_count) || 0;
     summary.classList.toggle("err", failed || sendFailed > 0 || st.ok === false);
-    summary.title = failed ? localizeUserError(st.last_error, "请求失败") : "";
+    summary.title = failed ? localizeUserError(st.protection_error || st.last_error, "请求失败") : "";
     if (!botUp) {
       summary.textContent = "—";
     } else if (failed) {
-      summary.innerHTML = '<strong>' + (st.last_result === "parse_failed" ? "解析异常" : "请求异常") + '</strong><span>请稍后重试</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
+      const protectionFailed = !!st.protection_error || st.last_result === "protection_failed";
+      const errorLabel = protectionFailed ? "投递保护异常" : (st.last_result === "parse_failed" ? "解析异常" : "请求异常");
+      const advice = protectionFailed ? "请恢复积压队列文件" : "请稍后重试";
+      summary.innerHTML = '<strong>' + errorLabel + '</strong><span>' + advice + '</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
     } else if (st.ok === false) {
       summary.title = localizeUserError(st.msg, "请求异常");
       summary.innerHTML = '<strong>请求异常</strong><span>请稍后重试</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
@@ -4394,6 +4603,8 @@ document.addEventListener("click", async function (e) {
     openQQWhitelistModal();
     return;
   }
+  if (["btnMaintenanceOpen", "btnMaintenanceBanner"].includes(btn.id)) { openBackupRestore(); return; }
+  if (["btnAutoBackupToggle", "btnAutoBackupNow", "btnAutoBackupRestore"].includes(btn.id)) { await runMaintenanceAction(btn); return; }
   if (btn.id === "btnBackupRestore") { openBackupRestore(); return; }
   if (btn.id === "btnBackupExport") {
     try { await exportBackup(); } catch (err) { showAlert("导出备份", err.message || "导出失败"); }
@@ -5314,7 +5525,10 @@ async function refreshStatus() {
       bfLimit.value = Number(st.backfill_limit) > 0 ? st.backfill_limit : 10;
     }
     if (st.scheduled_message !== undefined && settings && !scheduledMessageEditorFocused()) {
-      settings.scheduled_message = st.scheduled_message || {};
+      settings.scheduled_message = preserveScheduledMessageAttachments(
+        st.scheduled_message,
+        settings.scheduled_message,
+      );
       renderScheduledMessage(settings.scheduled_message);
     }
     // 补发/清除成功（含 QQ 私聊触发）后立即刷新待补发数量
@@ -5357,6 +5571,8 @@ async function init() {
   // Bilibili RSS 状态卡片：与 X RSS 相同的轻量轮询
   await refreshBilibiliStatus();
   setInterval(refreshBilibiliStatus, 10000);
+  await refreshMaintenance();
+  setInterval(refreshMaintenance, 10000);
   await refreshMessageTrace();
   setInterval(refreshMessageTrace, 10000);
 }

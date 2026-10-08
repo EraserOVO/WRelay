@@ -484,6 +484,14 @@
   .scheduled-message-entry-content {
     min-height: 84px; resize: vertical; line-height: 1.5;
   }
+  .scheduled-message-image-row {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+    margin-top: 8px;
+  }
+  .scheduled-message-image-row button { padding: 5px 9px; font-size: 12px; }
+  .scheduled-message-image-row button:disabled { opacity: .55; cursor: default; }
+  .scheduled-message-image-name { min-width: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+  .scheduled-message-image-hint { margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.45; }
   .scheduled-message-entry input[type=datetime-local],
   .scheduled-message-entry input[type=time] { height: 30px; }
   .scheduled-message-entry input[type=number] { width: 62px; height: 30px; }
@@ -2663,6 +2671,11 @@ body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data
       #recentMessageCard, #logCard, #pageDiscord > .card, #pageX > .card, #pageBilibili > .card, #pageQQ > .card) > h2 .hintbtn {
   align-self: center;
   margin: 0;
+}
+/* The Discord backfill and QQ scheduled-message headings share a top baseline. */
+body.desktop-host[data-active-page="discord"] .desktop-backfill-parameters > h2,
+body.desktop-host[data-active-page="qq"] #scheduledMessageCard > h2 {
+  align-self: flex-start;
 }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
   :is(#backfillCard, #xrssCard, #bilibiliCard, #scheduledMessageCard) { margin-bottom: 0; }

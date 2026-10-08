@@ -75,3 +75,18 @@ async def api_message_trace(limit: int = 50):
         "ok": True,
         "entries": await asyncio.to_thread(get_delivery_traces, limit),
     }
+
+
+@app.post("/api/maintenance/alert")
+async def api_maintenance_alert(request: Request):
+    data = await request.json()
+    if not isinstance(data, dict) or not isinstance(data.get("id"), str) or not isinstance(data.get("message"), str):
+        return JSONResponse({"ok": False}, status_code=400)
+    if not data["id"] or len(data["id"]) > 200 or len(data["message"]) > 500:
+        return JSONResponse({"ok": False}, status_code=400)
+    from plugins.failure_notification import notify_maintenance_failure
+    qq = next((bot for bot in get_bots().values() if isinstance(bot, QQBot)), None)
+    if qq is None:
+        return {"ok": False, "sent": 0}
+    sent = await notify_maintenance_failure(qq, data["id"], data["message"])
+    return {"ok": True, "sent": sent}

@@ -85,7 +85,10 @@ def main():
         assert wrelay_panel.BOT_ENTRY is None
         print(json.dumps({"ok": True, "plugins": len(modules)}))
         return 0
-    if role == "wrelay.bot":
+    if role == "wrelay.guardian":
+        from panel.desktop_guardian import guardian_main
+        guardian_main()
+    elif role == "wrelay.bot":
         import bot  # This existing entry performs the credential guard and runs NoneBot.
     elif role == "wrelay.restart":
         import wrelay_restart

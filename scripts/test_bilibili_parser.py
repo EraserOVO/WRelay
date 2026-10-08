@@ -30,7 +30,8 @@ def main():
     posts = parse_feed(RSS)
     assert len(posts) == 2
     assert posts[0]["title"] == "第一个视频"
-    assert posts[0]["bvid"] == "BV1AA411C7MD"
+    # BV 号大小写敏感：必须原样保留 fixture 中的小写 m
+    assert posts[0]["bvid"] == "BV1AA411C7mD"
     assert posts[0]["author"] == "测试 UP"
     assert posts[0]["tags"] == ["游戏", "攻略"]
     assert posts[0]["media"] == [{"kind": "图片", "url": "https://img.example/cover.jpg"}]

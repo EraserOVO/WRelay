@@ -28,3 +28,17 @@ GitHub Actions 在 Ubuntu 和 Windows 上检查 Python 3.10 与 3.12，安装锁
 正式构建与测试构建分开；签名发布需要由发布者配置受信任的 Authenticode 证书、时间戳服务和签名工具。仓库不应保存私钥或证书密码。安装包会附第三方组件许可证材料，具体文件由构建脚本从当前锁定依赖生成。
 
 测试包说明见 [测试包使用说明](TEST_PACKAGE.md)。测试安装包与任何公开发行版应使用可追溯的源提交构建，并在发布前完成依赖、素材、隐私与许可证复核。
+
+### 明确选择未签名的正式安装包
+
+没有受信任的签名证书时，由发布者明确选择：
+
+```powershell
+.\scripts\build_installer.ps1 -Edition release -Unsigned
+```
+
+此参数只跳过 Authenticode 签名，不跳过源提交、依赖检查、编译审计及安装包 SHA-256 生成。
+默认正式构建仍要求签名配置。发布说明应标记「未签名」，Windows 可能显示未知发布者。
+0.1.1 安装包包含无控制台的 WRelay.Guardian.exe，与桌面和 Bot 同源编译。
+
+针对维护功能可单独运行 `python scripts/test_maintenance.py` 和 `python scripts/test_backup_restore.py`，覆盖备份完整性、损坏状态保护、恢复失败回滚、RSS 连续失败提醒及桌面恢复限制。

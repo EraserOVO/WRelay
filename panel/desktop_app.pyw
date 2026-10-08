@@ -307,6 +307,10 @@ class DesktopApi:
 
 
 def main():
+    if "--guardian" in sys.argv:
+        from panel.desktop_guardian import guardian_main
+        guardian_main()
+        return
     try:
         mutex = _single_instance_handle()
     except Exception as exc:
@@ -316,6 +320,7 @@ def main():
     if mutex is None:
         return
 
+    guardian = None
     tray = None
     controls = None
     pipe_server = None
@@ -345,6 +350,9 @@ def main():
         pipe_server = ManagerPipeServer(panel.app, panel.PANEL_TOKEN)
         pipe_server.start()
         panel.main()
+        from panel.desktop_guardian import GuardianSession
+        guardian = GuardianSession()
+        guardian.start()
 
         capability = secrets.token_urlsafe(32)
         api = DesktopApi(panel, capability)
@@ -413,6 +421,8 @@ def main():
             if exiting:
                 return
             exiting = True
+            if guardian is not None:
+                guardian.stop()
             if controls is not None:
                 controls.finished.set()
             if save_timer is not None:
@@ -436,6 +446,8 @@ def main():
                 return True
             if api._preferences.get()["close_behavior"] == "exit":
                 exiting = True
+                if guardian is not None:
+                    guardian.stop()
                 controls.finished.set()
                 return True
             controls.dispatch(controls.close_window)
@@ -461,6 +473,8 @@ def main():
         tray.run_detached()
         threading.Thread(target=controls.poll, name="wrelay-tray-status", daemon=True).start()
         webview.start(gui="edgechromium", icon=ICON_PATH)
+        if exiting and guardian is not None:
+            guardian.stop()
     except Exception as exc:
         _log_error()
         _message("桌面窗口启动失败：%s\n请确认已安装 WebView2 Runtime。" % exc)

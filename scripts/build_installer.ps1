@@ -3,7 +3,8 @@ param(
     [ValidateSet("release", "test")]
     [string]$Edition = "release",
     [string]$Owner = "",
-    [switch]$CompileOnly
+    [switch]$CompileOnly,
+    [switch]$Unsigned
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,5 +16,6 @@ if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
 $arguments = @((Join-Path $PSScriptRoot "build_compiled.py"), "--edition", $Edition)
 if ($Owner) { $arguments += @("--owner", $Owner) }
 if ($CompileOnly) { $arguments += "--compile-only" }
+if ($Unsigned) { $arguments += "--unsigned" }
 & $python @arguments
 if ($LASTEXITCODE -ne 0) { throw "WRelay release build failed ($LASTEXITCODE)." }

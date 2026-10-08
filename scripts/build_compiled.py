@@ -185,6 +185,7 @@ def licenses(target):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--compile-only", action="store_true")
+    parser.add_argument("--unsigned", action="store_true", help="Explicitly build an unsigned installer; published as unsigned")
     parser.add_argument("--edition", choices=("test", "release"), default="test")
     parser.add_argument("--owner", default="", help="Copyright holder supplied by the project owner")
     parser.add_argument("--resume", type=Path, help="Resume a build directory under build/compiled")
@@ -198,7 +199,7 @@ def main():
             "Release builds require a clean, committed Git worktree. Remaining changes: " +
             ", ".join(changes[:12])
         )
-    signing = signing_configuration() if args.edition == "release" and not args.compile_only else None
+    signing = signing_configuration() if args.edition == "release" and not args.compile_only and not args.unsigned else None
     run([sys.executable, ROOT / "scripts" / "check_security_dependencies.py"])
     version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     builds = ROOT / "build" / "compiled"
@@ -263,7 +264,7 @@ def main():
     # Remove only these known symbols; the audit still rejects unexpected files.
     for architecture in ("amd64", "x86"):
         (output / "clr_loader" / "ffi" / "dlls" / architecture / "ClrLoader.pdb").unlink(missing_ok=True)
-    for name in ("WRelay.Bot.exe", "WRelay.Restart.exe"):
+    for name in ("WRelay.Bot.exe", "WRelay.Restart.exe", "WRelay.Guardian.exe"):
         shutil.copy2(output / "WRelay.exe", output / name)
     (output / "panel" / "web").mkdir(parents=True, exist_ok=True)
     for name in WEB_FILES:
@@ -305,7 +306,7 @@ WRelay is licensed under GPL-3.0-or-later. Third-party components retain their o
                                              "\nThird-party components retain their respective licenses.\n", encoding="utf-8")
     if signing:
         signtool, thumbprint, timestamp_url = signing
-        for name in ("WRelay.exe", "WRelay.Bot.exe", "WRelay.Restart.exe", "panel/WRelay.WindowChrome.dll"):
+        for name in ("WRelay.exe", "WRelay.Bot.exe", "WRelay.Restart.exe", "WRelay.Guardian.exe", "panel/WRelay.WindowChrome.dll"):
             sign_and_verify(signtool, output / name, thumbprint, timestamp_url)
     audit(output)
     (build / "artifact-path.txt").write_text(str(output), encoding="utf-8")
@@ -336,8 +337,12 @@ WRelay is licensed under GPL-3.0-or-later. Third-party components retain their o
     installer_name = "WRelay-Setup.exe" if args.edition == "release" else "WRelay-Test-" + build.name + "-Setup.exe"
     staging_output = build / "installer-output"
     staging_output.mkdir(exist_ok=True)
+    # Inno Setup 6 的 ISCC 只接受短选项；/O<path> 在 6 和 7 中都有效，
+    # 因此不要使用 --output-dir= 这类长选项。
     compiler_args = [compiler, "/Qp", "/DCompiledRoot=" + str(output), "/DBuildVersion=" + version,
-                     "/DBuildId=" + build.name, "--output-dir=" + str(staging_output)]
+                     "/DBuildId=" + build.name, "/O" + str(staging_output)]
+    if args.unsigned:
+        compiler_args.append("/DUnsigned=1")
     if signing:
         compiler_args.extend(["--no-ide-signtools", "--signtool=" + inno_sign_tool(*signing)])
     compiler_args.append(ROOT / installer_script)

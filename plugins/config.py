@@ -1090,13 +1090,19 @@ def get_scheduled_message_config():
         if not isinstance(raw, dict):
             continue
         content = str(raw.get("content") or "").strip()
-        if not content:
+        image_data = raw.get("image_data")
+        if not content and not isinstance(image_data, str):
+            continue
+        if not content and not image_data:
             continue
         item = {
             "id": str(raw.get("id") or "message-" + str(index + 1)),
             "content": content,
             "schedule_type": raw.get("schedule_type"),
         }
+        if isinstance(image_data, str) and image_data:
+            item["image_data"] = image_data
+            item["image_name"] = str(raw.get("image_name") or "")
         if item["schedule_type"] == "interval":
             def _int_value(key, default, maximum):
                 try:

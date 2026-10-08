@@ -4,7 +4,7 @@ from collections import deque
 from nonebot import get_driver
 from nonebot import logger
 from nonebot import on_message
-from nonebot.adapters import Event
+from nonebot.adapters import Bot, Event
 
 from nonebot.adapters.discord import Bot as DiscordBot
 from nonebot.adapters.discord.event import GuildMessageCreateEvent
@@ -359,7 +359,7 @@ async def _process_event(
 
 @relay.handle()
 async def handle(
-    bot: DiscordBot,
+    bot: Bot,
     event: Event
 ):
     """实时事件入口：快速入队，把耗时处理移到有界频道队列。"""

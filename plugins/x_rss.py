@@ -1260,6 +1260,7 @@ async def _poll_all():
         seen_source_keys.add(normalized_key)
         sources.append(source)
     if not sources:
+        _runtime_status["source_health"] = []
         return
 
     sem = asyncio.Semaphore(X_POLL_CONCURRENCY)
@@ -1279,6 +1280,13 @@ async def _poll_all():
                         "new": 0, "sent": 0, "failed": 0}
 
     results = await asyncio.gather(*(poll_one(source) for source in sources))
+    previous = {item["id"]: item for item in _runtime_status.get("source_health", [])}
+    health = []
+    for source, result in zip(sources, results):
+        identity = str(source["key"])
+        count = 0 if result.get("result") == "ok" else previous.get(identity, {}).get("consecutive_failures", 0) + 1
+        health.append({"id": identity, "name": source["name"], "consecutive_failures": count})
+    _runtime_status["source_health"] = health
     new_total = sent_total = failed_total = 0
     bad_result = ""
     bad_error = ""

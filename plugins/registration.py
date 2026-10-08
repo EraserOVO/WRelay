@@ -18,6 +18,7 @@ from plugins.json_io import (
     update_json,
 )
 from plugins.paths import data_path
+from plugins.c2c_consumed import is_consumed
 
 
 # =====================================================
@@ -164,6 +165,10 @@ async def handle_register(
         bot,
         QQBot
     ):
+        return
+
+    # 已被 QQ 私聊 relay 消费的消息不再触发注册（stop_propagation 的兜底）。
+    if is_consumed(event):
         return
 
     message = event.get_plaintext().strip()

@@ -52,6 +52,7 @@ from plugins.json_io import (
     update_json,
 )
 from plugins.paths import data_path
+from plugins.c2c_consumed import mark_consumed
 
 
 relay_command = on_message(
@@ -296,7 +297,7 @@ async def log_group_add_openid(
 # 私聊专属：下一条消息若是 Discord / X / Bilibili 链接，分别走对应平台的
 # 单条消息抓取与渲染机制；relay 命令入口统一使用已授权 QQ 用户白名单。
 #
-# 与 manage.py（priority=20）的关系：本 matcher priority=15 先执行；凡是被本段
+# 与 manage.py（priority=20）的关系：本 matcher priority=14 先执行；凡是被本段
 # 消费的消息（relay 指令、待转发的下一条内容）都 stop_propagation，避免 manage
 # 再把同一消息当私聊命令回复「未知命令」造成双回复。
 # =====================================================
@@ -398,7 +399,7 @@ def _parse_c2c_relay_indexes(argument, group_count):
 
 @relay_command.handle()
 async def handle(
-    bot: QQBot,
+    bot: Bot,
     event: Event
 ):
 
@@ -438,12 +439,14 @@ async def handle(
             stripped == "relay"
             or stripped.startswith("relay ")
         ):
+            mark_consumed(event)
             await _handle_relay_cmd(bot, event, stripped, user)
             return
 
         # ---- 下一条消息消费（有 pending 时）----
         entry = get_c2c_pending(user)
         if entry is not None:
+            mark_consumed(event)
             await _consume_next(
                 bot,
                 event,

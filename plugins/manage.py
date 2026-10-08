@@ -11,7 +11,6 @@ from nonebot.adapters import Bot, Event
 from nonebot.adapters.qq import Bot as QQBot
 from nonebot.adapters.qq.event import (
     C2CMessageCreateEvent,
-    GroupAtMessageCreateEvent,
     GroupMessageCreateEvent,
 )
 
@@ -23,6 +22,7 @@ from plugins.json_io import (
     run_in_thread_to_completion,
 )
 from plugins.paths import data_path
+from plugins.c2c_consumed import is_consumed
 from panel.local_bridge import request_manager
 
 
@@ -511,6 +511,12 @@ async def handle(
     ):
         return
 
+    # 已被 QQ 私聊 relay 消费的消息不再按管理命令处理。
+    # stop_propagation 是首选机制；它失效的运行环境下由该标记兜底，
+    # 避免同一条消息既被转发/报错又被回复一次「未知命令」。
+    if is_consumed(event):
+        return
+
     message = event.get_plaintext()
 
     if not message:
@@ -628,10 +634,9 @@ async def handle(
 # =====================================================
 # 群内 @ 机器人的未知命令提示
 #
-# 标准事件以 GroupAtMessageCreateEvent / is_tome() 准确识别。
-# 旧部署可能把 @机器人消息送成无标记的空文本 GroupMessageCreateEvent；
-# 为兼容旧行为，仅对单个空文本段回退提示。此旧格式无法和普通空白消息
-# 区分，所以空白消息也可能触发。进行中的 relay pending 继续优先消费消息。
+# 只接受 QQ 适配器明确标记为机器人目标的 mention_user 消息段。
+# 事件类型或空文本段无法证明提及对象是机器人，不能作为回退触发条件。
+# 进行中的 relay pending 继续优先消费消息。
 # =====================================================
 
 group_at_hint = on_message(
@@ -670,18 +675,31 @@ async def handle_group_at_hint(
     msg = event.get_message()
     segs = list(msg)
 
-    is_tome = getattr(event, "is_tome", None)
-    explicit_at = isinstance(event, GroupAtMessageCreateEvent) or (
-        callable(is_tome) and bool(is_tome())
-    )
-    legacy_blank_at = (
-        len(segs) == 1
-        and segs[0].type == "text"
-        and not (segs[0].data.get("text") or "").strip()
-    )
+    bot_id = _qq_bot_id(bot)
+    mentions_bot = False
+    for segment in segs:
+        if getattr(segment, "type", None) != "mention_user":
+            continue
 
-    if not explicit_at and not legacy_blank_at:
-        # 普通群消息、附件消息、@其他成员的消息均不触发。
+        data = getattr(segment, "data", None)
+        if not isinstance(data, dict):
+            continue
+
+        mention_id = str(data.get("user_id") or "").strip()
+        if bot_id and mention_id:
+            if mention_id == bot_id:
+                mentions_bot = True
+                break
+            # 目标 ID 已明确且不是机器人时，不采信可能不一致的辅助标记。
+            continue
+
+        # 兼容缺少目标 ID 的适配器事件。
+        if data.get("is_bot") is True:
+            mentions_bot = True
+            break
+
+    if not mentions_bot:
+        # 事件类型可能覆盖普通成员提及；必须确认提及目标确实是机器人。
         return
 
     if qq_fwd.has_pending(

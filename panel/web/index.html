@@ -535,12 +535,16 @@
       <section class="card settings-card">
         <h2>启动与维护</h2>
         <div class="settings-row">
-          <div class="settings-item-copy"><strong>失败通知</strong><small>转发失败时向授权 QQ 用户发送提醒</small></div>
+          <div class="settings-item-copy"><strong>失败通知</strong><small>投递失败、RSS 连续失败和队列异常时向授权 QQ 用户提醒</small></div>
           <button id="btnFailureNotificationToggle" type="button" class="sec settings-switch" role="switch" aria-checked="false" aria-label="失败通知"><span class="settings-switch-track" aria-hidden="true"></span></button>
         </div>
         <div class="settings-row">
           <div class="settings-item-copy"><strong>随 Windows 启动</strong><small>登录 Windows 后启动 WRelay 与机器人</small></div>
           <button id="btnSettingsAutostart" type="button" class="sec" disabled aria-label="机器人随 Windows 启动" aria-pressed="false"><span class="settings-switch-track" aria-hidden="true"></span></button>
+        </div>
+        <div class="settings-row">
+          <div class="settings-item-copy"><strong>自动备份与维护</strong><small id="maintenanceStatus" aria-live="polite">正在检查维护状态…</small></div>
+          <button type="button" class="sec" id="btnMaintenanceOpen">查看 ›</button>
         </div>
         <div class="settings-row">
           <div class="settings-item-copy"><strong>备份与恢复</strong><small>备份或恢复配置数据</small></div>
@@ -643,11 +647,22 @@
     </div>
   </div>
 </div>
+<div id="maintenanceBanner" role="status" class="card" style="display:none;position:fixed;bottom:16px;right:24px;z-index:900;max-width:440px;padding:12px 16px;"><span id="maintenanceBannerText"></span><button id="btnMaintenanceBanner" class="sec" type="button">查看维护</button></div>
 <div id="backupRestoreModal" class="backup-modal" style="display:none;">
   <div class="backup-dialog" role="dialog" aria-modal="true" aria-labelledby="backupRestoreTitle">
     <button type="button" class="modal-x" data-close="backupRestoreModal" aria-label="关闭">×</button>
     <div class="backup-title"><h3 id="backupRestoreTitle">安全备份与恢复</h3></div>
-    <p class="backup-note">默认仅处理面板配置 <code>settings.json</code>。导出和导入 ZIP 上限均为 5 MB。</p>
+    <div class="settings-row">
+      <div class="settings-item-copy"><strong>每小时自动备份</strong><small>默认开启，保留最近 30 份，包含运行状态</small></div>
+      <button id="btnAutoBackupToggle" type="button" class="sec" aria-pressed="true">已开启</button>
+    </div>
+    <div class="backup-actions">
+      <button id="btnAutoBackupNow" class="sec" type="button">立即备份</button>
+      <select id="autoBackupSelect" aria-label="选择自动备份"><option value="">正在读取备份…</option></select>
+      <button id="btnAutoBackupRestore" class="danger" type="button">恢复所选备份</button>
+    </div>
+    <p id="maintenanceDetail" class="backup-warning" aria-live="polite"></p>
+    <p class="backup-note">手动导出默认仅包含配置；自动备份包含配置、游标、队列和来源状态。ZIP 上限为 5 MB，超限会提醒并保留旧备份。</p>
     <label class="backup-runtime"><input id="backupIncludeRuntime" type="checkbox"> <span>包含运行状态（游标和重试队列）</span></label>
     <div class="backup-actions">
       <button id="btnBackupExport" class="sec" type="button">导出 ZIP</button>

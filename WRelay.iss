@@ -11,8 +11,10 @@ AppId=WRelay
 AppName=WRelay
 AppVersion={#BuildVersion}
 AppPublisher=WRelay
+#ifndef Unsigned
 SignTool=wrelay-authenticode
 SignedUninstaller=yes
+#endif
 DefaultDirName={code:GetDefaultReleaseDir}
 DefaultGroupName=WRelay
 OutputDir=dist

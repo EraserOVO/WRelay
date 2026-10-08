@@ -63,8 +63,8 @@ async def main():
             panel.RESTORE_BACKUP_DIR = str(root / "restore_backups")
             settings = panel.get_default_settings()
             Path(panel.SETTINGS_FILE).write_text(json.dumps(settings), encoding="utf-8")
-            Path(panel.DISCORD_LAST_FILE).write_text(json.dumps({"cursor": "old"}), encoding="utf-8")
-            Path(panel.RETRY_PENDING_FILE).write_text(json.dumps({"pending": ["old"]}), encoding="utf-8")
+            Path(panel.DISCORD_LAST_FILE).write_text(json.dumps({"cursor": "100"}), encoding="utf-8")
+            Path(panel.RETRY_PENDING_FILE).write_text(json.dumps({"version": 1, "entries": [], "last_error": "old"}), encoding="utf-8")
             connection = sqlite3.connect(panel.DELIVERY_DEDUP_DB_FILE)
             try:
                 connection.execute(
@@ -99,8 +99,8 @@ async def main():
             incoming = panel.get_default_settings()
             incoming["backfill_limit"] = 12
             panel.restore_backup_archive(archive({"settings.json": incoming}))
-            assert json.loads(Path(panel.DISCORD_LAST_FILE).read_text(encoding="utf-8"))["cursor"] == "old"
-            assert json.loads(Path(panel.RETRY_PENDING_FILE).read_text(encoding="utf-8"))["pending"] == ["old"]
+            assert json.loads(Path(panel.DISCORD_LAST_FILE).read_text(encoding="utf-8"))["cursor"] == "100"
+            assert json.loads(Path(panel.RETRY_PENDING_FILE).read_text(encoding="utf-8"))["last_error"] == "old"
             print("PASS - 默认恢复不触碰运行状态")
 
             restored = await api_request(
@@ -113,7 +113,7 @@ async def main():
                 },
             )
             assert restored.status_code == 200 and restored.json()["ok"] is True
-            assert json.loads(Path(panel.DISCORD_LAST_FILE).read_text(encoding="utf-8"))["cursor"] == "old"
+            assert json.loads(Path(panel.DISCORD_LAST_FILE).read_text(encoding="utf-8"))["cursor"] == "100"
             print("PASS - 默认恢复接口不触碰运行状态")
 
             runtime_archive = panel.create_backup_archive(True)
@@ -137,8 +137,8 @@ async def main():
 
             panel.restore_backup_archive(archive({
                 "settings.json": incoming,
-                "discord_last.json": {"cursor": "new"},
-                "retry_pending.json": {"pending": ["new"]},
+                "discord_last.json": {"cursor": "200"},
+                "retry_pending.json": {"version": 1, "entries": [], "last_error": "new"},
             }, True), True, True)
             backups = list((root / "restore_backups").glob("*.zip"))
             assert backups
@@ -166,8 +166,8 @@ async def main():
                     "/api/backup/restore?include_runtime_state=true&confirm_runtime_state=true",
                     content=archive({
                         "settings.json": blocked_settings,
-                        "discord_last.json": {"cursor": "blocked"},
-                        "retry_pending.json": {"pending": ["blocked"]},
+                        "discord_last.json": {"cursor": "300"},
+                        "retry_pending.json": {"version": 1, "entries": [], "last_error": "blocked"},
                     }, True),
                     headers={
                         "Content-Type": "application/zip",
@@ -202,7 +202,7 @@ async def main():
                 panel._save_restore_rollback = check_rollback
                 panel.restore_backup_archive(archive({
                     "settings.json": incoming,
-                    "discord_last.json": {"cursor": "locked"},
+                    "discord_last.json": {"cursor": "400"},
                 }, True), True, True)
             finally:
                 panel.json_file_lock = original_lock
@@ -236,7 +236,7 @@ async def main():
                 raise AssertionError("非白名单文件未被拒绝")
             bad = archive({
                 "settings.json": incoming,
-                "discord_last.json": {"cursor": "new"},
+                "discord_last.json": {"cursor": "200"},
             })
             try:
                 panel.restore_backup_archive(bad, True, True)

@@ -1,6 +1,7 @@
 """管理面板配置备份与恢复服务。"""
 
 import io
+import hashlib
 import json
 import os
 import shutil
@@ -12,6 +13,8 @@ import zipfile
 from contextlib import ExitStack
 from datetime import datetime, timezone
 
+from plugins.state_validation import validate_runtime
+
 
 BACKUP_SETTINGS_NAME = "settings.json"
 BACKUP_DELIVERY_DEDUP_NAME = "delivery_dedup.sqlite3"
@@ -19,6 +22,9 @@ BACKUP_RUNTIME_NAMES = (
     "discord_last.json",
     "retry_pending.json",
     "x_protection.json",
+    "bilibili_protection.json",
+    "bilibili.json",
+    "x_rss.json",
     BACKUP_DELIVERY_DEDUP_NAME,
 )
 BACKUP_MANIFEST_NAME = "manifest.json"
@@ -73,6 +79,9 @@ class BackupRestoreService:
             "discord_last.json": self.discord_last_file,
             "retry_pending.json": self.retry_pending_file,
             "x_protection.json": self.x_protection_file,
+            "bilibili_protection.json": os.path.join(os.path.dirname(self.settings_file), "bilibili_protection.json"),
+            "bilibili.json": os.path.join(os.path.dirname(self.settings_file), "bilibili.json"),
+            "x_rss.json": os.path.join(os.path.dirname(self.settings_file), "x_rss.json"),
             BACKUP_DELIVERY_DEDUP_NAME: self.delivery_dedup_file,
         }
 
@@ -100,18 +109,19 @@ class BackupRestoreService:
             try:
                 connection = sqlite3.connect(path, timeout=10)
                 try:
-                    result = connection.execute("PRAGMA quick_check").fetchone()
+                    result = connection.execute("PRAGMA integrity_check").fetchone()
                     tables = {
                         row[0]
                         for row in connection.execute(
                             "SELECT name FROM sqlite_master WHERE type = 'table'"
                         )
                     }
+                    columns = {row[1] for row in connection.execute("PRAGMA table_info(delivered_items)")}
                 finally:
                     connection.close()
             except sqlite3.DatabaseError as exc:
                 raise ValueError("delivery_dedup.sqlite3 不是有效 SQLite 数据库") from exc
-            if not result or result[0] != "ok" or "delivered_items" not in tables:
+            if not result or result[0] != "ok" or "delivered_items" not in tables or not {"identity_key", "group_id", "delivered_at"} <= columns:
                 raise ValueError("delivery_dedup.sqlite3 结构校验失败")
 
     @staticmethod
@@ -172,14 +182,16 @@ class BackupRestoreService:
             names = [name for name in requested_names if os.path.exists(targets[name])]
             if BACKUP_SETTINGS_NAME not in names:
                 names.insert(0, BACKUP_SETTINGS_NAME)
+            manifest = self.backup_manifest(names, include_runtime_state)
+            manifest["version"] = 2
+            manifest["sha256"] = {}
             manifest_payload = json.dumps(
-                self.backup_manifest(names, include_runtime_state),
+                manifest,
                 ensure_ascii=False,
                 indent=2,
             ).encode("utf-8")
             payload = io.BytesIO()
             with zipfile.ZipFile(payload, "w", zipfile.ZIP_DEFLATED) as archive:
-                archive.writestr(BACKUP_MANIFEST_NAME, manifest_payload)
                 uncompressed_size = len(manifest_payload)
                 for name in names:
                     try:
@@ -204,10 +216,17 @@ class BackupRestoreService:
                         raise ValueError(
                             "备份内容超过 5 MB 限制，请取消包含运行状态或减少队列数据"
                         )
+                    manifest["sha256"][name] = hashlib.sha256(content).hexdigest()
                     archive.writestr(name, content)
+                manifest_payload = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
+                if uncompressed_size + len(manifest_payload) > BACKUP_MAX_BYTES:
+                    raise ValueError("备份内容超过 5 MB 限制")
+                archive.writestr(BACKUP_MANIFEST_NAME, manifest_payload)
             if payload.tell() > BACKUP_MAX_BYTES:
                 raise ValueError("生成的备份 ZIP 超过 5 MB 限制")
-        return payload.getvalue()
+        result = payload.getvalue()
+        self.read_restore_archive(result)
+        return result
 
     def read_restore_archive(self, payload):
         if (
@@ -252,7 +271,7 @@ class BackupRestoreService:
                     not isinstance(manifest, dict)
                     or manifest.get("format") != "wrelay-backup"
                     or type(manifest.get("version")) is not int
-                    or manifest.get("version") != 1
+                    or manifest.get("version") not in (1, 2)
                 ):
                     raise ValueError("不支持的备份格式")
                 if type(manifest.get("include_runtime_state")) is not bool:
@@ -266,6 +285,13 @@ class BackupRestoreService:
                     and manifest.get("include_runtime_state") is not True
                 ):
                     raise ValueError("备份清单未声明运行状态")
+                if manifest["version"] == 2:
+                    hashes = manifest.get("sha256")
+                    if not isinstance(hashes, dict) or set(hashes) != set(manifest["files"]):
+                        raise ValueError("备份缺少完整校验值")
+                    for name in manifest["files"]:
+                        if hashlib.sha256(archive.read(name)).hexdigest() != hashes[name]:
+                            raise ValueError(name + " 完整性校验失败")
                 data = {}
                 for name in names:
                     if name == BACKUP_MANIFEST_NAME:
@@ -286,6 +312,9 @@ class BackupRestoreService:
         err = self.settings_validator(data[BACKUP_SETTINGS_NAME])
         if err:
             raise ValueError("settings.json 配置校验失败: " + err)
+        for name, value in data.items():
+            if name not in (BACKUP_SETTINGS_NAME, BACKUP_DELIVERY_DEDUP_NAME):
+                validate_runtime(name, value)
         return data
 
     def save_restore_rollback(self, names):

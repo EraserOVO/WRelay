@@ -11,6 +11,7 @@ from datetime import datetime, time, timedelta
 
 from nonebot import get_driver, logger
 from nonebot.adapters.qq import Bot as QQBot
+from nonebot.adapters.qq import MessageSegment as QQMessageSegment
 
 from plugins.config import (
     get_active_groups,
@@ -18,6 +19,7 @@ from plugins.config import (
 )
 from plugins.media import make_text
 from plugins.sender import send_relay_message
+from plugins.scheduled_message_media import decode_scheduled_image_data
 
 
 _loop_task = None
@@ -134,7 +136,11 @@ async def _scheduled_message_loop():
             target_groups = set(config["target_groups"])
             messages = config.get("messages") or []
             message_signature = tuple(
-                tuple(sorted((str(key), repr(value)) for key, value in message.items()))
+                tuple(sorted(
+                    (str(key), repr(value))
+                    for key, value in message.items()
+                    if key not in ("image_data", "image_name")
+                ))
                 for message in messages
             )
             signature = (
@@ -174,9 +180,32 @@ async def _scheduled_message_loop():
                             if group in target_groups
                         ]
                         if groups:
+                            text_parts = (
+                                [make_text(message["content"])]
+                                if message.get("content") else []
+                            )
+                            media_items = []
+                            if message.get("image_data"):
+                                image_data, mime_type = decode_scheduled_image_data(
+                                    message["image_data"]
+                                )
+                                extension = {
+                                    "image/png": ".png",
+                                    "image/jpeg": ".jpg",
+                                    "image/gif": ".gif",
+                                    "image/webp": ".webp",
+                                }[mime_type]
+                                media_items.append({
+                                    "kind": "定时图片",
+                                    "url": "",
+                                    "segment": QQMessageSegment.file_image(
+                                        image_data,
+                                        "scheduled-message" + extension,
+                                    ),
+                                })
                             ok_map = await send_relay_message(
-                                [make_text(message["content"])],
-                                [],
+                                text_parts,
+                                media_items,
                                 groups=groups,
                             )
                             if ok_map and all(ok_map.values()):

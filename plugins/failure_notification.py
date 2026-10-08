@@ -100,3 +100,20 @@ async def notify_delivery_failure(qq_bot, failed_groups, channel_id="", message_
             message,
             config["cooldown_seconds"],
         )
+
+
+async def notify_maintenance_failure(qq_bot, alert_id, message):
+    """Use the existing authorized recipients and cooldown for maintenance faults."""
+    config, recipients = await asyncio.to_thread(get_failure_notification_snapshot)
+    if not config["enabled"] or not recipients:
+        return 0
+    _prune_recent_failures(time.monotonic(), config["cooldown_seconds"])
+    sent = 0
+    for openid in recipients:
+        key = ("maintenance", alert_id, str(openid))
+        before = _recent_failures.get(key)
+        await _notify_recipient(qq_bot, openid, key, "【WRelay 维护提醒】\n" + message,
+                                config["cooldown_seconds"])
+        if _recent_failures.get(key) != before:
+            sent += 1
+    return sent

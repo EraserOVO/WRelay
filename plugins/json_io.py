@@ -153,6 +153,8 @@ def _atomic_write_json_unlocked(path, data, indent=4):
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=indent)
+            f.flush()
+            os.fsync(f.fileno())
         for attempt in range(1, REPLACE_ATTEMPTS + 1):
             try:
                 os.replace(tmp, path)
