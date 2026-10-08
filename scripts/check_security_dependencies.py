@@ -3,7 +3,7 @@ from importlib.metadata import version
 
 
 def main():
-    expected = {"cryptography": "50.0.1", "nonebot-adapter-qq": "1.7.2+wrelay.1"}
+    expected = {"cryptography": "50.0.1", "nonebot-adapter-qq": "1.7.2+wrelay.1", "multidict": "6.9.1"}
     for package, required in expected.items():
         actual = version(package)
         if actual != required:

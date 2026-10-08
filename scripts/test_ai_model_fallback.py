@@ -288,7 +288,45 @@ async def main():
     assert "profile-0" in ai_client._model_overrides
     assert "profile-1" not in ai_client._model_overrides
     assert set(ai_client._model_overrides) == set(ai_client._model_recheck_at)
-    print("PASS - AI API 模型不可用时自动切换")
+
+    assert ai_client.ollama_native_chat_endpoint("http://127.0.0.1:11434/v1") == "http://127.0.0.1:11434/api/chat"
+    assert ai_client.ollama_native_chat_endpoint("http://localhost:11434/v1") == "http://localhost:11434/api/chat"
+    assert ai_client.ollama_native_chat_endpoint("https://127.0.0.1:11434/v1") is None
+    assert ai_client.ollama_native_chat_endpoint("https://example.test/v1") is None
+    assert ai_client.clean_ollama_content(None) is None
+    assert ai_client.clean_ollama_content({"unexpected": "object"}) == {"unexpected": "object"}
+    assert ai_client.clean_ollama_content("</think>\n\n译文") == "译文"
+    assert ai_client.clean_ollama_content("<think>reasoning</think>\n译文") == "译文"
+
+    class FakeOllamaClient:
+        def __init__(self):
+            self.calls = []
+
+        async def post(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            return FakeResponse(200, {"message": {"content": "</think>\n\n这是译文"}})
+
+    ollama_client = FakeOllamaClient()
+    ollama_config = {
+        "base_url": "http://127.0.0.1:11434/v1",
+        "model": "qwen3-4b-local:latest",
+        "api_key_env": "WRELAY_TEST_KEY",
+        "timeout_seconds": 25,
+        "max_output_tokens": 64,
+        "_profile_id": "profile-local-ollama",
+    }
+    with patch.object(ai_client, "_ai_client", ollama_client), patch.object(
+        ai_client, "get_ai_config", return_value=ollama_config
+    ), patch.dict(os.environ, {"WRELAY_TEST_KEY": "ollama"}, clear=False):
+        assert await ai_client.generate_text([{"role": "user", "content": "Translate this."}]) == "这是译文"
+    url, request_kwargs = ollama_client.calls[0]
+    assert url == "http://127.0.0.1:11434/api/chat"
+    assert request_kwargs["json"]["think"] is False
+    assert request_kwargs["json"]["stream"] is False
+    assert request_kwargs["json"]["options"]["num_predict"] == 64
+    assert request_kwargs["headers"]["Authorization"] == "Bearer ollama"
+    assert request_kwargs["timeout"] == 90
+    print("PASS - AI API 模型轮换与本机 Ollama 原生调用")
 
 
 if __name__ == "__main__":

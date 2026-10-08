@@ -64,8 +64,8 @@ WRelay 是一个基于 NoneBot2 的 Windows 消息转发服务。当前代码包
 ### 自动翻译
 
 - Discord → QQ 与 X/Twitter RSS → QQ 可分别启用自动翻译，并按链路设置首选服务和后备服务；Bilibili 首版默认发送原文
-- 支持腾讯 TMT 与 OpenAI 兼容 AI API；所有翻译服务失败时仍发送原文
-- AI API 遇到模型不存在、模型并发受限，或明确的模型容量/节点不可用错误时，会自动查询可用模型并逐个轮换尝试，直到成功或全部候选模型失败
+- 支持腾讯 TMT、OpenAI 兼容 AI API 与本机 Ollama（loopback:11434，适用于 Qwen 等本地模型）；所有翻译服务失败时仍发送原文
+- AI API 仅在模型不存在/不支持、并发受限或明确容量/节点不可用时查询备用模型；普通网络超时与配额类 429 不触发模型轮换
 - 面板「翻译服务配置」显示最近一次真实翻译成功使用的工作模型；AI 检测记录只表示独立检测结果，两者可能不同
 - 检测记录只展示检测类型和原因，不包含 API 地址或密钥
 
@@ -153,7 +153,7 @@ list                           查看命令帮助
 
 1. 正式安装包使用编译后的 `WRelay.exe` 桌面程序和 `WRelay.Bot.exe` 机器人程序，安装时从 `.env.example` 生成 `.env.prod`；源码目录运行 `install.bat` 时，如果没有内置 Python，则创建 `.venv` 并安装项目依赖。
 
-   安全依赖已锁定为 `cryptography==50.0.1`，QQ 适配器使用仅修改依赖元数据的本地兼容补丁。
+   安全依赖已锁定为 `cryptography==50.0.1`、`multidict==6.9.1`，QQ 适配器使用仅修改依赖元数据的本地兼容补丁。
    源码安装需完整保留 `vendor/` 并使用 `pip install -r requirements-lock.txt -e .`；Windows 需使用 64 位 Python。
    现有安装包用户需安装重新构建的版本，单独更新仓库不会替换已安装的运行时。详见 [补丁来源与验证](vendor/README.md)。
 2. 源码版本如果不存在 `.env.prod`，安装脚本会从 `.env.example` 生成配置模板。

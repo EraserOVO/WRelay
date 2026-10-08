@@ -150,6 +150,10 @@ from plugins.json_io import (
     run_in_thread_to_completion,
 )
 from plugins.settings_model import SettingsModel, validate_settings
+from plugins.ai_protocol import (
+    clean_ollama_content,
+    ollama_native_chat_endpoint,
+)
 from plugins.user_errors import localize_user_error
 from plugins.startup_config import discord_ready
 from panel.backup_restore import (
@@ -2309,7 +2313,7 @@ def _ai_probe_diagnostic(category, detail=""):
 
 
 def _probe_ai_api(config):
-    """用最小 OpenAI 兼容请求验证配置；不返回模型回复或密钥。"""
+    """用最小请求验证 AI 配置；不返回模型回复或密钥。"""
     import urllib.error
     import urllib.request
 
@@ -2328,15 +2332,29 @@ def _probe_ai_api(config):
         timeout = int(config.get("timeout_seconds") or 25)
     except (TypeError, ValueError):
         timeout = 25
-    timeout = min(30, max(1, timeout))
-    payload = json.dumps({
-        "model": model,
-        "messages": [{"role": "user", "content": "Reply with exactly OK."}],
-        "temperature": 0,
-        "max_tokens": 8,
-    }).encode("utf-8")
+    ollama_endpoint = ollama_native_chat_endpoint(config.get("base_url"))
+    if ollama_endpoint:
+        timeout = min(120, max(90, timeout))
+        payload_data = {
+            "model": model,
+            "messages": [{"role": "user", "content": "Reply with exactly OK."}],
+            "stream": False,
+            "think": False,
+            "options": {"temperature": 0, "num_predict": 8},
+        }
+        endpoint = ollama_endpoint
+    else:
+        timeout = min(30, max(1, timeout))
+        payload_data = {
+            "model": model,
+            "messages": [{"role": "user", "content": "Reply with exactly OK."}],
+            "temperature": 0,
+            "max_tokens": 8,
+        }
+        endpoint = _ai_chat_endpoint(config.get("base_url"))
+    payload = json.dumps(payload_data).encode("utf-8")
     request = urllib.request.Request(
-        _ai_chat_endpoint(config.get("base_url")),
+        endpoint,
         data=payload,
         headers={
             "Authorization": "Bearer " + api_key,
@@ -2407,19 +2425,23 @@ def _probe_ai_api(config):
             category="invalid_json",
             detail="响应内容不是有效 JSON",
         ) from exc
+    content_field = "message.content" if ollama_endpoint else "choices[0].message.content"
     try:
-        content = data["choices"][0]["message"]["content"]
+        if ollama_endpoint:
+            content = clean_ollama_content(data["message"]["content"])
+        else:
+            content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise AiProbeError(
             "AI API 响应格式不兼容",
             category="response_format",
-            detail="缺少 choices[0].message.content 字段",
+            detail="缺少 %s 字段" % content_field,
         ) from exc
     if not str(content or "").strip():
         raise AiProbeError(
             "AI API 未返回检测结果",
             category="empty_content",
-            detail="choices[0].message.content 为空",
+            detail="%s 为空" % content_field,
         )
     return model
 

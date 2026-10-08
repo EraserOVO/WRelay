@@ -1,4 +1,4 @@
-"""OpenAI 兼容的公告翻译文本生成客户端。"""
+"""公告翻译文本生成客户端，支持 OpenAI 兼容服务和本机 Ollama。"""
 import asyncio
 import os
 import time
@@ -8,6 +8,10 @@ import httpx
 from nonebot import get_driver, logger
 
 from plugins.config import get_ai_config
+from plugins.ai_protocol import (
+    clean_ollama_content,
+    ollama_native_chat_endpoint,
+)
 
 
 class AIClientError(RuntimeError):
@@ -238,25 +242,42 @@ async def _model_for_request(config, api_key, timeout, configured_model, overrid
 
 
 async def _request_completion(base_url, api_key, model, messages, max_tokens, temperature, timeout):
-    response = await _request_ai(
-        "post",
-        _endpoint(base_url),
-        headers={"Authorization": "Bearer " + api_key},
-        json={
+    ollama_endpoint = ollama_native_chat_endpoint(base_url)
+    if ollama_endpoint:
+        endpoint = ollama_endpoint
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "think": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+            },
+        }
+    else:
+        endpoint = _endpoint(base_url)
+        payload = {
             "model": model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
-        },
+        }
+    response = await _request_ai(
+        "post",
+        endpoint,
+        headers={"Authorization": "Bearer " + api_key},
+        json=payload,
         timeout=timeout,
     )
     response.raise_for_status()
     data = response.json()
+    if ollama_endpoint:
+        return clean_ollama_content(data["message"]["content"])
     return data["choices"][0]["message"]["content"]
 
-
 async def generate_text(messages, max_tokens=None, temperature=0.7):
-    """调用已配置的 OpenAI 兼容接口，返回供翻译路由使用的纯文本。"""
+    """调用已配置的 AI 接口，返回供翻译路由使用的纯文本。"""
     global _last_used_model
     config = await asyncio.to_thread(get_ai_config)
     api_key = os.getenv(str(config.get("api_key_env") or "WRELAY_AI_API_KEY"), "").strip()
@@ -267,6 +288,8 @@ async def generate_text(messages, max_tokens=None, temperature=0.7):
         raise AIClientError("AI 模型未配置")
 
     timeout = int(config.get("timeout_seconds") or 25)
+    if ollama_native_chat_endpoint(config.get("base_url")):
+        timeout = max(90, timeout)
     output_limit = int(max_tokens or config.get("max_output_tokens") or 800)
     override_key = _model_override_key(config)
     model = await _model_for_request(

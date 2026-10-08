@@ -65,6 +65,7 @@ QQ 分支只引导授权私聊手动转发。该授权用户仍可选择所有�
 安全依赖使用 `cryptography==50.0.1` 与 QQ 适配器 `1.7.2+wrelay.1` 本地元数据补丁，
 完整来源、摘要与复现方法见 [vendor/README.md](../vendor/README.md)。源码安装需保留 `vendor/wheels/`，
 并始终配合 `requirements-lock.txt` 安装；仅执行 `pip install -e .` 无法从 PyPI 找到本地补丁版本。
+multidict 固定为 `6.9.1`，修复 `6.7.0` 至 `6.9.0` 的 items-view 并集／差集引用泄漏（[GHSA-54p9-h82j-f925](https://github.com/aio-libs/multidict/security/advisories/GHSA-54p9-h82j-f925)）。构建前的安全依赖检查也要求此版本；转发逻辑不变。
 补丁不改变 QQ 适配器的运行代码。升级依赖后必须重新运行下方准备脚本；构建脚本会拒绝旧依赖，
 避免把仍含漏洞的 `.runtime/python` 打进新安装包。
 
@@ -267,6 +268,10 @@ UP 主视频、专栏和动态分别使用 RSSHub 的 `/bilibili/user/video/{uid
 失败后服务会按配置自动尝试，未配置或调用失败时继续发送原文。
 AI 服务采用 OpenAI 兼容接口，可填写百炼、DeepSeek 等服务的地址和模型名；
 密钥也可在面板的「翻译服务配置」中填写，或手动写入 `.env.prod`：
+本机 Ollama 可填写地址 http://127.0.0.1:11434/v1、本地模型名（如 qwen3-4b-local:latest）和任意非空密钥值（例如 ollama；Ollama 本机服务会忽略该密钥）。
+WRelay 会将本机默认 11434 端口请求转到原生聊天接口并关闭 thinking，清理 Qwen 输出中的思考标记；
+冷启动模型时翻译至少等待 90 秒（档案超时设得更高时按配置等待），面板连通性检测最多等待 120 秒。
+建议保留腾讯 TMT 等后备服务，避免本地模型未启动或请求失败时影响消息投递。
 AI 配置的请求超时必须为 1–300 秒，最大输出长度必须为 1–1,000,000 tokens；超出范围的配置不会保存，损坏的 `settings.json` 在修复前会按安全默认值运行并保留原文件。
 
 ```text

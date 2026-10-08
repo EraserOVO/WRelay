@@ -1501,6 +1501,25 @@ def main():
             "api_key_env": "WRELAY_TEST_KEY",
             "timeout_seconds": 5,
         }) == "test-model"
+    local_probe_calls = []
+    def fake_local_urlopen(request, timeout):
+        local_probe_calls.append((request, timeout))
+        return FakeResponse(b'{"message":{"content":"</think>\\nOK"}}')
+    with patch.object(panel, "_read_env_secret", return_value="ollama"), patch(
+        "urllib.request.urlopen", side_effect=fake_local_urlopen
+    ):
+        assert panel._probe_ai_api({
+            "base_url": "http://127.0.0.1:11434/v1",
+            "model": "qwen3-4b-local:latest",
+            "api_key_env": "WRELAY_TEST_KEY",
+            "timeout_seconds": 5,
+        }) == "qwen3-4b-local:latest"
+    local_request, local_timeout = local_probe_calls[0]
+    local_payload = json.loads(local_request.data.decode("utf-8"))
+    assert local_request.full_url == "http://127.0.0.1:11434/api/chat"
+    assert local_payload["think"] is False
+    assert local_payload["options"]["num_predict"] == 8
+    assert local_timeout == 90
     # 面板 API 需要把检测成功的模型名称返回给二级配置窗口，供其显示。
     class JsonRequest:
         def __init__(self, payload):

@@ -297,12 +297,15 @@ Discord 实时转发、启动补发和失败重试共用 `plugins/forward_servic
 plugins/translation.py
     ├── 腾讯 TMT → plugins/tencent_tmt.py
     └── AI API  → plugins/ai_client.py
-                    │
+                    ├── 本机 Ollama（loopback:11434）→ /api/chat，think=false
+                    ├── 其他服务 → OpenAI 兼容的 /chat/completions
                     ├── 首次请求配置模型
-                    ├── 模型不存在、模型并发受限，或明确的模型容量/节点不可用
-                    │   → 查询 /models，按优先级逐个尝试可用模型
+                    ├── 明确的模型不可用/过载 → 查询 /models 并逐个尝试备用模型
                     └── 成功后记录实际使用的模型
 ```
+
+本机地址仅在 HTTP loopback 且默认端口为 11434 时走 Ollama 原生接口；请求关闭 thinking，
+并将响应中的 Qwen 思考标记清理后再交给翻译路由。其他 AI 地址继续使用 OpenAI 兼容协议。
 
 AI 模型轮换只针对明确的模型级错误：400 模型不存在/不支持、包含模型并发限制的
 429，以及明确表示无可用 worker、服务不可用或模型过载的 500/503。普通网络超时、
