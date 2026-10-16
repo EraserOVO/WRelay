@@ -176,12 +176,53 @@ _first_run_config_check()
 
 
 def _use_tun_network_routing():
-    """让出站连接交给 Clash 虚拟网卡，不强制请求本地 HTTP 代理。"""
+    """让出站连接交给 Clash 虚拟网卡，不强制请求本地 HTTP 代理。
+
+    同时清理代理绕过列表中的方括号 IPv6 条目：httpx 会把 no_proxy 按逗号
+    拆开后逐项当 URL 解析，而 ``[::1]`` 会被读成端口 ``:1]`` 并抛
+    ``httpx.InvalidURL``。NoneBot 自带的 httpx 驱动（QQ 适配器取 access
+    token）使用 trust_env 默认值，会因此无法建立连接，表现为「QQ Bot 未连接」。
+    裸 ``::1`` 可正常解析，只有方括号形式需要移除。
+    """
     for name in (
         "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
         "http_proxy", "https_proxy", "all_proxy",
     ):
         os.environ.pop(name, None)
+
+    # Windows 系统代理的绕过列表来自注册表，光删环境变量不生效；
+    # 显式写入一份不含方括号 IPv6 的安全值来覆盖它。
+    # 先取一次原始值（含注册表），再统一写入，避免第二次循环读到已清洗的值。
+    raw = os.environ.get("NO_PROXY") or os.environ.get("no_proxy")
+    if raw is None:
+        raw = _system_no_proxy()
+    entries = []
+    for entry in str(raw or "").split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        # 丢弃方括号 IPv6（如 [::1]）：httpx 解析该项会抛 InvalidURL
+        if entry.startswith("[") and entry.endswith("]"):
+            continue
+        if entry not in entries:
+            entries.append(entry)
+    # 保留本机绕行语义，避免代理把回环流量也接管
+    for keep in ("localhost", "127.0.0.1"):
+        if keep not in entries:
+            entries.append(keep)
+    safe = ",".join(entries)
+    for name in ("NO_PROXY", "no_proxy"):
+        os.environ[name] = safe
+
+
+def _system_no_proxy():
+    """读取系统（含注册表）代理绕过列表；失败时返回空串。"""
+    try:
+        import urllib.request
+
+        return str(urllib.request.getproxies().get("no") or "")
+    except Exception:
+        return ""
 
 
 # Clash 虚拟网卡会透明接管出站流量；若保留 .env.prod 中的 HTTP_PROXY，

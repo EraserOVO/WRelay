@@ -32,7 +32,10 @@ _tmt_stopping = False
 def _get_tmt_client():
     global _tmt_client
     if _tmt_client is None:
-        _tmt_client = httpx.AsyncClient()
+        # 同 ai_client / RSS 链路：忽略系统与环境代理，避免 Windows 代理绕过
+        # 列表中的裸 IPv6 条目（如 ::1）在构造客户端时被当成非法端口抛出
+        # InvalidURL，使腾讯 TMT 回退翻译整体不可用。
+        _tmt_client = httpx.AsyncClient(trust_env=False)
     return _tmt_client
 
 

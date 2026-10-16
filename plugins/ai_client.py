@@ -47,7 +47,11 @@ _PREFERRED_MODELS = (
 def _get_ai_client():
     global _ai_client
     if _ai_client is None:
-        _ai_client = httpx.AsyncClient()
+        # 与 RSS 链路一致，忽略系统/环境代理（bot.py 已清理通用代理变量，
+        # 出站走 Clash 虚拟网卡）。若保留 trust_env，Windows 代理绕过列表
+        # 中的裸 IPv6 条目（如 ::1）会让 httpx 在构造客户端时把 ":1]" 当作
+        # 端口抛出 InvalidURL，导致翻译请求整体失败。
+        _ai_client = httpx.AsyncClient(trust_env=False)
     return _ai_client
 
 

@@ -211,9 +211,13 @@ _qq_media_stopping = False
 def _get_qq_media_client():
     global _qq_media_client
     if _qq_media_client is None:
+        # 与 media/RSS 链路一致：忽略系统与环境代理，避免 Windows 代理绕过
+        # 列表中的裸 IPv6 条目（如 ::1）在构造客户端时抛 InvalidURL，使
+        # QQ 手动转发的媒体下载全部失败。
         _qq_media_client = httpx.AsyncClient(
             follow_redirects=True,
             headers={"User-Agent": "Mozilla/5.0"},
+            trust_env=False,
         )
     return _qq_media_client
 

@@ -276,10 +276,15 @@ def _get_media_client(proxy=None):
             )
         return _discord_media_client
     if _media_client is None:
+        # 与 RSS 链路一致：非 Discord 媒体走系统路由，不读取环境/系统代理。
+        # 若保留 trust_env，Windows 代理绕过列表中的裸 IPv6 条目（如 ::1）会
+        # 让 httpx 在构造客户端时把 ":1]" 当作非法端口抛 InvalidURL，使
+        # X/Bilibili 媒体下载全部降级为链接。
         _media_client = httpx.AsyncClient(
             timeout=_get_timeout(),
             follow_redirects=True,
             headers={"User-Agent": "Mozilla/5.0"},
+            trust_env=False,
         )
     return _media_client
 
