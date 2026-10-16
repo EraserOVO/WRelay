@@ -10,20 +10,14 @@
     button.setAttribute("aria-label", label);
     button.title = label;
   }
-  document.querySelectorAll('.linkbtn, .about-social').forEach(externalLinkButton);
-  // Author links need visible destination names when all actions say "打开".
-  document.querySelectorAll('.about-social').forEach(button => {
-    const row = document.createElement("div");
-    row.className = "status-row author-link-row";
-    const label = document.createElement("span");
-    label.textContent = button.getAttribute("aria-label").replace(/^打开/, "");
-    button.before(row);
-    row.append(label, button);
-  });
+  document.querySelectorAll('.linkbtn').forEach(externalLinkButton);
+  // 发布页入口已从设置页移除；保留空值保护，避免该行缺失时中断后续组件装饰。
   const release = document.getElementById("btnOpenRelease");
-  new MutationObserver(() => {
-    if (!release.querySelector(".external-link-icon")) externalLinkButton(release);
-  }).observe(release, {childList: true});
+  if (release) {
+    new MutationObserver(() => {
+      if (!release.querySelector(".external-link-icon")) externalLinkButton(release);
+    }).observe(release, {childList: true});
+  }
 
   const specs = {
     runtimeLogModal: {size: "large", footer: "btnClearLog", backdrop: true},
@@ -39,7 +33,6 @@
     translationSourceModal: {size: "small", footer: "translationSourceSave", backdrop: true},
     relayChannelsModal: {size: "medium", footer: "relayChannelsSave", backdrop: true},
     scheduledMessageContentModal: {size: "large", footer: "scheduledMessageContentConfirm", backdrop: true},
-    aboutModal: {size: "small", backdrop: true},
   };
   function closeButton(id, text) {
     const button = document.createElement("button");

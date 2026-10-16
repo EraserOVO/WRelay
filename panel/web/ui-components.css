@@ -69,8 +69,6 @@ body .modal-shell :is(.diagnostic-row, .status-row) { display: flex; align-items
 .modal-shell .diagnostic-result.ok { color: var(--badge-on-fg); }
 .modal-shell .diagnostic-result.warn { color: var(--badge-off-fg); }
 .modal-shell .diagnostic-result.neutral { color: var(--muted); }
-#aboutModal .modal-body > div { display: block !important; }
-#aboutModal .author-link-row { display: flex !important; }
 @media (max-width: 620px) {
   body .modal-overlay { padding: 12px; }
   .qq-bot-form-row { grid-template-columns: minmax(0,1fr); }
@@ -106,15 +104,13 @@ body .foldbtn svg { width: 10px; height: 10px; }
 /* Desktop secondary actions share one hover/focus treatment; stateful and icon-only controls keep their own feedback. */
 body.desktop-host :is(
   button.sec:not(.danger):not(.warn):not(.iconbtn):not(.rowicon):not(.settings-switch):not(.foldbtn):not(.hintbtn):not([data-on="1"]),
-  .external-link-button,
-  .release-link.linkbtn
+  .external-link-button
 ):not(:disabled) {
   transition: background-color .14s ease, border-color .14s ease, color .14s ease, opacity .14s ease;
 }
 body.desktop-host :is(
   button.sec:not(.danger):not(.warn):not(.iconbtn):not(.rowicon):not(.settings-switch):not(.foldbtn):not(.hintbtn):not([data-on="1"]),
-  .external-link-button,
-  .release-link.linkbtn
+  .external-link-button
 ):not(:disabled):is(:hover, :focus-visible) {
   background: color-mix(in srgb, var(--sec-bg) 78%, var(--fg));
   border-color: var(--muted);
@@ -141,14 +137,14 @@ body.desktop-host #pageSettings #btnRestartPanel:is(:hover, :focus-visible) {
   opacity: 1;
 }
 
-/* The two settings links are rendered as different HTML elements; pin their base border together. */
-body.desktop-host #pageSettings .settings-row > :is(#btnOpenRelease, #btnAbout) {
+/* 问题反馈是设置行内的链接型入口，与同行的按钮共享底色、边框与悬停反馈。 */
+body.desktop-host #pageSettings .settings-row > #btnFeedback {
   border: 1px solid var(--field-border);
   background: var(--sec-bg);
   color: var(--sec-fg);
   transition: background-color .14s ease, border-color .14s ease, color .14s ease, opacity .14s ease;
 }
-body.desktop-host #pageSettings .settings-row > :is(#btnOpenRelease, #btnAbout):is(:hover, :focus-visible) {
+body.desktop-host #pageSettings .settings-row > #btnFeedback:is(:hover, :focus-visible) {
   background: color-mix(in srgb, var(--sec-bg) 78%, var(--fg));
   border-color: var(--muted);
   color: var(--hover-fg);

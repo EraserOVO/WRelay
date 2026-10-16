@@ -190,13 +190,6 @@
   button.linkbtn#btnQQPlatform svg, button.linkbtn#btnQQPlatformX svg, button.linkbtn#btnQQPlatformBilibili svg {
     width: 18px; height: 18px;
   }
-  /* 顶部关于按钮：小型方形控件，与其它图标按钮保持一致。 */
-  #btnAbout {
-    width: 34px; height: 34px; padding: 0;
-    border-radius: 8px;
-    display: inline-flex; align-items: center; justify-content: center;
-  }
-  #btnAbout svg { flex: none; }
   /* 重启面板：去掉按钮底色/边框，仅保留循环箭头图标（与「离线补发」刷新按钮同款 SVG）；与标题底部对齐（点击交互不变） */
   #btnRestartPanel {
     background: transparent; border: none;
@@ -211,14 +204,6 @@
     display: inline-flex; align-items: center; justify-content: center;
   }
   .panel-action-icon svg { width: 18px; height: 18px; pointer-events: none; }
-  /* 「关于作者」社交按钮：横向并列、圆角矩形、图标+名称、尺寸统一 */
-  #aboutModal button { padding: 10px 16px; border-radius: 8px; font-size: 14px; }
-  #aboutModal .about-social {
-    flex: 1; min-width: 0;
-    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-    padding: 10px 6px;
-  }
-  #aboutModal .about-social svg { flex: none; }
   /* 离线补发：启用开关按钮与「开机自启」完全同款 */
   #btnBackfillToggle {
     display: inline-flex; align-items: center; justify-content: center; gap: 6px;
@@ -973,8 +958,6 @@
     cursor: pointer;
   }
   .modal-x:hover { color: var(--hover-fg); border-color: var(--muted); }
-  /* aboutModal 的 #aboutModal button 规则优先级更高，需重申圆角/去 padding 覆盖 */
-  #aboutModal button.modal-x { padding: 0; border-radius: 50%; }
   /* 确认/提示弹窗永远在最上层，目标群管理可从定时消息编辑弹窗内继续打开 */
   #confirmModal { z-index: 1100 !important; }
   .diagnostic-modal {
@@ -1354,9 +1337,6 @@
   .update-check-row > div:first-child { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
   .update-check-row strong { color: var(--fg); font-size: 14px; }
   .update-check-row small, .settings-select-row small { color: var(--muted); font-size: 12px; line-height: 1.5; }
-  .update-actions { display: flex; flex: none; align-items: center; gap: 8px; }
-  .update-actions button, .release-link { border: 1px solid var(--field-border); white-space: nowrap; }
-  .release-link { display: inline-flex; align-items: center; text-decoration: none; }
   .settings-footnote { margin: 11px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
   .settings-select-row, .settings-note-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 58px; padding: 10px 0; border-top: 1px solid var(--panel-border); }
   .settings-select-row > span { display: flex; flex-direction: column; gap: 4px; }
@@ -1380,7 +1360,6 @@
   }
   @media (max-width: 620px) {
     .overview-intro, .update-check-row { align-items: flex-start; flex-direction: column; }
-    .update-actions { flex-wrap: wrap; }
     .overview-route { min-height: 108px; padding: 14px; }
     .settings-note-row { flex-direction: column; gap: 6px; }
     .settings-note-row span { max-width: none; text-align: left; }
@@ -1404,8 +1383,7 @@
   #activePageDescription { font-size: 14px; }
   .page-header-actions { gap: var(--space-2); }
   .page-header-actions .iconbtn,
-  button.iconbtn,
-  #btnAbout {
+  button.iconbtn {
     width: var(--icon-button-size);
     height: var(--icon-button-size);
     min-width: var(--icon-button-size);
@@ -1433,7 +1411,7 @@
   button:not(.rowicon):not(.iconbtn):not(.panel-action-icon):not(.modal-x):not(.foldbtn):not(.hintbtn):not(.fgtab):not(.fgtab-add):not(.flt-chip-x) {
     min-height: var(--control-height);
   }
-  button.sec, .release-link { border: 1px solid var(--field-border); }
+  button.sec { border: 1px solid var(--field-border); }
   button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible,
   textarea:focus-visible, summary:focus-visible, .chan-name-edit:focus-visible {
     outline: 2px solid var(--primary-border);
@@ -1604,7 +1582,6 @@
   .settings-note-row { align-items: center; }
   .settings-note-row .settings-item-copy { flex: 1 1 auto; }
   .settings-note-row .settings-static-value { flex: 0 0 auto; max-width: 44%; color: var(--muted); font-size: 12px; text-align: right; }
-  .release-link { color: var(--sec-fg); }
   .update-check-row { border-radius: 8px; }
 
   /* Logs stay contained; the page itself remains the primary vertical scroller. */
@@ -1700,7 +1677,7 @@
   .fgtab-actions .fg-delete:hover, .fgtab-actions .fg-delete:focus-visible { background: var(--danger-bg); color: var(--danger-fg); }
 
   /* One shared external-link button treatment across route pages and Settings. */
-  .linkbtn, .release-link.linkbtn {
+  .linkbtn {
     display: inline-flex; align-items: center; justify-content: center; gap: 7px;
     min-height: var(--control-height); height: var(--control-height); padding: 0 12px;
     border: 1px solid var(--field-border); border-radius: var(--radius-control);
@@ -1713,7 +1690,7 @@
     -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 3h7v7M21 3 10 14'/%3E%3Cpath d='M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6'/%3E%3C/svg%3E") center / contain no-repeat;
     mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 3h7v7M21 3 10 14'/%3E%3Cpath d='M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6'/%3E%3C/svg%3E") center / contain no-repeat;
   }
-  .linkbtn:hover, .release-link.linkbtn:hover { border-color: var(--muted); background: color-mix(in srgb, var(--sec-bg) 76%, var(--fg)); opacity: 1; }
+  .linkbtn:hover { border-color: var(--muted); background: color-mix(in srgb, var(--sec-bg) 76%, var(--fg)); opacity: 1; }
   .linkbtn:active { filter: brightness(.94); }
 
   /* Robot status uses aligned metric columns and a dedicated, compact startup toggle. */
@@ -2823,11 +2800,9 @@ body.desktop-host[data-active-page="settings"] .page-header-actions { display: n
 #pageSettings .settings-item-copy { flex: 1; }
 #pageSettings .settings-row > :last-child { flex-shrink: 0; }
 #pageSettings .settings-static-value { color: var(--muted); font-size: 13px; }
-#pageSettings #updateDetail::before { content: " · "; }
 #pageSettings :is(select, option) { color: var(--field-fg); background: var(--field-bg); color-scheme: dark; }
 #pageSettings select { width: 130px; height: var(--control-height); border: 1px solid var(--field-border); border-radius: var(--radius-control); padding: 0 12px; font: inherit; }
 body.theme-light #pageSettings :is(select, option) { color-scheme: light; }
-#pageSettings .release-link { height: var(--control-height); box-sizing: border-box; padding: 0 14px; border-radius: var(--radius-control); background: var(--sec-bg); }
 
 /* Keep immediate actions, logs and low-frequency maintenance in distinct groups. */
 body.desktop-host[data-active-page="discord"] #backfillContent { display: none; }
@@ -2866,7 +2841,9 @@ body[data-active-page="overview"] .robot-core-actions :is(#btnStart, #btnStop, #
 #pageSettings .settings-switch { flex: 0 0 44px; width: 44px; min-width: 44px; height: 26px; min-height: 26px; padding: 3px; border-radius: 999px; margin: 0; }
 #pageSettings .settings-switch[data-on="1"] .settings-switch-track { background: var(--primary); }
 #pageSettings .settings-switch[data-on="1"] .settings-switch-track::after { transform: translateX(16px); }
-#pageSettings :is(#btnRestartPanel, #btnAbout) { width: auto; color: var(--sec-fg); background: var(--sec-bg); border: 1px solid var(--field-border); padding: 0 14px; height: var(--control-height); border-radius: var(--radius-control); }
+#pageSettings :is(#btnRestartPanel) { width: auto; color: var(--sec-fg); background: var(--sec-bg); border: 1px solid var(--field-border); padding: 0 14px; height: var(--control-height); border-radius: var(--radius-control); }
+/* 更新状态说明可能较长，允许换行而不是被省略号截断。 */
+#pageSettings #updateStatus { white-space: normal; overflow: visible; }
 
 /* Settings controls share fixed dimensions; descriptions remain a single line. */
 #pageSettings .settings-row { height: 76px; min-height: 76px; padding: 12px 0; }

@@ -11,19 +11,21 @@ const SVG_CHECK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" s
 const SVG_PEN = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>';
 const SVG_PAUSE = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>';
 const SVG_PLAY = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
-// 关于作者 —— 社交媒体链接（QQ / Bilibili 链接留待填写；GitHub 固定）
-const ABOUT_LINKS = {
-  qq:       "https://qm.qq.com/q/KOaCzqYuES",
-  bilibili: "https://space.bilibili.com/437986248",
-  github:   "https://github.com/EraserOVO",
-};
-function openAboutLink(url, label) {
-  if (!url) {
-    showAlert("关于作者", label + " 链接还未填写，请在 app.js 顶部的 ABOUT_LINKS 中配置。");
-    return;
-  }
-  openExternal(url);
+// 更新检查偏好：启动后是否自动检查一次（仅提示，不自动安装）
+const AUTO_UPDATE_CHECK_KEY = "wrelay_auto_update_check";
+function isAutoUpdateCheckEnabled() {
+  try { return localStorage.getItem(AUTO_UPDATE_CHECK_KEY) !== "0"; } catch (e) { return true; }
 }
+function applyAutoUpdateCheckPreference(enabled) {
+  const button = document.getElementById("btnAutoUpdateCheck");
+  if (button) {
+    button.dataset.on = enabled ? "1" : "0";
+    button.setAttribute("aria-checked", String(enabled));
+  }
+}
+(function initUpdatePreferences() {
+  applyAutoUpdateCheckPreference(isAutoUpdateCheckEnabled());
+})();
 
 let settings = null;
 // 主题偏好：夜间/日间模式，持久化到 localStorage，首次使用默认夜间。
@@ -307,40 +309,144 @@ async function loadAppInfo() {
   }
 }
 
-async function checkForUpdates() {
+const UPDATE_CHECK_HINT = "检查 GitHub 官方稳定版，不会自动下载安装。";
+const UPDATE_RELEASES_URL = "https://github.com/EraserOVO/WRelay/releases/latest";
+// 已检查到可安装的新版本时，按钮改为「立即更新」
+let pendingUpdate = null;
+let updateInstalling = false;
+
+function setUpdateButton(label, disabled) {
   const button = document.getElementById("btnCheckUpdates");
+  if (!button) return;
+  button.textContent = label;
+  button.disabled = Boolean(disabled);
+}
+
+async function checkForUpdates() {
   const status = document.getElementById("updateStatus");
-  const detail = document.getElementById("updateDetail");
-  const releaseLink = document.getElementById("btnOpenRelease");
-  if (!button || !status || !detail || !releaseLink) return;
-  button.disabled = true;
-  releaseLink.href = "https://github.com/EraserOVO/WRelay/releases/latest";
-  releaseLink.textContent = "打开";
-  status.textContent = "正在检查…";
-  detail.textContent = "正在连接 GitHub 官方发布页。";
+  if (!status) return;
+  setUpdateButton("检查中…", true);
+  status.textContent = "正在连接 GitHub 官方发布页。";
   try {
     const result = await jget("/api/app/update-check");
     if (!result || !result.ok) throw new Error((result && result.msg) || "暂时无法检查更新");
     const current = String(result.current_version || "未知");
     const latest = String(result.latest_version || "未知");
     if (result.update_available) {
-      status.textContent = "发现新版本 v" + latest;
-      detail.textContent = "当前版本 v" + current + " · 可查看更新说明并下载安装。";
+      const fallback = UPDATE_RELEASES_URL;
       const url = String(result.release_url || "");
-      if (/^https:\/\/github\.com\/EraserOVO\/WRelay\/releases\//i.test(url)) {
-        releaseLink.href = url;
-        releaseLink.textContent = "打开";
-      }
+      pendingUpdate = {
+        latest: latest,
+        release_url: /^https:\/\/github\.com\/EraserOVO\/WRelay\/releases\//i.test(url) ? url : fallback,
+      };
+      status.textContent = "发现新版本 v" + latest + "（当前 v" + current + "），可立即更新。";
+      setUpdateButton("立即更新", false);
     } else {
-      status.textContent = "当前已是最新版本";
-      detail.textContent = "当前版本 v" + current + " · 最新稳定版 v" + latest + "。";
+      pendingUpdate = null;
+      status.textContent = "当前已是最新版本 v" + current + "。";
+      setUpdateButton("检查更新", false);
     }
   } catch (err) {
-    status.textContent = "检查更新失败";
-    detail.textContent = err && err.message ? err.message : "请检查网络后重试，也可以打开项目发布页查看。";
-  } finally {
-    button.disabled = false;
+    pendingUpdate = null;
+    status.textContent = (err && err.message) || "请检查网络后重试。";
+    setUpdateButton("检查更新", false);
   }
+}
+
+function describeInstallStage(state) {
+  const stage = String((state && state.stage) || "");
+  const percent = Number(state && state.percent);
+  const hasPercent = Number.isFinite(percent) && percent > 0;
+  const labels = {
+    preparing: "准备下载…",
+    downloading: "正在下载安装包…",
+    verifying: "正在校验安装包…",
+    launching: "正在启动安装程序…",
+    done: "安装程序已启动",
+  };
+  let text = labels[stage] || "正在更新…";
+  if (hasPercent && (stage === "downloading" || stage === "verifying")) {
+    text += " " + Math.min(100, Math.round(percent)) + "%";
+  }
+  return text;
+}
+
+async function pollUpdateProgress() {
+  const status = document.getElementById("updateStatus");
+  while (updateInstalling) {
+    let state = null;
+    try {
+      state = await jget("/api/app/update-progress");
+    } catch (err) {
+      state = null;
+    }
+    if (state && state.ok) {
+      const text = describeInstallStage(state);
+      if (status) status.textContent = text;
+      const percent = Number(state.percent);
+      setUpdateButton(
+        Number.isFinite(percent) && percent > 0
+          ? "更新中 " + Math.min(100, Math.round(percent)) + "%"
+          : "更新中…",
+        true
+      );
+      if (state.stage === "done" || state.stage === "failed") {
+        updateInstalling = false;
+        if (state.stage === "done") {
+          if (status) status.textContent = "安装程序已启动，请按向导完成更新。";
+          setUpdateButton("更新中…", true);
+        } else {
+          if (status) status.textContent = state.error || "更新失败，请稍后重试。";
+          setUpdateButton("立即更新", false);
+        }
+        return;
+      }
+    }
+    await new Promise(function (resolve) { setTimeout(resolve, 800); });
+  }
+}
+
+async function startUpdate() {
+  const status = document.getElementById("updateStatus");
+  if (!pendingUpdate || updateInstalling) return;
+  updateInstalling = true;
+  setUpdateButton("准备中…", true);
+  if (status) status.textContent = "正在准备下载安装包…";
+  try {
+    const result = await jpost("/api/app/update-install");
+    if (!result || !result.ok) throw new Error((result && result.msg) || "无法开始更新");
+  } catch (err) {
+    updateInstalling = false;
+    if (status) status.textContent = (err && err.message) || "无法开始更新，请稍后重试。";
+    setUpdateButton("立即更新", false);
+    return;
+  }
+  await pollUpdateProgress();
+}
+
+async function runUpdateAction() {
+  if (updateInstalling) return;
+  if (pendingUpdate) {
+    await startUpdate();
+  } else {
+    await checkForUpdates();
+  }
+}
+
+// 页面刷新后若安装仍在进行，接续显示进度而不是回到「检查更新」
+async function resumeUpdateProgressIfRunning() {
+  let state = null;
+  try {
+    state = await jget("/api/app/update-progress");
+  } catch (err) {
+    return;
+  }
+  if (!state || !state.ok || !state.running) return;
+  updateInstalling = true;
+  if (!pendingUpdate) {
+    pendingUpdate = { latest: "", release_url: "" };
+  }
+  await pollUpdateProgress();
 }
 
 let panelToken = "";
@@ -2209,7 +2315,12 @@ function renderXStatus(st) {
   } else if (!st.qq_connected) {
     if (!pollTs) badgeText = "等待 QQ 连接";
     else if (st.last_result === "ok") badgeText = "RSS 正常 · QQ 未连接";
+    else if (st.last_result === "pending") badgeText = "等待 RSSHub 启动 · QQ 未连接";
     else badgeText = "RSSHub 请求失败 · QQ 未连接";
+    badgeCls = "badge warn";
+  } else if (st.last_result === "pending") {
+    // 启动宽限期内 RSSHub 尚未就绪，不算失败
+    badgeText = "等待 RSSHub 启动";
     badgeCls = "badge warn";
   } else if (st.last_result === "fetch_failed") {
     badgeText = "RSSHub 请求失败";
@@ -2300,7 +2411,12 @@ function renderBilibiliStatus(st) {
   } else if (!st.qq_connected) {
     if (!pollTs) badgeText = "等待 QQ 连接";
     else if (st.last_result === "ok") badgeText = "RSS 正常 · QQ 未连接";
+    else if (st.last_result === "pending") badgeText = "等待 RSSHub 启动 · QQ 未连接";
     else badgeText = "RSSHub 请求失败 · QQ 未连接";
+    badgeCls = "badge warn";
+  } else if (st.last_result === "pending") {
+    // 启动宽限期内 RSSHub 尚未就绪，不算失败
+    badgeText = "等待 RSSHub 启动";
     badgeCls = "badge warn";
   } else if (st.last_result === "fetch_failed") {
     badgeText = "RSSHub 请求失败";
@@ -4519,7 +4635,6 @@ document.addEventListener("click", async function (e) {
       translationSourceModal: closeTranslationSourceModal,
       relayChannelsModal: closeRelayChannelsModal,
       qqWhitelistModal: closeQQWhitelistModal,
-      aboutModal: function () { document.getElementById("aboutModal").style.display = "none"; },
       translationConfigModal: closeTranslationConfigModal,
       qqConfigModal: closeQQConfigModal,
       discordConfigModal: closeDiscordConfigModal,
@@ -5078,15 +5193,12 @@ document.addEventListener("click", async function (e) {
     });
     await saveAndReload();
   } else if (btn.id === "btnCheckUpdates") {
-    await checkForUpdates();
-  } else if (btn.id === "btnAbout") {
-    document.getElementById("aboutModal").style.display = "flex";
-  } else if (btn.id === "aboutQq") {
-    openAboutLink(ABOUT_LINKS.qq, "QQ");
-  } else if (btn.id === "aboutBilibili") {
-    openAboutLink(ABOUT_LINKS.bilibili, "Bilibili");
-  } else if (btn.id === "aboutGithub") {
-    openAboutLink(ABOUT_LINKS.github, "GitHub");
+    await runUpdateAction();
+  } else if (btn.id === "btnAutoUpdateCheck") {
+    const enabled = btn.dataset.on !== "1";
+    applyAutoUpdateCheckPreference(enabled);
+    try { localStorage.setItem(AUTO_UPDATE_CHECK_KEY, enabled ? "1" : "0"); } catch (e) {}
+    if (enabled) await checkForUpdates();
   } else if (btn.id === "btnRestartPanel") {
     btn.disabled = true;
     try {
@@ -5112,7 +5224,6 @@ const keyboardModalClosers = {
   translationSourceModal: closeTranslationSourceModal,
   relayChannelsModal: closeRelayChannelsModal,
   qqWhitelistModal: closeQQWhitelistModal,
-  aboutModal: function () { document.getElementById("aboutModal").style.display = "none"; },
   translationConfigModal: closeTranslationConfigModal,
   qqConfigModal: closeQQConfigModal,
   discordConfigModal: closeDiscordConfigModal,
@@ -5558,6 +5669,10 @@ async function init() {
     renderOverviewCounts();
   } catch (err) { /* ignore */ }
   await loadAppInfo();
+  // 启动后自动检查一次（默认开启，可在设置页关闭）；只提示，不自动安装
+  if (isAutoUpdateCheckEnabled()) await checkForUpdates();
+  // 若上次的更新安装仍在进行（例如页面刚刷新），继续显示进度
+  await resumeUpdateProgressIfRunning();
   await refreshChannelNames();
   await refreshStatus();
   setInterval(refreshStatus, 3000);
