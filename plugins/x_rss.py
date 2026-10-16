@@ -99,6 +99,23 @@ FEED_RETRY_DELAYS = (1, 3)
 # RSSHub 暂时不可用时使用 X 公开时间线作为回退，避免本地 RSSHub
 # 停止或 Twitter 路由短暂异常时整条 RSS 链路长期显示失败。
 SYNDICATION_BASE = "https://syndication.twitter.com/srv/timeline-profile/screen-name"
+# RSSHub 常与本程序同时开机启动（Docker Desktop 登录自启），容器需要
+# 1~2 分钟才监听端口。启动初期连接被拒属于"服务尚未就绪"，不是真的
+# 请求失败：记为 pending 并照常重试，避免开机即刷失败与三轮告警。
+RSSHUB_COLD_START_GRACE = 240
+# 进程启动时刻（用于判断是否仍处于冷启动宽限期）
+_PROCESS_STARTED_AT = time.time()
+
+
+def _in_cold_start_grace():
+    """是否仍处于启动宽限期（RSSHub 可能仍在拉起容器）。"""
+    return (time.time() - _PROCESS_STARTED_AT) < RSSHUB_COLD_START_GRACE
+
+
+def _is_connection_error(error):
+    """连接被拒/超时等"服务不可达"错误（区别于 HTTP 状态码错误）。"""
+    text = str(error or "")
+    return text.startswith("请求异常")
 
 # 运行时状态：每源的 ETag / 最近轮询时间（data/ 已在 .gitignore，
 # 文件首次轮询时自动创建，不进版本库）
@@ -191,7 +208,8 @@ async def _close_feed_client():
 # 内存态，重启清零，不写入 settings.json 等用户配置。字段：
 # - loop_started      轮询循环是否已启动（应用启动后即启动；QQ 未连接时等待）
 # - last_poll_ts      上一轮轮询完成时间（epoch 秒；0 = 本进程尚未轮询过）
-# - last_result       上一轮结果："ok" / "fetch_failed" / "parse_failed" / "protection_failed"
+# - last_result       上一轮结果："ok" / "pending" / "fetch_failed" / "parse_failed" / "protection_failed"
+#                     （pending = 启动宽限期内 RSSHub 尚未就绪，非真失败）
 # - last_error        上一轮失败的简短原因（成功轮清空）
 # - last_new_count    上一轮发现的新帖数（存在该帖未送达的目标群）
 # - last_sent_count   上一轮发送成功帖数（至少一个群送达）
@@ -522,6 +540,11 @@ async def _fetch_feed(url, etag=None):
             fallback_error = f"请求异常: {exc}"
         logger.warning("X 公开时间线回退失败（{}）: {}", handle, fallback_error)
         last_error = f"{last_error}; 回退失败: {fallback_error}"
+
+    # 启动宽限期内 RSSHub 连接被拒（Docker/WSL 仍在拉起）与回退也不可达时，
+    # 标记为"尚未就绪"：调用方不把它计入失败轮次，也不触发维护告警。
+    if _in_cold_start_grace() and _is_connection_error(last_error):
+        last_error = f"{last_error}（RSSHub 可能仍在启动）"
     return None, None, last_error
 
 
@@ -1166,7 +1189,7 @@ async def _poll_source(source):
     """轮询一个 X 源。任何失败只记日志返回，绝不推进去重游标。
 
     返回单源结果 dict（供轮次汇总运行时状态，不影响转发行为）：
-    {result: "ok"/"fetch_failed"/"parse_failed"/"protection_failed", error: str,
+    {result: "ok"/"pending"/"fetch_failed"/"parse_failed"/"protection_failed", error: str,
      new/sent/failed: int}"""
     key = source["key"]
     url = source["url"]
@@ -1200,6 +1223,12 @@ async def _poll_source(source):
         body, new_etag, err = await _fetch_feed(url, None)
 
     if err:
+        # 启动宽限期内 RSSHub 尚在拉起：记为 pending，不计入失败轮次，
+        # 避免开机即刷"请求失败"与连续三轮告警；仍不推进游标。
+        if _in_cold_start_grace() and _is_connection_error(err):
+            logger.info("X RSS 暂不可用（RSSHub 可能仍在启动），本轮跳过: {} ({})", name, key)
+            return {"result": "pending", "error": _short_error(err),
+                    "new": 0, "sent": 0, "failed": 0}
         logger.warning("X RSS 拉取失败，本轮跳过: {} ({}): {}", name, key, err)
         return {"result": "fetch_failed", "error": _short_error(err),
                 "new": 0, "sent": 0, "failed": 0}
@@ -1284,19 +1313,31 @@ async def _poll_all():
     health = []
     for source, result in zip(sources, results):
         identity = str(source["key"])
-        count = 0 if result.get("result") == "ok" else previous.get(identity, {}).get("consecutive_failures", 0) + 1
+        # pending（RSSHub 尚在启动）不算失败，保留原失败计数不累加，
+        # 避免冷启动期间把健康来源推成"连续三轮失败"告警。
+        status = result.get("result")
+        if status == "ok":
+            count = 0
+        elif status == "pending":
+            count = previous.get(identity, {}).get("consecutive_failures", 0)
+        else:
+            count = previous.get(identity, {}).get("consecutive_failures", 0) + 1
         health.append({"id": identity, "name": source["name"], "consecutive_failures": count})
     _runtime_status["source_health"] = health
     new_total = sent_total = failed_total = 0
     bad_result = ""
     bad_error = ""
+    pending_seen = False
     for res in results:
         new_total += res.get("new", 0)
         sent_total += res.get("sent", 0)
         failed_total += res.get("failed", 0)
+        status = res.get("result")
+        if status == "pending":
+            pending_seen = True
         # 取本轮第一个失败源作为轮次结果（全部成功则记 ok）
-        if not bad_result and res.get("result") not in (None, "ok"):
-            bad_result = res["result"]
+        if not bad_result and status not in (None, "ok", "pending"):
+            bad_result = status
             bad_error = res.get("error") or ""
 
     with _dispatch_counter_lock:
@@ -1310,8 +1351,17 @@ async def _poll_all():
     st["last_new_count"] = new_total
     st["last_sent_count"] = sent_total
     st["last_failed_count"] = failed_total
-    st["last_result"] = bad_result or "ok"
-    st["last_error"] = bad_error
+    # 全部来源都只是"尚未就绪"时，轮次记为 pending：面板显示为等待 RSSHub
+    # 启动，而不是请求失败。
+    if bad_result:
+        st["last_result"] = bad_result
+        st["last_error"] = bad_error
+    elif pending_seen:
+        st["last_result"] = "pending"
+        st["last_error"] = "RSSHub 可能仍在启动，等待其就绪"
+    else:
+        st["last_result"] = "ok"
+        st["last_error"] = ""
 
 
 async def _poll_loop():

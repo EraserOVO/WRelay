@@ -65,6 +65,21 @@ FEED_TIMEOUT = 30
 FEED_MAX_ATTEMPTS = 4
 FEED_RETRY_DELAYS = (2, 5, 15)
 FEED_REQUEST_GAP = 2
+# RSSHub 常与本程序同时开机启动（Docker Desktop 登录自启），容器需要
+# 1~2 分钟才监听端口。启动初期连接被拒属于"服务尚未就绪"，不是真的
+# 请求失败：记为 pending 并照常重试，避免开机即刷失败与三轮告警。
+RSSHUB_COLD_START_GRACE = 240
+_PROCESS_STARTED_AT = time.time()
+
+
+def _in_cold_start_grace():
+    """是否仍处于启动宽限期（RSSHub 可能仍在拉起容器）。"""
+    return (time.time() - _PROCESS_STARTED_AT) < RSSHUB_COLD_START_GRACE
+
+
+def _is_connection_error(error):
+    """连接被拒/超时等"服务不可达"错误（区别于 HTTP 状态码错误）。"""
+    return str(error or "").startswith("请求异常")
 BILIBILI_POLL_CONCURRENCY = 4
 DEFAULT_BILIBILI_POLL_INTERVAL = 300
 BILIBILI_STATE_FILE = data_path("bilibili.json")
@@ -1103,6 +1118,16 @@ async def _poll_feed_posts(source, source_id, feed, feed_type, state_key):
             body, new_etag, error = await _fetch_feed(feed_url, None)
 
     if error:
+        # 启动宽限期内 RSSHub 尚在拉起：记为 pending，不计入失败轮次，
+        # 避免开机即刷"请求失败"与连续三轮告警；仍不推进游标。
+        if _in_cold_start_grace() and _is_connection_error(error):
+            logger.info(
+                "Bilibili RSS 暂不可用（RSSHub 可能仍在启动），本轮跳过该投稿类型: {} ({}, {})",
+                source["name"],
+                source_id,
+                feed_type,
+            )
+            return None, ("pending", _short_error(error))
         logger.warning(
             "Bilibili RSS 拉取失败，本轮跳过该投稿类型: {} ({}, {}): {}",
             source["name"],
@@ -1272,26 +1297,44 @@ async def _poll_all():
     health = []
     for source, result in zip(sources, results):
         identity = str(source["id"])
-        count = 0 if result.get("result") == "ok" else previous.get(identity, {}).get("consecutive_failures", 0) + 1
+        # pending（RSSHub 尚在启动）不算失败，保留原失败计数不累加，
+        # 避免冷启动期间把健康来源推成"连续三轮失败"告警。
+        status = result.get("result")
+        if status == "ok":
+            count = 0
+        elif status == "pending":
+            count = previous.get(identity, {}).get("consecutive_failures", 0)
+        else:
+            count = previous.get(identity, {}).get("consecutive_failures", 0) + 1
         health.append({"id": identity, "name": source["name"], "consecutive_failures": count})
     _runtime_status["source_health"] = health
     new_total = sent_total = failed_total = 0
     bad_result = ""
     bad_error = ""
+    pending_seen = False
     for result in results:
         new_total += result.get("new", 0)
         sent_total += result.get("sent", 0)
         failed_total += result.get("failed", 0)
-        if not bad_result and result.get("result") not in (None, "ok"):
-            bad_result = result["result"]
+        status = result.get("result")
+        if status == "pending":
+            pending_seen = True
+        if not bad_result and status not in (None, "ok", "pending"):
+            bad_result = status
             bad_error = result.get("error") or ""
+    if bad_result:
+        last_result, last_error = bad_result, bad_error
+    elif pending_seen:
+        last_result, last_error = "pending", "RSSHub 可能仍在启动，等待其就绪"
+    else:
+        last_result, last_error = "ok", ""
     _runtime_status.update({
         "last_poll_ts": int(time.time()),
         "last_new_count": new_total,
         "last_sent_count": sent_total,
         "last_failed_count": failed_total,
-        "last_result": bad_result or "ok",
-        "last_error": bad_error,
+        "last_result": last_result,
+        "last_error": last_error,
     })
 
 
