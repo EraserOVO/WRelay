@@ -1286,6 +1286,180 @@ def api_app_update_check():
         return {"ok": False, "msg": "无法读取 GitHub 发布信息，请稍后重试。"}
 
 
+# ---------------- 更新下载与安装 ----------------
+# 只从本项目的 GitHub 发行页下载安装包；下载后校验体积与 PE 头，
+# 再以独立进程启动安装程序（Inno Setup），由安装向导完成替换。
+# 状态保存在内存，供设置页轮询显示进度与当前步骤。
+UPDATE_STATE_LOCK = threading.Lock()
+UPDATE_STATE = {
+    "running": False,
+    "stage": "",
+    "percent": 0,
+    "error": "",
+    "version": "",
+    "installer": "",
+}
+UPDATE_ALLOWED_HOSTS = ("github.com", "objects.githubusercontent.com",
+                        "release-assets.githubusercontent.com")
+UPDATE_MAX_BYTES = 400 * 1024 * 1024
+
+
+def _update_state_snapshot():
+    with UPDATE_STATE_LOCK:
+        return dict(UPDATE_STATE)
+
+
+def _set_update_state(**changes):
+    with UPDATE_STATE_LOCK:
+        UPDATE_STATE.update(changes)
+
+
+def _pick_installer_asset(release):
+    """从发行版资产中选出 Windows 安装包（优先 WRelay-Setup 正式包）。"""
+    assets = release.get("assets")
+    if not isinstance(assets, list):
+        return None
+    candidates = []
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        name = str(asset.get("name") or "")
+        url = str(asset.get("browser_download_url") or "")
+        if not name.lower().endswith(".exe") or not url:
+            continue
+        if "setup" not in name.lower():
+            continue
+        candidates.append((name, url, int(asset.get("size") or 0)))
+    if not candidates:
+        return None
+    # 测试版包名含 Test，正式包优先
+    candidates.sort(key=lambda item: ("test" in item[0].lower(), item[0]))
+    return candidates[0]
+
+
+def _download_installer(url, destination):
+    """下载安装包并回报进度；返回 (成功, 错误信息)。"""
+    import urllib.request
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    if parts.scheme != "https" or (parts.hostname or "").lower() not in UPDATE_ALLOWED_HOSTS:
+        return False, "更新地址不在允许的范围内，已取消下载。"
+
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "WRelay-Desktop/" + _application_version()}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            total = int(response.headers.get("content-length") or 0)
+            if total > UPDATE_MAX_BYTES:
+                return False, "安装包体积异常，已取消下载。"
+            downloaded = 0
+            with open(destination, "wb") as target:
+                while True:
+                    chunk = response.read(64 * 1024)
+                    if not chunk:
+                        break
+                    target.write(chunk)
+                    downloaded += len(chunk)
+                    if downloaded > UPDATE_MAX_BYTES:
+                        return False, "安装包体积异常，已取消下载。"
+                    if total > 0:
+                        _set_update_state(percent=min(95, downloaded * 95 // total))
+    except Exception as exc:
+        return False, "下载安装包失败：%s" % exc
+
+    if downloaded <= 0:
+        return False, "下载到的安装包为空，已取消更新。"
+    return True, ""
+
+
+def _verify_installer(path):
+    """校验安装程序确实是 Windows 可执行文件（MZ 头）。"""
+    try:
+        with open(path, "rb") as source:
+            return source.read(2) == b"MZ"
+    except OSError:
+        return False
+
+
+def _run_update_install(version, url):
+    """后台线程：下载并启动安装程序。"""
+    import tempfile
+
+    installer_path = ""
+    try:
+        _set_update_state(stage="downloading", percent=0, error="")
+        handle, installer_path = tempfile.mkstemp(prefix="WRelay-Setup-", suffix=".exe")
+        os.close(handle)
+        ok, error = _download_installer(url, installer_path)
+        if not ok:
+            _set_update_state(running=False, stage="failed", error=error, percent=0)
+            return
+
+        _set_update_state(stage="verifying", percent=97)
+        if not _verify_installer(installer_path):
+            _set_update_state(running=False, stage="failed", percent=0,
+                              error="安装包校验失败，已取消更新。")
+            return
+
+        _set_update_state(stage="launching", percent=99)
+        # 安装程序自行处理关闭/替换流程；这里只负责启动。
+        subprocess.Popen(
+            [installer_path],
+            close_fds=True,
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        )
+        _log("更新安装程序已启动: %s" % version)
+        _set_update_state(running=False, stage="done", percent=100, error="")
+    except Exception as exc:
+        _set_update_state(running=False, stage="failed", percent=0,
+                          error="启动更新失败：%s" % exc)
+
+
+@app.post("/api/app/update-install")
+def api_app_update_install():
+    """下载最新安装包并启动安装程序；不静默替换正在运行的程序。"""
+    if _update_state_snapshot()["running"]:
+        return {"ok": False, "msg": "更新已在进行中。"}
+
+    import urllib.request
+
+    current_version = _application_version()
+    request = urllib.request.Request(
+        "https://api.github.com/repos/EraserOVO/WRelay/releases/latest",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "WRelay-Desktop/" + current_version,
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            release = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return {"ok": False, "msg": "无法读取最新发行信息，请稍后重试。"}
+
+    asset = _pick_installer_asset(release) if isinstance(release, dict) else None
+    if not asset:
+        return {"ok": False, "msg": "该版本没有可用的 Windows 安装包，请打开发布页手动下载。"}
+
+    name, url, _size = asset
+    latest = str(release.get("tag_name") or "").strip().lstrip("vV")
+    _set_update_state(running=True, stage="preparing", percent=0, error="",
+                      version=latest, installer=name)
+    threading.Thread(
+        target=_run_update_install, args=(latest, url), daemon=True
+    ).start()
+    return {"ok": True, "version": latest, "installer": name}
+
+
+@app.get("/api/app/update-progress")
+def api_app_update_progress():
+    state = _update_state_snapshot()
+    state["ok"] = True
+    return state
+
+
 @app.get("/api/status")
 def api_status():
     st = bot_status()
