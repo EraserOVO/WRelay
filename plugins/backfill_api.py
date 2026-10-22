@@ -332,7 +332,16 @@ async def api_channels_refresh():
         return {"ok": False, "msg": localize_user_error(f"执行失败: {exc}", "执行失败")}
 
     if proc.returncode != 0:
-        detail = (stderr.decode("utf-8", "ignore") or "执行失败")[:200]
+        stderr_text = stderr.decode("utf-8", "ignore").strip()
+        stdout_text = stdout.decode("utf-8", "ignore").strip()
+        logger.warning(
+            "频道权限刷新失败（退出码 {}）：stderr={} stdout={}",
+            proc.returncode,
+            stderr_text[-1000:],
+            stdout_text[-1000:],
+        )
+        # 诊断脚本的部分错误写在 stdout，stderr 为空时也要把原因带回面板。
+        detail = (stderr_text or stdout_text or "执行失败")[-300:]
         return {"ok": False, "msg": localize_user_error(detail, "执行失败")}
 
     out = stdout.decode("utf-8", "ignore").strip()

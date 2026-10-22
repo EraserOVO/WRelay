@@ -15,7 +15,10 @@ from nonebot.adapters.qq import MessageSegment as QQMessageSegment
 
 from plugins.config import (
     get_active_groups,
+    get_qq_group_entries,
+    get_qq_forwarding_groups,
     get_scheduled_message_config,
+    resolve_scheduled_targets,
 )
 from plugins.media import make_text
 from plugins.sender import send_relay_message
@@ -124,8 +127,39 @@ def _try_next_scheduled_at(now, message, key):
         return None, True
 
 
+def _message_target_groups(message):
+    """按当前群与转发组配置解析一条定时消息的目标群。"""
+    return resolve_scheduled_targets(
+        message,
+        get_qq_group_entries(),
+        get_qq_forwarding_groups(),
+        get_active_groups(),
+    )
+
+
+def _message_has_targets(message):
+    """快速判断是否值得启动定时循环：任一条消息可能解析出目标即可。
+
+    「全部群」模式直接视为有目标（生效群数在发送时再判断），其余模式看配置。"""
+    mode = str((message or {}).get("target_mode") or "groups")
+    if mode == "all":
+        return True
+    if mode == "forward_group":
+        wanted = set(
+            str(group_id) for group_id in (message or {}).get("forward_groups") or []
+        )
+        return any(
+            str(group.get("id") or "") in wanted and group.get("enabled") is not False
+            for group in get_qq_forwarding_groups() or []
+        )
+    return bool((message or {}).get("target_groups"))
+
+
 async def _scheduled_message_loop():
-    """每秒检查配置，分别处理每条消息的下一次发送时间。"""
+    """每秒检查配置，分别处理每条消息的下一次发送时间。
+
+    每条消息可自带目标（指定群 / QQ→QQ 转发组 / 全部群）；缺少目标的旧消息
+    沿用顶层 target_groups。任一消息有可用目标即可运行，不再要求顶层列表非空。"""
     last_config = None
     next_send_at = {}
 
@@ -155,7 +189,10 @@ async def _scheduled_message_loop():
 
             now = datetime.now()
             active_keys = set()
-            if enabled and target_groups:
+            has_targets = any(
+                _message_has_targets(message) for message in messages
+            )
+            if enabled and has_targets:
                 for index, message in enumerate(messages):
                     key = str(message.get("id") or "message-" + str(index + 1)) + ":" + str(index)
                     active_keys.add(key)
@@ -175,10 +212,9 @@ async def _scheduled_message_loop():
                     if now < next_send_at[key]:
                         continue
                     try:
-                        groups = [
-                            group for group in await asyncio.to_thread(get_active_groups)
-                            if group in target_groups
-                        ]
+                        groups = await asyncio.to_thread(
+                            _message_target_groups, message
+                        )
                         if groups:
                             text_parts = (
                                 [make_text(message["content"])]
@@ -215,7 +251,10 @@ async def _scheduled_message_loop():
                             else:
                                 logger.warning("定时消息发送失败：QQ Bot 未连接")
                         else:
-                            logger.info("定时消息跳过：没有可用的目标 QQ 接收群")
+                            logger.info(
+                                "定时消息跳过：本条消息没有可用的目标 QQ 群（模式 {}）",
+                                message.get("target_mode") or "groups",
+                            )
                     except Exception as exc:
                         logger.exception("定时消息处理异常，跳过本次计划 {}：{}", key, exc)
                     finally:

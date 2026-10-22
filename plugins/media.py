@@ -224,7 +224,7 @@ def make_media_link(kind, url):
 
 
 def _get_proxy(url):
-    """Discord-hosted media may use DISCORD_PROXY; other media stays on system routing."""
+    """Discord/X media CDNs use DISCORD_PROXY; domestic media stays on system routing."""
     try:
         host = (urlsplit(str(url)).hostname or "").lower()
     except (TypeError, ValueError):
@@ -232,6 +232,8 @@ def _get_proxy(url):
     if not (
         host == "discord.com"
         or host.endswith((".discord.com", ".discordapp.com", ".discordapp.net"))
+        or host == "twimg.com"
+        or host.endswith(".twimg.com")
     ):
         return None
     try:
@@ -276,10 +278,10 @@ def _get_media_client(proxy=None):
             )
         return _discord_media_client
     if _media_client is None:
-        # 与 RSS 链路一致：非 Discord 媒体走系统路由，不读取环境/系统代理。
+        # 非代理媒体走系统路由，不读取环境/系统代理。
         # 若保留 trust_env，Windows 代理绕过列表中的裸 IPv6 条目（如 ::1）会
         # 让 httpx 在构造客户端时把 ":1]" 当作非法端口抛 InvalidURL，使
-        # X/Bilibili 媒体下载全部降级为链接。
+        # Bilibili 等直连媒体下载全部降级为链接。
         _media_client = httpx.AsyncClient(
             timeout=_get_timeout(),
             follow_redirects=True,

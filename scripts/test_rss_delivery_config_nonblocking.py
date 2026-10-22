@@ -17,7 +17,8 @@ def verify_config_snapshots():
         "x_rss_sources": [{
             "source": "alice",
             "filter_keywords": ["blocked"],
-            "filter_post_types": ["video"],
+            "filter_post_types": ["原创"],
+            "filter_message_types": ["文字", "图片"],
             "translation_enabled": True,
             "translation_append_original": False,
             "translation_show_datetime": True,
@@ -28,7 +29,7 @@ def verify_config_snapshots():
             "value": "1",
             "filter_keywords": ["blocked"],
             "filter_bilibili_post_types": ["视频", "无效"],
-            "forward_video": True,
+            "filter_message_types": ["文字", "图片", "链接"],
             "translation_enabled": True,
             "translation_append_original": False,
             "translation_show_datetime": True,
@@ -38,7 +39,11 @@ def verify_config_snapshots():
         x_result = config.get_x_source_delivery_config("alice")
     load.assert_called_once_with()
     assert x_result == {
-        "filter": {"filter_keywords": ["blocked"], "filter_post_types": ["video"]},
+        "filter": {
+            "filter_keywords": ["blocked"],
+            "filter_post_types": ["原创"],
+            "filter_message_types": ["文字", "图片"],
+        },
         "translation": {
             "provider": "ai",
             "fallback_provider": "tencent_tmt",
@@ -55,7 +60,7 @@ def verify_config_snapshots():
         "filter": {
             "filter_keywords": ["blocked"],
             "filter_bilibili_post_types": ["视频"],
-            "forward_video": True,
+            "filter_message_types": ["文字", "图片", "链接"],
         },
         "translation": {
             "provider": "ai",

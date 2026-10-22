@@ -20,13 +20,15 @@
 
 # 消息类型（与前端筛选弹窗按钮、plugins/fetch.py build_parts 的组件一一对应）。
 # 注意：Discord 视频附件当前按「文件」转发（附件未匹配图片/音频扩展名时渲染为
-# 文件链接），因此没有独立的「视频」类型。
+# 文件链接），因此 Discord 没有独立的「视频」类型。
 MESSAGE_TYPE_TEXT = "文字"
 MESSAGE_TYPE_IMAGE = "图片"
 MESSAGE_TYPE_AUDIO = "语音"
 MESSAGE_TYPE_FILE = "文件"
 MESSAGE_TYPE_LINK = "链接"
 MESSAGE_TYPE_EMOJI = "表情"
+# X/Bilibili 的媒体槽位就是视频，它们用「视频」而不是通用的「文件」。
+MESSAGE_TYPE_VIDEO = "视频"
 
 ALL_MESSAGE_TYPES = (
     MESSAGE_TYPE_TEXT,
@@ -36,6 +38,73 @@ ALL_MESSAGE_TYPES = (
     MESSAGE_TYPE_LINK,
     MESSAGE_TYPE_EMOJI,
 )
+
+# =====================================================
+# 各链路实际支持的消息类型
+#
+# 六类型集合描述的是 Discord 消息的内容组件（正文 / 附件 / Embed / Emoji）。
+# X 推文与 Bilibili 投稿没有这种组件划分，能筛选的只是它们各自渲染出的部分，
+# 因此每条链路各自声明支持集，前端按此渲染按钮、后端按此归一化配置。
+# =====================================================
+
+# Discord：正文、附件（图片/语音/文件）、Embed 链接、自定义表情，六类齐备。
+DISCORD_MESSAGE_TYPES = ALL_MESSAGE_TYPES
+
+# X：只有正文（含链接与话题）与媒体（图片/视频）两类组件。
+# 推文里没有独立链接、音频或表情组件，故不提供这三项。
+X_MESSAGE_TYPES = (
+    MESSAGE_TYPE_TEXT,
+    MESSAGE_TYPE_IMAGE,
+    MESSAGE_TYPE_VIDEO,
+)
+
+# Bilibili：标题/正文（文字）、封面（图片）、投稿地址（链接）、视频本体（视频）。
+BILIBILI_MESSAGE_TYPES = (
+    MESSAGE_TYPE_TEXT,
+    MESSAGE_TYPE_IMAGE,
+    MESSAGE_TYPE_LINK,
+    MESSAGE_TYPE_VIDEO,
+)
+
+# 手动转发全局筛选字段 → 该链路支持的类型集。
+MANUAL_RELAY_FILTER_TYPES = {
+    "qq_c2c_relay_filter": DISCORD_MESSAGE_TYPES,
+    "x_c2c_relay_filter": X_MESSAGE_TYPES,
+    "bilibili_c2c_relay_filter": BILIBILI_MESSAGE_TYPES,
+}
+
+# 旧配置的类型别名（历史值 → 规范名）。
+# X/Bilibili 早期与 Discord 共用「文件」表示视频本体；改名后它们的规范名是
+# 「视频」。只在别名目标属于该链路支持集时才映射，因此 Discord 的「文件」
+# （真正的附件类型）不受影响。
+LEGACY_MESSAGE_TYPE_ALIASES = {
+    MESSAGE_TYPE_FILE: MESSAGE_TYPE_VIDEO,
+}
+
+
+def normalize_message_types(values, supported):
+    """把配置里的类型名归一化为该链路的规范名，并丢弃不支持项。
+
+    返回列表，顺序按 ``supported``，保证面板显示与落盘顺序稳定。
+    ``values`` 为 None/非列表时返回全部支持类型；显式空列表返回空列表
+    （调用方据此区分"用户清空"与"未配置"）。
+    """
+    allowed = tuple(supported)
+    if not isinstance(values, (list, tuple)):
+        return list(allowed)
+    requested = set()
+    for item in values:
+        name = str(item).strip()
+        if not name:
+            continue
+        if name in allowed:
+            requested.add(name)
+            continue
+        # 历史值：映射到规范名（仅当该规范名属于本链路）。
+        alias = LEGACY_MESSAGE_TYPE_ALIASES.get(name)
+        if alias and alias in allowed:
+            requested.add(alias)
+    return [name for name in allowed if name in requested]
 
 X_POST_TYPE_ORIGINAL = "原创"
 X_POST_TYPE_RETWEET = "转发"
@@ -47,21 +116,23 @@ ALL_X_POST_TYPES = (
 )
 
 
-def get_enabled_message_types(filter_config):
+def get_enabled_message_types(filter_config, supported=None):
     """返回当前启用的消息类型集合（build_parts 按此逐组件过滤）。
 
-    filter_config 缺省 filter_message_types（老配置）→ 全部类型启用；
-    显式空列表 → 不转发任何内容组件（过滤后为空的消息不发送）；
-    未知类型名被忽略，避免脏配置造成意外全过滤。"""
+    缺省 ``filter_message_types`` → 全部支持类型启用；显式空列表 → 不转发任何组件。
+    给定 ``supported`` 时按该链路的类型集规范化，并将 X/Bilibili 旧名「文件」
+    迁移为「视频」。显式列表若只含不支持的旧值，则视为未筛选，避免旧配置
+    意外让来源全部停止投递。
+    """
+    allowed = tuple(supported) if supported else ALL_MESSAGE_TYPES
     types = filter_config.get("filter_message_types")
     if not isinstance(types, (list, tuple)):
-        return set(ALL_MESSAGE_TYPES)
-    enabled = set(ALL_MESSAGE_TYPES) & {
-        str(t).strip()
-        for t in types
-        if str(t).strip()
-    }
-    return enabled
+        return set(allowed)
+    has_explicit_values = any(str(t).strip() for t in types)
+    if not has_explicit_values:
+        return set()
+    normalized = normalize_message_types(types, allowed)
+    return set(normalized) if normalized else set(allowed)
 
 
 def check_message_filter(

@@ -22,7 +22,12 @@ from nonebot import get_app, get_bots, get_driver, logger
 from nonebot.adapters.qq import Bot as QQBot
 from nonebot.adapters.qq import MessageSegment as QQMessageSegment
 
-from plugins.bilibili_parser import format_forward_text, parse_feed, parse_video_url
+from plugins.bilibili_parser import (
+    format_forward_text,
+    parse_feed,
+    parse_manual_post_url,
+    parse_opus_detail,
+)
 from plugins.config import (
     get_bilibili_groups_for_source,
     get_bilibili_poll_interval,
@@ -39,7 +44,11 @@ from plugins.dedup import (
     normalize_channel_map,
     select_target_groups,
 )
-from plugins.filter import check_bilibili_video_filter
+from plugins.filter import (
+    BILIBILI_MESSAGE_TYPES,
+    check_bilibili_video_filter,
+    get_enabled_message_types,
+)
 from plugins.bilibili_rate_limit import (
     choose_overflow,
     normalize_protection_config,
@@ -281,54 +290,112 @@ async def _fetch_view_data(video_ref):
     return payload["data"]
 
 
+def _unsupported_link_error():
+    return "不是受支持的 Bilibili 投稿链接"
+
+
+async def _resolve_manual_ref(url):
+    """解析手动转发的链接；短链接跟随重定向后再解析。
+
+    返回 (ref, error)：ref 为 parse_manual_post_url 的结果。
+    """
+    ref = parse_manual_post_url(url)
+    if not ref:
+        return None, _unsupported_link_error()
+
+    # 短链（b23.tv）需要跟随重定向后重新判定类型：可能指向视频、
+    # 专栏或动态。
+    needs_follow = (
+        ref.get("kind") == "视频" and ref.get("video_ref", {}).get("short_url")
+    )
+    if not needs_follow:
+        return ref, None
+    response = await _bilibili_get(ref["video_ref"]["short_url"])
+    response.raise_for_status()
+    followed = parse_manual_post_url(str(response.url))
+    if not followed:
+        raise RuntimeError("短链接没有跳转到受支持的 Bilibili 页面")
+    return followed, None
+
+
+async def _fetch_opus_manual_post(opus_id):
+    """读取 opus 详情（专栏或动态），返回 (post, source_name)。
+
+    专栏与动态共用 x/polymer/web-dynamic/v1/detail 接口，由 item.type 区分。
+    """
+    response = await _bilibili_get(
+        "https://api.bilibili.com/x/polymer/web-dynamic/v1/detail",
+        params={"id": str(opus_id)},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if payload.get("code") != 0:
+        raise RuntimeError(
+            str(payload.get("message") or "读取 Bilibili 内容失败")
+        )
+    data = payload.get("data") or {}
+    item = data.get("item")
+    if not isinstance(item, dict):
+        raise RuntimeError("Bilibili 接口没有返回内容")
+    post = parse_opus_detail(item, opus_id=opus_id)
+    if post is None:
+        raise RuntimeError("该内容没有可转发的正文或媒体")
+    return post, str(post.get("author") or "")
+
+
+async def _fetch_video_manual_post(video_ref):
+    """读取投稿视频详情，返回 (post, source_name)。"""
+    data = await _fetch_view_data(video_ref)
+    pages = data.get("pages") or []
+    page_index = min(max(int(video_ref.get("page") or 1) - 1, 0), len(pages) - 1) if pages else 0
+    page = pages[page_index] if pages else {}
+    bvid = str(data.get("bvid") or video_ref.get("bvid") or "").strip()
+    avid = str(data.get("aid") or video_ref.get("avid") or "").strip()
+    link_id = bvid or ("av" + avid if avid else "")
+    if not link_id:
+        raise RuntimeError("Bilibili 投稿接口没有返回投稿编号")
+    page_number = page_index + 1
+    link = "https://www.bilibili.com/video/%s" % link_id
+    if page_number > 1:
+        link += "?p=%s" % page_number
+    title = str(data.get("title") or "").strip()
+    page_title = str(page.get("part") or "").strip()
+    if page_number > 1 and page_title:
+        title = "%s（P%d：%s）" % (title, page_number, page_title)
+    cover = str(data.get("pic") or "").strip()
+    if cover.startswith("//"):
+        cover = "https:" + cover
+    elif cover.startswith("http://"):
+        cover = "https://" + cover[len("http://"):]
+    author = str((data.get("owner") or {}).get("name") or "").strip()
+    post = {
+        "id": link_id,
+        "bvid": bvid,
+        "avid": avid,
+        "cid": page.get("cid"),
+        "page": page_number,
+        "link": link,
+        "title": title,
+        "author": author,
+        "post_type": "视频",
+        "media": ([{"kind": "图片", "url": cover}] if cover else []),
+    }
+    return post, author
+
+
 async def fetch_bilibili_manual_post(url):
-    """读取 QQ 私聊提交的 Bilibili 视频链接，返回 (post, source_name, error)。"""
-    video_ref = parse_video_url(url)
-    if not video_ref:
-        return None, "", "不是受支持的 Bilibili 投稿链接"
+    """读取 QQ 私聊提交的 Bilibili 链接，返回 (post, source_name, error)。
 
+    支持投稿视频、专栏和动态（专栏/动态共用 opus 链接）。
+    """
     try:
-        if video_ref.get("short_url"):
-            response = await _bilibili_get(video_ref["short_url"])
-            response.raise_for_status()
-            video_ref = parse_video_url(str(response.url))
-            if not video_ref:
-                raise RuntimeError("短链接没有跳转到 Bilibili 投稿页")
-
-        data = await _fetch_view_data(video_ref)
-        pages = data.get("pages") or []
-        page_index = min(max(int(video_ref.get("page") or 1) - 1, 0), len(pages) - 1) if pages else 0
-        page = pages[page_index] if pages else {}
-        bvid = str(data.get("bvid") or video_ref.get("bvid") or "").strip()
-        avid = str(data.get("aid") or video_ref.get("avid") or "").strip()
-        link_id = bvid or ("av" + avid if avid else "")
-        if not link_id:
-            raise RuntimeError("Bilibili 投稿接口没有返回投稿编号")
-        page_number = page_index + 1
-        link = "https://www.bilibili.com/video/%s" % link_id
-        if page_number > 1:
-            link += "?p=%s" % page_number
-        title = str(data.get("title") or "").strip()
-        page_title = str(page.get("part") or "").strip()
-        if page_number > 1 and page_title:
-            title = "%s（P%d：%s）" % (title, page_number, page_title)
-        cover = str(data.get("pic") or "").strip()
-        if cover.startswith("//"):
-            cover = "https:" + cover
-        elif cover.startswith("http://"):
-            cover = "https://" + cover[len("http://"):]
-        author = str((data.get("owner") or {}).get("name") or "").strip()
-        post = {
-            "id": link_id,
-            "bvid": bvid,
-            "avid": avid,
-            "cid": page.get("cid"),
-            "page": page_number,
-            "link": link,
-            "title": title,
-            "author": author,
-            "media": ([{"kind": "图片", "url": cover}] if cover else []),
-        }
+        ref, error = await _resolve_manual_ref(url)
+        if error:
+            return None, "", error
+        if ref.get("kind") == "opus":
+            post, author = await _fetch_opus_manual_post(ref.get("opus_id"))
+        else:
+            post, author = await _fetch_video_manual_post(ref.get("video_ref"))
         return post, author, None
     except Exception as exc:
         logger.warning("读取 Bilibili 投稿失败: {}", exc)
@@ -719,7 +786,18 @@ async def _dispatch_one_locked():
             continue
 
         try:
-            rendered = await _render_post(item["post"], source)
+            enabled_types = get_enabled_message_types(
+                filter_config, BILIBILI_MESSAGE_TYPES
+            )
+            # 全类型启用时走原有 None 路径，避免新筛选改变默认投递格式。
+            if enabled_types == set(BILIBILI_MESSAGE_TYPES):
+                enabled_types = None
+            rendered = await _render_post(
+                item["post"],
+                source,
+                enabled_types=enabled_types,
+                include_body=False,
+            )
             if rendered is None:
                 await _skip_queue_items(channel_key, active_groups, [item])
                 await _remove_queue_item(bucket, item, source_id, active_groups)
@@ -900,12 +978,30 @@ def _image_filename(index):
     return "bilibili-cover-%s.jpg" % (index + 1)
 
 
+def _manual_body_text(post, title=""):
+    """返回手动转发需要附带的正文文字。
+
+    动态以正文为主体，专栏只有接口给出的简介摘要（与标题可能重复，
+    重复时不重复发送）。视频没有 description，返回空字符串。
+    """
+    post_type = str(post.get("post_type") or "").strip()
+    if post_type not in ("动态", "专栏"):
+        return ""
+    body = " ".join(str(post.get("description") or "").split())
+    if not body:
+        return ""
+    normalized_title = " ".join(str(title or "").split())
+    if normalized_title and body == normalized_title:
+        return ""
+    return body
+
+
 async def _render_post(
     post,
     source,
     source_label="自动转发来自",
-    include_video=None,
     enabled_types=None,
+    include_body=True,
 ):
     text_parts = []
     media_items = []
@@ -923,6 +1019,12 @@ async def _render_post(
         link = str(post.get("link") or "").strip()
         if title and "文字" in enabled_types:
             body_lines.append(title)
+        # 动态正文即主体内容；专栏的正文只有接口提供的简介摘要。
+        # 仅手动转发（enabled_types 非 None）渲染，自动转发保持原有格式。
+        if include_body and "文字" in enabled_types:
+            body = _manual_body_text(post, title)
+            if body:
+                body_lines.append(body)
         if link and "链接" in enabled_types:
             body_lines.append(link)
 
@@ -944,13 +1046,10 @@ async def _render_post(
                 segment = make_media_link("图片", url)
             media_items.append({"kind": "图片", "url": url, "segment": segment})
 
-    video_enabled = (
-        source.get("forward_video") is True
-        if include_video is None and isinstance(source, dict)
-        else include_video is True
-    )
-    if video_enabled and str(post.get("post_type") or "视频") == "视频" and (
-        enabled_types is None or "文件" in enabled_types
+    # 只要消息类型筛选启用「视频」（或未筛选即全部启用），视频投稿就尝试上传
+    # 视频本体；下载失败、超过大小上限或视频分段时降级为视频链接。
+    if str(post.get("post_type") or "视频") == "视频" and (
+        enabled_types is None or "视频" in enabled_types
     ):
         video_url, video_data = await _fetch_video_url(post)
         if video_data:
@@ -992,7 +1091,6 @@ async def _render_post(
 async def render_bilibili_post(
     post,
     source_name="",
-    include_video=True,
     enabled_types=None,
 ):
     """渲染 QQ 私聊手动转发的 Bilibili 投稿。"""
@@ -1001,7 +1099,6 @@ async def render_bilibili_post(
         post,
         source,
         source_label="手动转发来自",
-        include_video=include_video,
         enabled_types=enabled_types,
     )
 

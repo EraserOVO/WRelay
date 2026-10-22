@@ -637,6 +637,30 @@ def check_registration_review_does_not_block_event_loop():
     print("PASS - 注册审核事务在线程池运行，慢读期间事件循环仍响应且审核用户仍禁用")
 
 
+def check_registration_without_profile_keeps_existing_metadata():
+    settings = {
+        "qq_user_openids": [{
+            "openid": "user-1",
+            "name": "Existing Name",
+            "qq_id": "12345",
+            "enabled": True,
+        }]
+    }
+    assert panel._fill_registration_info(
+        settings,
+        "qq_user_openids",
+        "user-1",
+        {"nickname": "", "qq_id": ""},
+    )
+    assert settings["qq_user_openids"][0] == {
+        "openid": "user-1",
+        "name": "Existing Name",
+        "qq_id": "12345",
+        "enabled": True,
+    }
+    print("PASS - 无资料注册审核不会覆盖已有 QQ 名称和账号")
+
+
 def check_corrupt_registrations_are_reported_and_preserved():
     class JsonRequest:
         async def json(self):
@@ -1365,6 +1389,7 @@ def main():
     check_scheduled_message_update_does_not_block_event_loop()
     check_discovered_settings_sync_does_not_block_event_loop()
     check_registration_review_does_not_block_event_loop()
+    check_registration_without_profile_keeps_existing_metadata()
     check_corrupt_registrations_are_reported_and_preserved()
     check_registration_list_uses_one_snapshot()
     check_corrupt_identity_store_is_reported_and_preserved()

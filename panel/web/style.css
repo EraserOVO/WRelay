@@ -204,11 +204,7 @@
     display: inline-flex; align-items: center; justify-content: center;
   }
   .panel-action-icon svg { width: 18px; height: 18px; pointer-events: none; }
-  /* 离线补发：启用开关按钮与「开机自启」完全同款 */
-  #btnBackfillToggle {
-    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  }
-  #btnBackfillToggle svg { flex: none; }
+  /* 离线补发：启用开关为胶囊式（外观由 .pill-switch 统一提供）。 */
   #btnFailureNotificationToggle { display: inline-flex; align-items: center; justify-content: center; gap: 6px; margin-left: auto; }
   #btnFailureNotificationToggle svg { flex: none; }
   #btnFailureNotificationToggle[data-on="1"] { background: var(--primary); color: var(--btn-fg); }
@@ -376,16 +372,12 @@
     display: flex; align-items: center; gap: 8px;
   }
   .scheduled-message-actions { margin-top: auto; padding-top: 12px; justify-content: flex-start; }
-  #btnScheduledMessageToggle { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
   #btnScheduledMessageEdit {
     width: 34px; height: 34px; padding: 0; margin-left: 0;
     border-radius: 8px;
     display: inline-flex; align-items: center; justify-content: center;
   }
   #btnScheduledMessageEdit svg { width: 18px; height: 18px; }
-  #btnScheduledMessageToggle[data-on="1"] {
-    background: var(--primary); border-color: var(--primary-border); color: var(--btn-fg);
-  }
   .scheduled-picker-modal {
     position: fixed; inset: 0; z-index: 1001;
     background: rgba(0, 0, 0, .55);
@@ -428,23 +420,55 @@
     display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;
   }
   .scheduled-message-editor-dialog { width: min(560px, calc(100vw - 32px)); }
+  body.desktop-host .scheduled-picker-dialog { padding: 0; width: auto; background: transparent; border: 0; border-radius: 0; box-shadow: none; }
+  body.desktop-host .scheduled-message-editor-dialog { width: min(720px, 100%); }
   .scheduled-message-editor-groups { margin-top: 14px; margin-bottom: 12px; }
   .scheduled-message-list-header {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 10px; margin-bottom: 8px;
+    display: flex; align-items: center; justify-content: flex-end;
+    gap: 8px; margin-bottom: 0;
   }
-  .scheduled-message-list-header .scheduled-message-group-title { margin-bottom: 0; }
+  .scheduled-message-list-header .scheduled-message-group-title { margin-bottom: 0; margin-right: auto; }
+  .scheduled-message-list-header > button { flex: 0 0 auto; white-space: nowrap; }
   .scheduled-message-entries {
-    display: flex; flex-direction: column; gap: 10px;
+    display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px;
     max-height: 52vh; overflow-y: auto; padding: 1px 2px 2px 0;
   }
   .scheduled-message-entry {
     padding: 12px; border: 1px solid var(--field-border);
     border-radius: 8px; background: color-mix(in srgb, var(--field-bg) 55%, transparent);
   }
+  /* 卡片头：左上角「消息 N」，右上角复用转发组的 .foldbtn 折叠按钮。 */
   .scheduled-message-entry-header {
     display: flex; align-items: center; justify-content: space-between;
     gap: 8px; margin-bottom: 10px; color: var(--card-heading); font-size: 13px;
+  }
+  .scheduled-message-entry-header > strong { flex: 0 0 auto; }
+  .scheduled-message-entry-header > .foldbtn { margin: 0; flex: 0 0 auto; }
+  .scheduled-message-entry.is-collapsed .scheduled-message-entry-body { display: none; }
+  .scheduled-message-entry.is-collapsed .scheduled-message-entry-header { margin-bottom: 0; }
+  /* 卡片底部动作栏：删除按钮位于右下角，沿用转发组表格的 .danger.rowicon。 */
+  .scheduled-message-entry-actions {
+    display: flex; justify-content: flex-end; align-items: center;
+    margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--panel-border);
+  }
+  .scheduled-message-entry-actions .scheduled-message-remove { flex: 0 0 auto; }
+  .scheduled-message-entry-actions .scheduled-message-remove:hover { color: var(--danger-fg); }
+  /* 发送方式与基准日期时间（或日历周期）左右并排。 */
+  .scheduled-message-timing-row {
+    display: grid; grid-template-columns: minmax(130px, max-content) minmax(0, 1fr);
+    align-items: start; gap: 12px; margin-top: 10px;
+  }
+  .scheduled-message-timing-mode > label {
+    display: flex; flex-direction: column; gap: 5px;
+    color: var(--muted); font-size: 12px;
+  }
+  .scheduled-message-target-summary {
+    flex: 1 1 auto; min-width: 0; color: var(--muted); font-size: 12px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .scheduled-message-entry-row > .scheduled-message-target-manage { flex: 0 0 auto; }
+  @media (max-width: 620px) {
+    .scheduled-message-timing-row { grid-template-columns: minmax(0, 1fr); }
   }
   .scheduled-message-entry-header .scheduled-message-remove {
     width: 26px; height: 26px; font-size: 17px; font-weight: normal;
@@ -455,6 +479,31 @@
   .scheduled-message-calendar-panel > label {
     display: flex; flex-direction: column; gap: 5px;
     color: var(--muted); font-size: 12px;
+  }
+  /* 卡片正文两列对齐：左列正文与附件，右列发送目标，时间设置跨整行（内部再左右并排）。 */
+  .scheduled-message-entry-body {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 14px; align-items: end;
+  }
+  .scheduled-message-entry-label { grid-column: 1; }
+  .scheduled-message-image-row { grid-column: 1; }
+  .scheduled-message-image-hint { grid-column: 1 / -1; }
+  .scheduled-message-timing-row { grid-column: 1 / -1; }
+  .scheduled-message-target-row { grid-column: 2; }
+  /* 时间设置行：发送方式在左，基准时间/间隔在右。 */
+  .scheduled-message-timing-row > .scheduled-message-interval-fields,
+  .scheduled-message-timing-row > .scheduled-message-calendar-fields {
+    display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-top: 0;
+  }
+  .scheduled-message-interval-fields > label { max-width: none; }
+  /* 卡片底部动作栏：删除按钮在右下角，与上方字段用一条分隔线区隔。 */
+  body.desktop-host .scheduled-message-entry-actions { margin-top: 2px; }
+  /* 两列网格自带间距，去掉旧的堆叠 margin。 */
+  body.desktop-host .scheduled-message-entry-body > :is(.scheduled-message-timing-row, .scheduled-message-target-row) { margin-top: 0; }
+  @media (max-width: 760px) {
+    .scheduled-message-entry-body { grid-template-columns: minmax(0, 1fr); }
+    .scheduled-message-timing-row,
+    .scheduled-message-target-row { grid-column: auto; }
   }
   .scheduled-message-entry-content,
   .scheduled-message-entry input[type=datetime-local],
@@ -497,6 +546,9 @@
   }
   .scheduled-message-entry-row { margin-top: 10px; align-items: flex-end; }
   .scheduled-message-entry-row > label { min-width: 130px; }
+  /* 发送目标行：下拉 + 摘要 + 管理按钮，摘要可省略而不挤掉按钮。 */
+  .scheduled-message-entry-row:has(.scheduled-message-target-manage) { flex-wrap: wrap; align-items: center; gap: 8px; }
+  .scheduled-message-entry-row .scheduled-message-target-manage { margin-left: auto; }
   .scheduled-message-interval-fields,
   .scheduled-message-calendar-fields {
     flex-direction: column; align-items: stretch; gap: 9px; margin-top: 10px;
@@ -637,48 +689,37 @@
     margin-top: auto; padding-top: 12px;
     justify-content: space-between;
   }
-  #btnRelayFilter.filter-active, #btnXRelayFilter.filter-active, #btnBilibiliRelayFilter.filter-active {
+  #btnUnifiedRelayFilter.filter-active {
     background: var(--filter-active-bg);
     border: 1px solid var(--filter-active-border);
     color: var(--btn-fg);
   }
-  #btnRelayFilter.filter-active:hover, #btnXRelayFilter.filter-active:hover, #btnBilibiliRelayFilter.filter-active:hover { background: var(--filter-active-border); }
+  #btnUnifiedRelayFilter.filter-active:hover { background: var(--filter-active-border); }
+  .filter-scope-tabs {
+    display: flex; gap: 8px; flex-wrap: wrap;
+  }
+  .fscope-tab { flex: 1 1 auto; text-align: center; }
+  .fscope-tab.active {
+    background: var(--primary);
+    border-color: var(--primary-border);
+    color: var(--btn-fg);
+    font-weight: 600;
+  }
   .relay-channels-dialog {
     position: relative; width: min(620px, calc(100vw - 32px));
     box-sizing: border-box; padding: 20px;
     background: var(--modal-bg); border: 1px solid var(--modal-border);
     border-radius: 14px; box-shadow: 0 18px 48px rgba(0, 0, 0, .28);
   }
-  .bili-forward-video-option {
-    position: relative; display: flex; align-items: center; gap: 12px;
-    margin: 4px 0 12px; padding: 10px 12px;
-    background: var(--field-bg); border: 1px solid var(--panel-border);
-    border-radius: var(--radius-control); cursor: pointer;
-  }
-  .bili-forward-video-option > input {
-    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
-  }
-  .bili-forward-video-option > .bili-forward-video-copy { display: flex; flex: 1 1 auto; flex-direction: column; gap: 3px; min-width: 0; }
-  .bili-forward-video-switch {
-    display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 26px;
-    box-sizing: border-box; border: 1px solid var(--field-border); border-radius: 999px;
-    background: var(--sec-bg); transition: border-color .14s ease, background-color .14s ease;
-  }
-  .bili-forward-video-option .settings-switch-track { width: 36px; height: 20px; }
-  .bili-forward-video-option input:checked ~ .bili-forward-video-switch .settings-switch-track { background: var(--primary); }
-  .bili-forward-video-option input:checked ~ .bili-forward-video-switch .settings-switch-track::after { transform: translateX(16px); }
-  .bili-forward-video-option input:focus-visible ~ .bili-forward-video-switch { outline: 2px solid var(--primary-border); outline-offset: 2px; }
-  .bili-forward-video-option strong { color: var(--fg); font-size: 13px; font-weight: 600; }
-  .bili-forward-video-option small { color: var(--muted); font-size: 12px; line-height: 1.45; }
+  body.desktop-host .relay-channels-dialog { padding: 0; width: auto; background: transparent; border: 0; border-radius: 0; box-shadow: none; }
   .relay-channels-dialog h3 {
     margin: 0; color: var(--card-heading); font-size: 16px;
   }
   .relay-channels-desc {
-    margin: 7px 0 16px; color: var(--muted); font-size: 12px; line-height: 1.5;
+    margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5;
   }
   .relay-channels-list {
-    display: flex; flex-direction: column; gap: 8px;
+    display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px;
     max-height: min(55vh, 460px); overflow-y: auto;
   }
   .relay-channel-row {
@@ -709,8 +750,9 @@
     padding: 24px 12px; color: var(--muted); text-align: center; font-size: 13px;
     background: var(--field-bg); border: 1px solid var(--field-border); border-radius: 8px;
   }
+  /* 底栏沿用二级窗口统一规则：取消贴左下、保存贴右下。 */
   .relay-channels-actions {
-    display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px;
+    display: flex; justify-content: space-between; gap: 8px; margin-top: 4px;
   }
   .qq-whitelist-dialog {
     position: relative; display: flex; flex-direction: column;
@@ -872,32 +914,8 @@
     border-radius: 5px; color: var(--field-fg); padding: 5px 8px;
   }
   .ai-profile-toolbar button { padding: 6px 10px; font-size: 12px; }
-  .auto-translation-actions {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 10px;
-    align-items: end;
-  }
-  .auto-translation-actions .hint { margin-top: 0; }
-  .auto-translation-actions .hint { grid-column: 1 / -1; }
-  .auto-translation-actions > .translation-toggle { grid-column: 1; justify-self: start; }
-  .auto-translation-action-buttons { grid-column: 2; display: inline-flex; align-items: center; gap: 6px; margin-left: 0; }
+  /* 「翻译链路」与「翻译设置」二级窗口中的开关：一排一个，胶囊轨道贴右。 */
   #autoTranslationCard { display: flex; flex-direction: column; }
-  #autoTranslationCard .auto-translation-actions {
-    display: flex; align-items: flex-end; gap: 10px; margin-top: auto;
-  }
-  #autoTranslationCard .auto-translation-actions .hint {
-    flex: 0 0 100%; width: 100%;
-  }
-  #autoTranslationCard .auto-translation-actions > .translation-toggle { margin-right: auto; }
-  #autoTranslationCard .auto-translation-action-buttons { margin-left: auto; }
-  #btnTranslationToggle, #btnXTranslationToggle { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
-  #btnTranslationToggle svg, #btnXTranslationToggle svg { flex: none; }
-  #btnTranslationToggle[data-on="1"], #btnXTranslationToggle[data-on="1"] {
-    background: var(--primary);
-    border-color: var(--primary-border);
-    color: var(--btn-fg);
-  }
   .tip { color: var(--tip); font-size: 12px; }
   .delbtn { width: 100%; }
   .cardrow { display: flex; gap: 16px; align-items: stretch; }
@@ -917,10 +935,9 @@
   #btnAutostart svg { flex: none; }
   /* √/× 图案中心与「开机自启」文字中心对齐：SVG 略向下移、控制高度 */
   #btnAutostart svg { transform: translateY(1px); }
-  /* 开机自启/启用补发 选中态：复用「模式选择」选中按钮的选中颜色（背景/边框），不改尺寸/图标/文字；
-     中央文字/图标颜色统一为 --btn-fg（与「关于作者」按钮中央图案同源） */
-  #btnAutostart[data-on="1"],
-  #btnBackfillToggle[data-on="1"] {
+  /* 开机自启选中态：复用「模式选择」选中按钮的选中颜色（背景/边框）。
+     「启用补发」已改为胶囊开关，选中态只体现在轨道上（见 .pill-switch）。 */
+  #btnAutostart[data-on="1"] {
     background: var(--primary);
     border-color: var(--primary-border);
     color: var(--btn-fg);
@@ -971,6 +988,7 @@
     background: var(--modal-bg); border: 1px solid var(--modal-border);
     border-radius: 10px; box-shadow: 0 18px 48px rgba(0, 0, 0, .28);
   }
+  body.desktop-host .backup-dialog { width: auto; padding: 0; background: transparent; border: 0; border-radius: 0; box-shadow: none; }
   .diagnostic-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-right: 28px; }
   .diagnostic-toolbar h3 { margin: 0; color: var(--card-heading); font-size: 16px; }
   .diagnostic-list { margin-top: 12px; border-top: 1px solid var(--field-border); }
@@ -985,10 +1003,9 @@
   }
   .backup-title { padding-right: 28px; }
   .backup-title h3 { margin: 0; color: var(--card-heading); font-size: 16px; }
-  .backup-note, .backup-warning { margin: 12px 0 0; font-size: 12px; line-height: 1.5; }
+  .backup-note, .backup-warning { margin: 0; font-size: 12px; line-height: 1.5; }
   .backup-note { color: var(--muted); }
-  .backup-runtime { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; }
-  .backup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .backup-runtime { display: flex; align-items: center; gap: 8px; margin-top: 0; font-size: 13px; }
   .backup-file-select { display: inline-flex; align-items: center; cursor: pointer; }
   .backup-file-select input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   .backup-warning { color: var(--danger); }
@@ -1015,18 +1032,7 @@
     color: var(--btn-fg);
   }
   button.rowicon.translation-active:hover { background: var(--primary-border); }
-  .translation-setting-toggle {
-    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-    min-height: 30px; min-width: 0; flex: 1 1 0;
-  }
-  .translation-setting-toggle svg { flex: none; }
-  .translation-setting-buttons {
-    display: flex; align-items: stretch; gap: 8px; width: 100%;
-  }
-  .translation-setting-toggle[data-on="1"] {
-    background: var(--primary); border-color: var(--primary-border); color: var(--btn-fg);
-  }
-  .translation-setting-toggle[data-on="1"]:hover { background: var(--primary-border); }
+  /* 单条来源的翻译设置改为胶囊开关一排一个（外观由 .pill-switch 统一提供）。 */
   .translation-setting-toggle:disabled { opacity: .45; cursor: not-allowed; }
 
   /* ---------- 频道筛选弹窗（用户名/关键词列表 + 消息类型按钮） ---------- */
@@ -1069,7 +1075,10 @@
     /* 选中态蓝色背景下的文字/图标颜色统一为 --btn-fg（与「关于作者」按钮中央图案同源） */
     color: var(--btn-fg);
   }
-  #filterBilibiliPostTypeList .flt-type-btn:disabled { opacity: .45; cursor: not-allowed; }
+  /* 置灰禁用：该来源不支持的类型（Bilibili 投稿类型、X 推文类型共用）。
+     消息类型不适用：该链路不支持的类型直接不渲染。 */
+  #filterBilibiliPostTypeList .flt-type-btn:disabled,
+  #filterXPostTypeList .flt-type-btn:disabled { opacity: .45; cursor: not-allowed; }
 
   /* Bilibili 来源注册保持紧凑；筛选弹窗复用共用的消息筛选样式。 */
   body .modal-overlay > .modal-shell.bilibili-source-modal { --modal-width: 560px; }
@@ -1219,9 +1228,6 @@
   @media (max-width: 720px) {
     .fgtab { padding: 5px 10px; font-size: 12px; }
     body { padding-left: 16px; padding-right: 16px; }
-    .auto-translation-actions { grid-template-columns: 1fr; }
-    .auto-translation-actions > .translation-toggle,
-    .auto-translation-action-buttons { grid-column: 1; justify-self: start; }
   }
   @media (max-width: 900px) {
     .translation-scheduled-row { flex-direction: column; }
@@ -1442,8 +1448,7 @@
   .robot-status-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
   .robot-core-actions, .desktop-advanced-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
   .desktop-advanced-actions { margin-left: auto; }
-  #btnFailureNotificationToggle, #btnAutostart, #btnBackfillToggle,
-  #btnScheduledMessageToggle, #btnTranslationToggle, #btnXTranslationToggle {
+  #btnFailureNotificationToggle, #btnAutostart {
     min-height: var(--control-height); padding: 0 10px; border-radius: 8px;
   }
   #btnFailureNotificationToggle { margin-left: 0; }
@@ -2327,26 +2332,38 @@ body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) #qqBotWorkspace { width: 100%; padding-right: 30px; }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) .robot-status-actions { margin: 0; }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) .robot-stat strong { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) #backfillCard {
-  display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 12px 24px; flex: none;
-  border: 0; border-bottom: 1px solid var(--panel-border); border-radius: 0;
-  padding: 12px 0; background: transparent; min-height: 0; margin: 0;
+/* 离线补发卡内容：上限/待补发在上，胶囊与操作按钮贴底。 */
+body.desktop-host[data-active-page="discord"] #pageDiscord .func-cards > #backfillCard #backfillContent {
+  display: flex; flex-direction: column; flex: 1; min-width: 0;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) #backfillCard h2 { margin: 0; flex: none; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) #backfillContent { flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; min-width: 0; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) #backfillContent > .row { margin: 0 !important; padding: 0 !important; flex: 1; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) .bf-pending-row { margin-left: 12px; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) .bf-right-group { margin-left: auto; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#btnBackfillToggle, #btnTranslationToggle, #btnXTranslationToggle, #btnScheduledMessageToggle, #btnLogAutoScroll) {
+body.desktop-host[data-active-page="discord"] #pageDiscord .func-cards > #backfillCard .bf-row {
+  margin: 0; padding: 8px 0 0; flex-wrap: wrap; gap: 8px 16px;
+}
+body.desktop-host[data-active-page="discord"] #pageDiscord .func-cards > #backfillCard .backfill-actions {
+  margin: auto 0 0; padding-top: 12px; width: 100%; gap: 8px; flex-wrap: wrap;
+}
+body.desktop-host[data-active-page="discord"] #pageDiscord .func-cards > #backfillCard .backfill-actions > button { flex: 0 0 auto; white-space: nowrap; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#btnBackfillToggle, #btnScheduledMessageToggle, #btnBilibiliAutoResolveToggle) {
+  flex: 0 0 auto; width: auto; min-width: 0; max-width: 100%;
+  justify-content: flex-start;
+}
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#btnBackfillToggle, #btnScheduledMessageToggle, #btnBilibiliAutoResolveToggle, #btnLogAutoScroll) {
   display: inline-flex; align-items: center; gap: 8px; padding: 0 8px; min-height: 36px;
   color: var(--fg); background: transparent; border-color: transparent;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#btnBackfillToggle, #btnTranslationToggle, #btnXTranslationToggle, #btnScheduledMessageToggle) > svg { display: none; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#btnBackfillToggle, #btnTranslationToggle, #btnXTranslationToggle, #btnScheduledMessageToggle, #btnLogAutoScroll):hover { background: var(--sec-bg); }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#btnBackfillToggle, #btnScheduledMessageToggle, #btnBilibiliAutoResolveToggle, #btnLogAutoScroll):hover { background: var(--sec-bg); }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) [role="switch"] .settings-switch-track { width: 32px; height: 18px; flex: none; }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) [role="switch"] .settings-switch-track::after { width: 14px; height: 14px; }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) [role="switch"][data-on="1"] .settings-switch-track { background: var(--toggle-on); }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) [role="switch"][data-on="1"] .settings-switch-track::after { transform: translateX(14px); }
+/* 卡片动作栏的胶囊开关落位：默认贴左；左侧已有按钮时贴右；
+   右下角还有按钮时保持在它左侧（动作栏按「左按钮 → 胶囊 → 右按钮」排列）。 */
+:is(.scheduled-message-actions, .relay-link-actions, .auto-translation-actions, #backfillCard #backfillContent > .row) > button.pill-switch:not(:first-child) {
+  margin-left: auto;
+}
+:is(.scheduled-message-actions, .relay-link-actions, .auto-translation-actions, #backfillCard #backfillContent > .row) > button.pill-switch:not(:first-child) ~ * {
+  margin-left: 0;
+}
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) > .card:first-child { padding: 18px; }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) { gap: 12px 16px; }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) > .fgsection { padding: 14px; margin: 0; border: 0; border-radius: var(--radius-control); }
@@ -2399,6 +2416,22 @@ body.desktop-host:is([data-active-page="x"], [data-active-page="bilibili"], [dat
   min-width: 0; background: var(--field-bg);
 }
 body.desktop-host :is(#xFgBody, #bilibiliFgBody, #qqFgBody) .fgh3 { color: var(--fg); font-size: 15px; font-weight: 700; }
+/* QQ 授权用户：与 X/Bilibili 一样把转发组工作区做成左右两个分栏，
+   左「QQ 转发群」、右「QQ 授权用户」，各带自己的底部操作栏。 */
+body.desktop-host[data-active-page="qq"] #qqFgBody {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px;
+  align-items: stretch;
+}
+body.desktop-host[data-active-page="qq"] #qqFgBody > :is(.fgtabs, .hint) { grid-column: 1 / -1; }
+body.desktop-host[data-active-page="qq"] #qqFgBody > .fgsection { min-width: 0; }
+body.desktop-host[data-active-page="qq"] #qqFgBody #userContent {
+  display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; min-height: 0;
+}
+body.desktop-host[data-active-page="qq"] #qqFgBody #userContent > .hint { grid-column: auto; }
+body.desktop-host[data-active-page="qq"] #qqFgBody #userContent .tablewrap { flex: 1 1 auto; min-height: 0; }
+@media (max-width: 1280px) {
+  body.desktop-host[data-active-page="qq"] #qqFgBody { grid-template-columns: 1fr; }
+}
 body.desktop-host:is([data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#xrssCard, #bilibiliCard, #scheduledMessageCard) {
   display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center;
   gap: 10px 24px; padding: 12px 0; margin: 0;
@@ -2621,7 +2654,7 @@ body.desktop-host:is([data-active-page="x"], [data-active-page="bilibili"], [dat
 /* Final shared card metrics for all four desktop forwarding pages. */
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
   :is(.overview-status-card, #backfillCard, #xrssCard, #bilibiliCard, #scheduledMessageCard,
-      .discord-whitelist, #relayLinkCard, #xRelayLinkCard, #autoTranslationCard, #xAutoTranslationCard,
+      .discord-whitelist, #relayLinkCard, #xRelayLinkCard, #autoTranslationCard, #xAutoTranslationCard, #bilibiliAutoResolveCard,
       #recentMessageCard, #logCard, #pageDiscord > .card, #pageX > .card, #pageBilibili > .card, #pageQQ > .card) {
   background: var(--card-bg);
   border: 1px solid var(--panel-border);
@@ -2635,7 +2668,7 @@ body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data
   :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) > .card:first-child > h2 { margin-bottom: 12px; }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
   :is(.overview-status-card, #backfillCard, #xrssCard, #bilibiliCard, #scheduledMessageCard,
-      .discord-whitelist, #relayLinkCard, #xRelayLinkCard, #autoTranslationCard, #xAutoTranslationCard,
+      .discord-whitelist, #relayLinkCard, #xRelayLinkCard, #autoTranslationCard, #xAutoTranslationCard, #bilibiliAutoResolveCard,
       #recentMessageCard, #logCard, #pageDiscord > .card, #pageX > .card, #pageBilibili > .card, #pageQQ > .card) > h2 {
   display: flex;
   align-items: center;
@@ -2644,13 +2677,12 @@ body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data
 }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
   :is(.overview-status-card, #backfillCard, #xrssCard, #bilibiliCard, #scheduledMessageCard,
-      .discord-whitelist, #relayLinkCard, #xRelayLinkCard, #autoTranslationCard, #xAutoTranslationCard,
+      .discord-whitelist, #relayLinkCard, #xRelayLinkCard, #autoTranslationCard, #xAutoTranslationCard, #bilibiliAutoResolveCard,
       #recentMessageCard, #logCard, #pageDiscord > .card, #pageX > .card, #pageBilibili > .card, #pageQQ > .card) > h2 .hintbtn {
   align-self: center;
   margin: 0;
 }
 /* The Discord backfill and QQ scheduled-message headings share a top baseline. */
-body.desktop-host[data-active-page="discord"] .desktop-backfill-parameters > h2,
 body.desktop-host[data-active-page="qq"] #scheduledMessageCard > h2 {
   align-self: flex-start;
 }
@@ -2805,12 +2837,6 @@ body.desktop-host[data-active-page="settings"] .page-header-actions { display: n
 body.theme-light #pageSettings :is(select, option) { color-scheme: light; }
 
 /* Keep immediate actions, logs and low-frequency maintenance in distinct groups. */
-body.desktop-host[data-active-page="discord"] #backfillContent { display: none; }
-body.desktop-host[data-active-page="discord"] #backfillCard { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; }
-.desktop-backfill-parameters { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; min-width: 0; }
-body.desktop-host[data-active-page="discord"] .desktop-backfill-parameters .bf-pending-row { margin: 0; }
-.desktop-backfill-parameters :is(.bf-limit-row, .bf-pending-row) { flex-wrap: nowrap; }
-.desktop-backfill-actions { display: flex; align-items: center; flex: none; gap: 8px; margin-left: auto; }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) #logCard .log-actions {
   flex-wrap: nowrap; justify-content: space-between; gap: 24px;
 }
@@ -2838,9 +2864,15 @@ body.desktop-host .desktop-connection-group .badge { max-width: none; }
 .discord-log-heading { display: none; }
 body:not([data-active-page="overview"]) .robot-status-actions { display: none; }
 body[data-active-page="overview"] .robot-core-actions :is(#btnStart, #btnStop, #btnRestart):disabled { display: none; }
-#pageSettings .settings-switch { flex: 0 0 44px; width: 44px; min-width: 44px; height: 26px; min-height: 26px; padding: 3px; border-radius: 999px; margin: 0; }
-#pageSettings .settings-switch[data-on="1"] .settings-switch-track { background: var(--primary); }
-#pageSettings .settings-switch[data-on="1"] .settings-switch-track::after { transform: translateX(16px); }
+/* 设置页开关与「启用补发」一致：只保留轨道，外围不再有圆角底色或描边。 */
+#pageSettings :is(.settings-switch, #btnSettingsAutostart) {
+  flex: 0 0 32px; width: 32px; min-width: 32px; height: 18px; min-height: 18px;
+  padding: 0; margin: 0; border: 0; background: transparent; border-radius: 999px;
+}
+#pageSettings :is(.settings-switch, #btnSettingsAutostart) .settings-switch-track { width: 32px; height: 18px; }
+#pageSettings :is(.settings-switch, #btnSettingsAutostart) .settings-switch-track::after { width: 14px; height: 14px; }
+#pageSettings :is(.settings-switch, #btnSettingsAutostart)[data-on="1"] .settings-switch-track { background: var(--toggle-on); }
+#pageSettings :is(.settings-switch, #btnSettingsAutostart)[data-on="1"] .settings-switch-track::after { transform: translateX(14px); }
 #pageSettings :is(#btnRestartPanel) { width: auto; color: var(--sec-fg); background: var(--sec-bg); border: 1px solid var(--field-border); padding: 0 14px; height: var(--control-height); border-radius: var(--radius-control); }
 /* 更新状态说明可能较长，允许换行而不是被省略号截断。 */
 #pageSettings #updateStatus { white-space: normal; overflow: visible; }
@@ -2873,27 +2905,40 @@ body.desktop-host[data-active-page="discord"] #backfillCard {
   align-items: stretch;
   justify-content: flex-start;
 }
-body.desktop-host[data-active-page="discord"] #backfillCard .desktop-backfill-parameters {
-  width: 100%;
-}
-body.desktop-host[data-active-page="discord"] #backfillCard .desktop-backfill-parameters > h2 {
-  flex: 0 0 100%;
-  margin: 0;
-}
-body.desktop-host[data-active-page="discord"] #backfillCard .desktop-backfill-actions {
-  margin: auto 0 0;
-}
-body.desktop-host[data-active-page="qq"] #pageQQ > .qq-other-cards {
+/* 转发组下方小卡片统一规则：功能页转发组卡下方的每张卡片都是同一两列网格中的一格，
+   从左至右、从上至下排列；每格同宽，最小高度与内边距以「定时消息 / 手动转发」卡为基准，
+   1280px 及以下退化为单列。新增同类卡片时放进 .func-cards 即自动继承这些尺寸。 */
+body.desktop-host:is([data-active-page="discord"], [data-active-page="bilibili"], [data-active-page="qq"])
+  :is(#pageDiscord, #pageBilibili, #pageQQ) > .func-cards {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: stretch;
   gap: 16px;
   margin: 0 0 16px;
 }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="bilibili"], [data-active-page="qq"])
+  :is(#pageDiscord, #pageBilibili, #pageQQ) .func-cards > .card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  min-height: 164px;
+  margin: 0;
+  padding: 12px 18px;
+  justify-self: stretch;
+  box-sizing: border-box;
+}
+body.desktop-host:is([data-active-page="discord"], [data-active-page="bilibili"], [data-active-page="qq"])
+  :is(#pageDiscord, #pageBilibili, #pageQQ) .func-cards > .card > h2 {
+  margin: 0;
+  align-self: flex-start;
+}
 body.desktop-host[data-active-page="discord"] #pageDiscord .relay-translation-row > :is(#relayLinkCard, #autoTranslationCard, #backfillCard),
 body.desktop-host[data-active-page="x"] #pageX .relay-translation-row > :is(#xRelayLinkCard, #xAutoTranslationCard),
-body.desktop-host[data-active-page="bilibili"] #pageBilibili .relay-translation-row > #bilibiliRelayLinkCard,
-body.desktop-host[data-active-page="qq"] #pageQQ .qq-other-cards > #scheduledMessageCard {
+body.desktop-host[data-active-page="bilibili"] #pageBilibili .relay-translation-row > #bilibiliRelayLinkCard {
   width: 100%;
   max-width: none;
   min-width: 0;
@@ -2906,8 +2951,37 @@ body.desktop-host[data-active-page="bilibili"] #pageBilibili .relay-translation-
   grid-column: auto;
 }
 @media (max-width: 1280px) {
-  body.desktop-host[data-active-page="qq"] #pageQQ > .qq-other-cards { grid-template-columns: 1fr; }
+  body.desktop-host:is([data-active-page="discord"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#pageDiscord, #pageBilibili, #pageQQ) > .func-cards { grid-template-columns: 1fr; }
 }
+
+/* 网格内统一的卡片起排：标题在最上、说明紧随其后，动作栏贴底。
+   动作按钮一律靠左下（左下角优先）；只有成对的图标动作才用 space-between
+   把第二个按钮推到右下角。卡片中央不放成段的解释文字，详细说明只写进标题旁问号的提示气泡。 */
+body.desktop-host:is([data-active-page="discord"], [data-active-page="bilibili"], [data-active-page="qq"])
+  :is(#pageDiscord, #pageBilibili, #pageQQ) .func-cards > .card > .relay-link-description { margin: 8px 0 0; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="bilibili"], [data-active-page="qq"])
+  :is(#pageDiscord, #pageBilibili, #pageQQ) .func-cards > .card > :is(.relay-link-actions, .scheduled-message-actions, .backfill-actions) {
+  margin: auto 0 0;
+  padding-top: 12px;
+  width: 100%;
+  align-self: stretch;
+  box-sizing: border-box;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+/* 「手动转发」卡右下角的漏斗按钮保持贴右。 */
+body.desktop-host:is([data-active-page="discord"], [data-active-page="bilibili"], [data-active-page="qq"])
+  :is(#pageDiscord, #pageBilibili, #pageQQ) .func-cards > .card > .relay-link-actions { justify-content: space-between; }
+/* 「定时消息」与「离线补发」的动作按钮全部靠左下，覆盖桌面端原先的网格居中对齐。 */
+body.desktop-host:is([data-active-page="discord"], [data-active-page="bilibili"], [data-active-page="qq"])
+  :is(#pageDiscord, #pageBilibili, #pageQQ) .func-cards > .card > :is(.scheduled-message-actions, .backfill-actions) { justify-content: flex-start; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="bilibili"], [data-active-page="qq"])
+  :is(#pageDiscord, #pageBilibili, #pageQQ) .func-cards > .card > :is(.relay-link-actions, .scheduled-message-actions, .backfill-actions) > button { flex: 0 0 auto; white-space: nowrap; }
+/* 「自动翻译」卡：首选/次选服务在窄格内换行，链路开关在二级窗口里批量设置。
+   分区只留出上方间距，保证卡片高度与同排其他小卡片一致。 */
+body.desktop-host[data-active-page="qq"] #pageQQ .func-cards > #autoTranslationCard .auto-translation-section { padding: 10px 0 0; }
+body.desktop-host[data-active-page="qq"] #pageQQ .func-cards > #autoTranslationCard .auto-translation-fields { flex-wrap: wrap; }
+body.desktop-host[data-active-page="qq"] #pageQQ .func-cards > #autoTranslationCard .auto-translation-field { min-width: 0; flex: 1 1 150px; }
 
 /* Keep process and RSS run-state pills at the same size across every page. */
 #badge, #xrssBadge, #bilibiliBadge {

@@ -1,6 +1,6 @@
 """QQ 私聊 relay 已消费事件的登记表。
 
-`plugins/command.py` 消费一条私聊消息（relay 指令或 pending 的下一条内容）后
+`plugins/command.py` 消费一条私聊 relay 指令后
 会调用 NoneBot 的 `stop_propagation()`，让低优先级 matcher 不再处理同一事件。
 该信号依赖 NoneBot 与 anyio 的异常处理链；在部分运行环境（Nuitka 编译产物）
 中它会丢失，导致 `plugins/manage.py` 把同一条消息再按命令处理一次并回复

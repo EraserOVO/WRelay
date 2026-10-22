@@ -81,7 +81,8 @@ def load_token_proxy():
         token = bots[0]["token"] if bots else ""
     except Exception:
         token = ""
-    proxy = env.get("HTTP_PROXY") or env.get("http_proxy") or None
+    # 与 Bot 保持一致：启动时会清除 HTTP_PROXY，Discord 只使用适配器专用代理。
+    proxy = env.get("DISCORD_PROXY") or None
     return token, proxy
 
 
@@ -212,4 +213,11 @@ async def main():
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+    try:
+        sys.exit(asyncio.run(main()))
+    except httpx.RequestError:
+        print(
+            "[错误] 无法连接 Discord，请检查网络或 .env.prod 的 DISCORD_PROXY 配置",
+            file=sys.stderr,
+        )
+        sys.exit(1)

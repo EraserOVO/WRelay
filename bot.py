@@ -159,7 +159,7 @@ def _first_run_config_check():
         lines.append("    - 记得在 Bot 设置里开启 Message Content Intent（特权网关意图）")
     lines.append("")
     lines.append("  Discord 可通过 Clash 虚拟网卡（TUN）路由，或在 .env.prod 设置适配器专用 DISCORD_PROXY。")
-    lines.append("  通用 HTTP_PROXY 不会被使用；DISCORD_PROXY 代理 Discord API、Gateway 和托管媒体请求。")
+    lines.append("  通用 HTTP_PROXY 不会被使用；DISCORD_PROXY 代理 Discord API、Gateway、Discord 托管媒体和 X 媒体 CDN。")
     lines.append("  详细说明见 docs/SETUP.md。")
     lines.append("")
     lines.append("  请打开桌面端「设置 → 配置向导」完成所需账号配置，再启动机器人。")
@@ -386,6 +386,7 @@ BOT_PLUGIN_MODULES = (
     "plugins.relay",
     "plugins.scheduled_message",
     "plugins.bilibili",
+    "plugins.bilibili_auto_resolve",
     "plugins.x_rss",
 )
 from plugins.compiled_plugins import install as install_compiled_plugin_loader

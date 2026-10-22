@@ -9,13 +9,20 @@ from nonebot import get_driver
 from nonebot.adapters import Bot, Event
 
 from nonebot.adapters.qq import Bot as QQBot
+from nonebot.adapters.qq import Message, MessageSegment
 from nonebot.adapters.qq.event import (
     C2CMessageCreateEvent,
     GroupMessageCreateEvent,
 )
 
 from plugins import qq_fwd
-from plugins.config import get_active_user_openids
+from plugins.config import (
+    get_active_user_openids,
+    get_qq_group_entries,
+    is_group_registered,
+    USER_NOT_AUTHORIZED_TEXT,
+    GROUP_NOT_REGISTERED_TEXT,
+)
 from plugins.json_io import (
     atomic_write_json,
     load_json,
@@ -23,6 +30,13 @@ from plugins.json_io import (
 )
 from plugins.paths import data_path
 from plugins.c2c_consumed import is_consumed
+from plugins.qq_keyboard import (
+    command_button,
+    command_rows,
+    send_with_buttons,
+    send_titled_reply,
+    titled_markdown,
+)
 from panel.local_bridge import request_manager
 
 
@@ -32,8 +46,7 @@ from panel.local_bridge import request_manager
 # 白名单内的 QQ 用户私聊 Bot，通过 Windows 本机管道请求桌面管理进程
 # 执行管理操作（状态/重启/模式/列表/补发）。
 #
-# 无前缀触发：私聊直接发送命令词（如 status、backfill on），
-# 帮助命令为 list；relay 消息由 plugins/command.py 处理。
+# 私聊命令统一以 /中文命令名触发；转发命令由 plugins/command.py 处理。
 # =====================================================
 
 
@@ -134,7 +147,11 @@ async def _confirm_restart(bot: Bot):
             # 与 adapter 回复路径一致，用 author.id 作为 send_to_c2c 的 openid
             await bot.send_to_c2c(
                 openid=openid,
-                message="重启完毕",
+                message=Message([
+                    MessageSegment.markdown(
+                        titled_markdown("机器人重启", "重启完毕")
+                    )
+                ]),
             )
             logger.info(
                 "已向 {} 发送重启完毕",
@@ -173,32 +190,396 @@ def _management_api_error(data, fallback):
 
 def _help_text():
     return (
-        "【私聊命令】\n"
-        "status 机器人状态\n"
-        "restart 重启机器人\n"
-        "groups 群列表\n"
-        "channels 频道列表\n"
-        "users 权限列表\n"
-        "backfill 补发状态\n"
-        "backfill <on/off/run/clear/refresh> 开/关/触发/清空/刷新\n"
-        "timer 查看定时消息状态\n"
-        "timer <on/off/clear> 开/关/清空定时消息\n"
-        "relay list 查看可转发群列表\n"
-        "relay {序号1} {序号2} 选择多个目标群，下一条消息转发\n"
-        "relay all 选择全部已启用群，下一条消息转发\n"
-        "register {QQ号} {昵称} 用户私聊提交注册申请\n"
-        "list 查看命令清单"
+        "WRelay菜单\n"
+        "/运行状态 运行总览\n"
+        "/转发 列表 手动转发目标与方法\n"
+        "/定时消息 查询或开关定时消息\n"
+        "/QQ账号与群 用户/群注册申请\n"
+        "/重启 重启机器人"
     )
 
 
-def _group_help_text():
-    return (
-        "【群聊命令】\n"
-        "register-group {群号} {群名称} 群内提交群注册申请\n"
-        "relay list 查看可转发的QQ群列表\n"
-        "relay {序号} 将下一条消息转发到指定QQ群\n"
-        "list 查看命令清单"
-    )
+def _help_markdown():
+    """私聊主菜单。"""
+    return "# WRelay菜单\n点击下方按钮执行常用命令:"
+
+
+def _private_help_rows():
+    """私聊主菜单只保留手机上常用的直达操作。"""
+    return command_rows([
+        command_button("overview", "运行总览", "/运行状态"),
+        command_button("manual-forward", "手动转发", "/转发 列表"),
+        command_button("timer", "定时消息", "/定时消息"),
+        command_button("registration", "注册申请", "/QQ账号与群"),
+        command_button("restart", "重启", "/重启"),
+    ], per_row=3)
+
+
+def _section_rows(commands, back="/菜单"):
+    buttons = [command_button(key, label, command) for key, label, command in commands]
+    if back:
+        buttons.append(command_button("back-menu", "返回菜单", back))
+    return command_rows(buttons, per_row=3)
+
+
+def _auto_forward_rows():
+    return _section_rows([
+        ("route-discord", "Discord→QQ", "/转发组 discord"),
+        ("route-x", "X→QQ", "/转发组 x"),
+        ("route-bilibili", "Bilibili→QQ", "/转发组 bilibili"),
+    ])
+
+
+def _accounts_groups_rows():
+    return _section_rows([
+        ("pending-users", "用户注册申请", "/注册申请 用户"),
+        ("pending-groups", "群注册申请", "/注册申请 群"),
+        ("register-user", "提交用户注册", "/注册"),
+    ])
+
+
+def _maintenance_rows():
+    return _section_rows([
+        ("backfill", "离线补发", "/补发状态"),
+        ("timer", "定时消息", "/定时消息"),
+        ("restart", "重启", "/重启"),
+    ])
+
+
+def _list_page_rows(command, page, total_pages, back="/QQ账号与群"):
+    total_pages = max(1, int(total_pages))
+    page = min(max(1, int(page)), total_pages)
+    buttons = []
+    buttons.append(command_button("page-refresh", "刷新", f"{command} {page}"))
+    if page > 1:
+        buttons.append(command_button("page-prev", "上一页", f"{command} {page - 1}"))
+    if page < total_pages:
+        buttons.append(command_button("page-next", "下一页", f"{command} {page + 1}"))
+    buttons.append(command_button("page-back", "返回上级", back))
+    return command_rows(buttons, per_row=3)
+
+
+def _page_number(args):
+    if not args:
+        return 1
+    raw = str(args[-1])
+    if not raw.isascii() or not raw.isdecimal():
+        return 1
+    digits = raw.lstrip("0") or "0"
+    if len(digits) > 9:
+        return 999999999
+    return max(1, int(digits))
+
+
+async def _settings_or_error():
+    data = await _panel_get("/api/settings")
+    error = _management_api_error(data, "读取设置失败")
+    return data, error
+
+
+def _route_items(settings, kind):
+    key = {
+        "discord": "forwarding_groups",
+        "x": "x_forwarding_groups",
+        "bilibili": "bilibili_forwarding_groups",
+        "qq": "qq_forwarding_groups",
+    }.get(kind)
+    return list(settings.get(key) or []) if key else []
+
+
+async def _cmd_route_groups(kind, page=1):
+    labels = {"discord": "Discord→QQ", "x": "X→QQ", "bilibili": "Bilibili→QQ", "qq": "QQ→QQ"}
+    if kind not in labels:
+        return "未知转发类型，请使用 discord、x、bilibili 或 qq。"
+    settings, error = await _settings_or_error()
+    if error:
+        return error
+    groups = _route_items(settings, kind)
+    page_size = 6
+    total_pages = max(1, (len(groups) + page_size - 1) // page_size)
+    page = min(max(1, page), total_pages)
+    start = (page - 1) * page_size
+    lines = [labels[kind] + "转发组", f"第 {page}/{total_pages} 页，共 {len(groups)} 个转发组"]
+    for index, item in enumerate(groups[start:start + page_size], start=start + 1):
+        name = str(item.get("name") or f"转发组 {index}")
+        enabled = "启用" if item.get("enabled", True) else "停用"
+        sources = item.get("channels" if kind == "discord" else "sources") or []
+        targets = item.get("groups") or []
+        lines.append(f"{index}. {name}（{enabled}）｜来源 {len(sources)}｜目标群 {len(targets)}")
+    if not groups:
+        lines.append("当前没有配置转发组")
+    return "\n".join(lines)
+
+
+async def _cmd_route_group_detail(kind, group_index, page=1):
+    labels = {"discord": "Discord→QQ", "x": "X→QQ", "bilibili": "Bilibili→QQ", "qq": "QQ→QQ"}
+    if kind not in labels:
+        return "未知转发类型，请使用 discord、x、bilibili 或 qq。"
+    settings, error = await _settings_or_error()
+    if error:
+        return error
+    groups = _route_items(settings, kind)
+    if group_index < 1 or group_index > len(groups):
+        return "找不到对应的转发组"
+    item = groups[group_index - 1]
+    name = str(item.get("name") or f"转发组 {group_index}")
+    sources = item.get("channels" if kind == "discord" else "sources") or []
+    targets = item.get("groups") or []
+    names_by_id = {
+        str(value.get("id") or value.get("openid") or ""): (
+            str(value.get("name") or value.get("remark") or value.get("id") or value.get("openid") or "")
+            + ("（启用）" if value.get("enabled") else "（未启用）")
+        )
+        for key in ("discord_channels", "qq_group_openids")
+        for value in settings.get(key) or [] if isinstance(value, dict)
+    }
+    x_names = {
+        str(source.get("source") or "").lstrip("@"): (
+            str(source.get("name") or source.get("source") or "")
+            + ("（启用）" if source.get("enabled") else "（未启用）")
+        )
+        for source in settings.get("x_rss_sources") or [] if isinstance(source, dict)
+    }
+    bili_names = {
+        str(source.get("id") or ""): (
+            str(source.get("name") or source.get("value") or source.get("id") or "")
+            + ("（启用）" if source.get("enabled") else "（未启用）")
+        )
+        for source in settings.get("bilibili_sources") or [] if isinstance(source, dict)
+    }
+    if kind == "discord":
+        source_labels = [names_by_id.get(str(source), "") or str(source) for source in sources]
+    elif kind == "qq":
+        source_labels = []
+    elif kind == "x":
+        source_labels = [x_names.get(str(source), "") or str(source) for source in sources]
+    else:
+        source_labels = [bili_names.get(str(source), "") or str(source) for source in sources]
+    target_labels = [names_by_id.get(str(target), "") or str(target) for target in targets]
+    records = []
+    if kind != "qq":
+        records.extend(("来源", label) for label in source_labels)
+    records.extend(("目标群", label) for label in target_labels)
+    page_size = 8
+    total_pages = max(1, (len(records) + page_size - 1) // page_size)
+    page = min(max(1, page), total_pages)
+    start = (page - 1) * page_size
+    lines = [f"{labels[kind]}转发组：{name}", "状态：" + ("启用" if item.get("enabled", True) else "停用"), f"第 {page}/{total_pages} 页，共 {len(records)} 项"]
+    for role, label in records[start:start + page_size]:
+        lines.append(f"{role}：{label}")
+    if not records:
+        lines.append("没有配置来源或目标群")
+    return "\n".join(lines)
+
+
+async def _cmd_bot_accounts(page=1):
+    bots = await _panel_get("/api/bot/qq-config")
+    error = _management_api_error(bots, "读取 Bot 账号失败")
+    if error:
+        return error
+    settings, error = await _settings_or_error()
+    if error:
+        return error
+    status = await _panel_get("/api/status")
+    health = status.get("health") if isinstance(status, dict) else {}
+    online = set(str(value) for value in (health or {}).get("qq_bots", []))
+    groups = settings.get("qq_group_openids") or []
+    bot_ids = [str(item.get("appid") or "") for item in bots.get("bots") or [] if isinstance(item, dict)]
+    page_size = 8
+    total_pages = max(1, (len(bot_ids) + page_size - 1) // page_size)
+    page = min(max(1, page), total_pages)
+    start = (page - 1) * page_size
+    lines = ["Bot账号及群归属", f"第 {page}/{total_pages} 页，共 {len(bot_ids)} 个账号"]
+    for appid in bot_ids[start:start + page_size]:
+        assigned = [g for g in groups if isinstance(g, dict) and str(g.get("bot_id") or "") == appid]
+        lines.append(f"{appid}（{'在线' if appid in online else '离线'}，归属群 {len(assigned)} 个）")
+    if not bot_ids:
+        lines.append("当前没有配置 QQ Bot 账号")
+    return "\n".join(lines)
+
+
+async def _cmd_registration_requests(kind, page=1):
+    from plugins.registration import load_registrations
+    data = await asyncio.to_thread(load_registrations)
+    key = "users" if kind in ("用户", "users") else "groups" if kind in ("群", "groups") else None
+    if key is None:
+        return "用法：/注册申请 用户 或 /注册申请 群"
+    entries = list((data.get(key) or {}).items())
+    page_size = 8
+    total_pages = max(1, (len(entries) + page_size - 1) // page_size)
+    page = min(max(1, page), total_pages)
+    start = (page - 1) * page_size
+    title = "用户注册申请" if key == "users" else "群注册申请"
+    lines = [title, f"第 {page}/{total_pages} 页，共 {len(entries)} 项"]
+    for index, (openid, item) in enumerate(entries[start:start + page_size], start=start + 1):
+        item = item if isinstance(item, dict) else {}
+        label = item.get("nickname") if key == "users" else item.get("group_name")
+        detail = f"QQ号 {item.get('qq_id')}" if item.get("qq_id") else ""
+        code = str(item.get("application_code") or "未生成识别码")
+        lines.append(
+            f"{index}. {label or '未提供名称'} {detail} 识别码 {code}（{openid}）".strip()
+        )
+    if not entries:
+        lines.append("当前没有待处理申请")
+    return "\n".join(lines)
+
+
+def _timer_rows():
+    """定时消息查询后的操作按钮。"""
+    return command_rows([
+        command_button("timer-on", "开启", "/定时消息 开启"),
+        command_button("timer-off", "关闭", "/定时消息 关闭"),
+        command_button("timer-clear", "清空", "/定时消息 清空"),
+    ], per_row=3)
+
+
+def _backfill_rows():
+    """补发状态与操作回复的快捷按钮。"""
+    return command_rows([
+        command_button("backfill-on", "开启", "/补发状态 开启"),
+        command_button("backfill-off", "关闭", "/补发状态 关闭"),
+        command_button("backfill-run", "执行", "/补发状态 执行"),
+        command_button("backfill-clear", "清空", "/补发状态 清空"),
+        command_button("backfill-refresh", "刷新", "/补发状态 刷新"),
+    ], per_row=3)
+
+
+async def _reply_rows(cmd, args=None, reply=None):
+    """各管理结果页提供该功能的再次操作入口。"""
+    args = args or []
+    if cmd == "/转发组":
+        page = _page_number(args[1:])
+    elif cmd == "/转发组详情":
+        page = _page_number(args[2:])
+    elif cmd == "/注册申请":
+        page = _page_number(args[1:])
+    else:
+        page = _page_number(args)
+    if cmd == "/运行状态":
+        buttons = [
+            command_button("status-refresh", "刷新状态", "/运行状态"),
+        ]
+    elif cmd == "/自动转发":
+        return _auto_forward_rows()
+    elif cmd == "/QQ账号与群":
+        return _accounts_groups_rows()
+    elif cmd == "/维护":
+        return _maintenance_rows()
+    elif cmd == "/转发组":
+        kind = args[0] if args else "discord"
+        settings, error = await _settings_or_error()
+        if error:
+            return _section_rows([], back="/自动转发")
+        groups = _route_items(settings, kind)
+        page_size = 6
+        total_pages = max(1, (len(groups) + page_size - 1) // page_size)
+        page = min(max(1, page), total_pages)
+        start = (page - 1) * page_size
+        buttons = [
+            command_button(
+                f"route-detail-{idx}", f"查看{idx}组",
+                f"/转发组详情 {kind} {idx}",
+            )
+            for idx in range(start + 1, min(start + page_size, len(groups)) + 1)
+        ]
+        if page > 1:
+            buttons.append(command_button("route-prev", "上一页", f"/转发组 {kind} {page - 1}"))
+        if page < total_pages:
+            buttons.append(command_button("route-next", "下一页", f"/转发组 {kind} {page + 1}"))
+        if kind == "discord":
+            buttons.append(command_button("discord-channels", "Discord频道", "/频道列表"))
+        buttons.append(command_button("route-back", "返回自动转发", "/自动转发"))
+        return command_rows(buttons, per_row=3)
+    elif cmd == "/群列表":
+        settings, _ = await _settings_or_error()
+        total = len(settings.get("qq_group_openids") or []) if isinstance(settings, dict) else 0
+        return _list_page_rows("/群列表", page, max(1, (total + 7) // 8), "/QQ账号与群")
+    elif cmd == "/频道列表":
+        settings, _ = await _settings_or_error()
+        total = len(settings.get("discord_channels") or []) if isinstance(settings, dict) else 0
+        return _list_page_rows("/频道列表", page, max(1, (total + 7) // 8), "/转发组 discord")
+    elif cmd == "/权限列表":
+        settings, _ = await _settings_or_error()
+        total = len(settings.get("qq_user_openids") or []) if isinstance(settings, dict) else 0
+        return _list_page_rows("/权限列表", page, max(1, (total + 7) // 8), "/QQ账号与群")
+    elif cmd == "/Bot账号":
+        data = await _panel_get("/api/bot/qq-config")
+        total = len(data.get("bots") or []) if isinstance(data, dict) else 0
+        return _list_page_rows("/Bot账号", page, max(1, (total + 7) // 8), "/QQ账号与群")
+    elif cmd == "/注册申请":
+        kind = args[0] if args else "用户"
+        from plugins.registration import load_registrations
+        data = await asyncio.to_thread(load_registrations)
+        key = "users" if kind in ("用户", "users") else "groups"
+        total = len(data.get(key) or {})
+        return _list_page_rows(f"/注册申请 {kind}", page, max(1, (total + 7) // 8), "/QQ账号与群")
+    elif cmd == "/转发组详情":
+        kind = args[0] if args else "discord"
+        group_index = _page_number([args[1]]) if len(args) > 1 else 0
+        settings, _ = await _settings_or_error()
+        groups = _route_items(settings, kind) if isinstance(settings, dict) else []
+        records = []
+        if 0 < group_index <= len(groups):
+            route = groups[group_index - 1]
+            if kind != "qq":
+                records.extend(route.get("channels" if kind == "discord" else "sources") or [])
+            records.extend(route.get("groups") or [])
+        total_pages = max(1, (len(records) + 7) // 8)
+        page = min(max(1, page), total_pages)
+        page_command = f"/转发组详情 {kind} {group_index}"
+        buttons = []
+        if page > 1:
+            buttons.append(command_button("detail-prev", "上一页", f"{page_command} {page - 1}"))
+        if page < total_pages:
+            buttons.append(command_button("detail-next", "下一页", f"{page_command} {page + 1}"))
+        buttons.append(command_button("detail-groups", "返回转发组", f"/转发组 {kind}"))
+        buttons.append(command_button("detail-auto", "返回自动转发", "/自动转发"))
+        return command_rows(buttons, per_row=3)
+    elif cmd == "/补发状态":
+        return _backfill_rows()
+    elif cmd == "/定时消息":
+        return _timer_rows()
+    else:
+        return None
+    return command_rows(buttons, per_row=3)
+
+
+def _reply_title(cmd, reply=None):
+    first_line = str(reply or "").splitlines()
+    known_titles = {
+        "机器人状态",
+        "自动转发",
+        "QQ账号与群",
+        "维护",
+        "Bot账号及群归属",
+        "用户注册申请",
+        "群注册申请",
+        "注册申请",
+        "群列表",
+        "频道列表",
+        "权限列表",
+        "离线补发状态",
+        "Discord 实时状态",
+        "定时消息",
+    }
+    if first_line and first_line[0].strip() in known_titles:
+        return first_line[0].strip()
+    return {
+        "/运行状态": "机器人状态",
+        "/自动转发": "自动转发",
+        "/QQ账号与群": "QQ账号与群",
+        "/维护": "维护",
+        "/Bot账号": "Bot账号及群归属",
+        "/转发组": "转发组列表",
+        "/转发组详情": "转发组详情",
+        "/注册申请": "注册申请",
+        "/群列表": "群列表",
+        "/频道列表": "频道列表",
+        "/权限列表": "权限列表",
+        "/补发状态": "离线补发状态",
+        "/定时消息": "定时消息",
+        "/重启": "机器人重启",
+    }.get(cmd, "WRelay")
 
 
 async def _cmd_status():
@@ -212,7 +593,7 @@ async def _cmd_status():
     if error:
         return error
 
-    lines = ["【机器人状态】"]
+    lines = ["机器人状态"]
 
     if data.get("running"):
         lines.append("运行中 PID:" + str(data.get("pid") or "?"))
@@ -245,10 +626,18 @@ async def _cmd_status():
     lines.append("离线补发：" + ("开启" if enabled else "关闭"))
     lines.append("开机自启：" + ("开启" if data.get("autostart") else "关闭"))
 
+    route_counts = {
+        "Discord→QQ": len(settings.get("forwarding_groups") or []),
+        "X→QQ": len(settings.get("x_forwarding_groups") or []),
+        "Bilibili→QQ": len(settings.get("bilibili_forwarding_groups") or []),
+        "QQ→QQ": len(settings.get("qq_forwarding_groups") or []),
+    }
+    lines.append("转发组：" + "，".join(f"{name} {count}" for name, count in route_counts.items()))
+
     return "\n".join(lines)
 
 
-async def _cmd_list(kind):
+async def _cmd_list(kind, page=1):
     """查询群/频道/用户列表（复用面板 /api/settings 的配置与 getter）"""
     if kind == "qq_group_openids":
         title, id_key, desc_key = "群列表", "openid", "name"
@@ -263,9 +652,13 @@ async def _cmd_list(kind):
         return error
     items = settings.get(kind) or []
 
-    lines = [f"【{title}】"]
+    page_size = 8
+    total_pages = max(1, (len(items) + page_size - 1) // page_size)
+    page = min(max(1, page), total_pages)
+    start = (page - 1) * page_size
+    lines = [title, f"第 {page}/{total_pages} 页，共 {len(items)} 项"]
 
-    for item in items:
+    for item in items[start:start + page_size]:
         if not isinstance(item, dict):
             continue
         flag = "（启用）" if item.get("enabled") else "（未启用）"
@@ -274,7 +667,11 @@ async def _cmd_list(kind):
             # 群/用户条目未注册时无 name，回退显示原 remark（如"自动发现，点击启用"）
             desc = str(item.get("remark") or "").strip()
         ident = str(item.get(id_key) or "?")
-        lines.append(flag + (desc + " " if desc else "") + ident)
+        bot_info = (
+            " Bot " + str(item.get("bot_id") or "未分配")
+            if kind == "qq_group_openids" else ""
+        )
+        lines.append(flag + (desc + " " if desc else "") + ident + bot_info)
 
     lines.append(f"（总计{len(items)}个）")
 
@@ -302,7 +699,7 @@ async def _cmd_backfill(args):
             pending_text = "未知"
 
         return (
-            "【离线补发状态】\n"
+            "离线补发状态\n"
             "当前"
             + ("开启" if enabled else "关闭")
             + "\n"
@@ -312,8 +709,8 @@ async def _cmd_backfill(args):
             "待补发：" + pending_text
         )
 
-    if arg in ("on", "off"):
-        value = arg == "on"
+    if arg in ("开启", "关闭"):
+        value = arg == "开启"
         # 字段级接口：只提交 backfill_enabled，不再 GET 全量配置后
         # 回传，避免覆盖面板刚保存的其他字段；已处于目标状态时
         # 服务端不写盘并返回 changed=false，直接告知用户
@@ -331,7 +728,7 @@ async def _cmd_backfill(args):
             return "已" + ("开启" if value else "关闭") + "离线补发"
         return data.get("msg") or "设置失败"
 
-    if arg == "run":
+    if arg == "执行":
         # 先查待补发缺口，无消息时直接告知，避免空触发
         pending = await _panel_get("/api/backfill/pending")
         if pending.get("ok") and not pending.get("total"):
@@ -341,7 +738,7 @@ async def _cmd_backfill(args):
             return "补发已触发"
         return data.get("msg") or "补发触发失败"
 
-    if arg == "clear":
+    if arg == "清空":
         data = await _panel_post("/api/backfill/clear")
         if data.get("ok"):
             cleared = data.get("cleared", 0)
@@ -355,12 +752,12 @@ async def _cmd_backfill(args):
             )
         return data.get("msg") or "清空失败"
 
-    if arg == "refresh":
+    if arg == "刷新":
         # 立即读取一次 Discord 实时状态（各频道待补发缺口）
         pending = await _panel_get("/api/backfill/pending")
         if not pending.get("ok"):
             return pending.get("msg") or "刷新失败"
-        lines = ["【Discord 实时状态】"]
+        lines = ["Discord 实时状态"]
         channels = pending.get("channels") or {}
         lines.append("待补发合计：" + str(pending.get("total", 0)) + " 条")
         for info in list(channels.values())[:15]:
@@ -376,7 +773,54 @@ async def _cmd_backfill(args):
             lines.append("…等共 " + str(len(channels)) + " 个频道")
         return "\n".join(lines)
 
-    return "用法: backfill（查询）/ on/off / run / clear / refresh"
+    return "用法：/补发状态（查询）/ 开启 / 关闭 / 执行 / 清空 / 刷新"
+
+
+SCHEDULED_TARGET_LABELS = {
+    "groups": "指定群",
+    "forward_group": "转发组",
+    "all": "全部群",
+}
+
+
+def _scheduled_target_summary(messages, default_targets):
+    """定时消息目标的一行摘要：区分「各自配置」与「统一默认」。"""
+    messages = [item for item in messages if isinstance(item, dict)]
+    if not messages:
+        return "默认目标 {} 个群".format(len(default_targets or []))
+    if all(
+        str(item.get("target_mode") or "groups") == "groups"
+        and not item.get("target_groups")
+        for item in messages
+    ):
+        return "统一默认目标 {} 个群".format(len(default_targets or []))
+    counts = {}
+    for item in messages:
+        mode = str(item.get("target_mode") or "groups")
+        counts[mode] = counts.get(mode, 0) + 1
+    parts = [
+        "{} {}".format(SCHEDULED_TARGET_LABELS.get(mode, mode), counts[mode])
+        for mode in ("groups", "forward_group", "all")
+        if counts.get(mode)
+    ]
+    return "按消息配置（" + "、".join(parts) + "）"
+
+
+def _scheduled_has_any_target(messages, default_targets):
+    """开启前的目标校验：任一条消息能解析出目标即可（群启用状态在发送时判断）。"""
+    if not messages:
+        return bool(default_targets)
+    for item in messages:
+        mode = str(item.get("target_mode") or "groups")
+        if mode == "all":
+            return True
+        if mode == "forward_group":
+            if item.get("forward_groups"):
+                return True
+            continue
+        if item.get("target_groups") or default_targets:
+            return True
+    return False
 
 
 async def _cmd_timer(args):
@@ -399,20 +843,21 @@ async def _cmd_timer(args):
         else:
             schedule = "未设置"
             send_time = config.get("send_time") or "09:00"
+        targets = _scheduled_target_summary(messages, config.get("target_groups") or [])
         return (
-            "【定时消息】\n"
+            "定时消息\n"
             "状态：" + ("开启" if enabled else "关闭") + "\n"
             "计划：" + schedule + "\n"
             "时间：" + str(send_time) + "\n"
-            "目标群：" + str(len(config.get("target_groups") or [])) + " 个\n"
+            "目标：" + targets + "\n"
             "内容：" + (content if content else "（未设置）")
         )
 
-    action = args[0].lower()
-    if action in ("on", "off"):
+    action = args[0]
+    if action in ("开启", "关闭"):
         if len(args) != 1:
-            return "用法: timer on 或 timer off"
-        if action == "on":
+            return "用法：/定时消息 开启 或 /定时消息 关闭"
+        if action == "开启":
             settings = await _panel_get("/api/settings")
             error = _management_api_error(settings, "读取定时消息设置失败")
             if error:
@@ -425,19 +870,22 @@ async def _cmd_timer(args):
             )
             if not has_content and not str(config.get("content") or "").strip():
                 return "请先在管理面板设置定时消息内容"
-            if not config.get("target_groups"):
-                return "请先在管理面板设置定时消息目标群"
+            if not _scheduled_has_any_target(
+                [item for item in messages if isinstance(item, dict)],
+                config.get("target_groups") or [],
+            ):
+                return "请先在管理面板为定时消息设置目标群或转发组"
         data = await _panel_post(
             "/api/settings/scheduled-message",
-            {"enabled": action == "on"},
+            {"enabled": action == "开启"},
         )
         if data.get("ok"):
-            return "已" + ("开启" if action == "on" else "关闭") + "定时消息"
+            return "已" + ("开启" if action == "开启" else "关闭") + "定时消息"
         return data.get("msg") or "设置失败"
 
-    if action == "clear":
+    if action == "清空":
         if len(args) != 1:
-            return "用法: timer clear"
+            return "用法：/定时消息 清空"
         data = await _panel_post(
             "/api/settings/scheduled-message",
             {"content": "", "enabled": False},
@@ -446,35 +894,78 @@ async def _cmd_timer(args):
             return "定时消息已关闭并清空内容"
         return data.get("msg") or "设置失败"
 
-    return "仅支持：timer（查询）或 timer <on/off/clear>"
+    return "仅支持：/定时消息（查询）或 /定时消息 <开启/关闭/清空>"
 
 
-UNKNOWN_COMMAND_REPLY = "未知命令，输入 list 查看可用命令"
+PRIVATE_UNKNOWN_COMMAND_REPLY = "该命令未知，点击下方按钮展开菜单："
+
+
+def _unknown_command_rows():
+    return command_rows([
+        command_button("menu", "展开菜单", "/菜单"),
+    ], per_row=1)
+
+
+def _stop_group_hint_propagation():
+    """Keep group hint messages from reaching lower-priority matchers."""
+    try:
+        from nonebot.internal.matcher import current_matcher
+        current_matcher.get().stop_propagation()
+    except Exception:
+        pass
 
 
 async def _dispatch(cmd, args):
-    if cmd == "list":
+    if cmd == "/菜单":
         return _help_text()
 
-    if cmd == "status":
+    if cmd == "/运行状态":
         return await _cmd_status()
 
-    if cmd == "groups":
-        return await _cmd_list("qq_group_openids")
+    if cmd == "/自动转发":
+        return "自动转发\n查看各来源类型的转发组及状态。"
 
-    if cmd == "channels":
-        return await _cmd_list("discord_channels")
+    if cmd == "/QQ账号与群":
+        return "注册申请\n查看用户/群待审申请，或提交用户注册申请。"
 
-    if cmd == "users":
-        return await _cmd_list("qq_user_openids")
+    if cmd == "/维护":
+        return "维护\n离线补发、定时消息与机器人重启。"
 
-    if cmd == "backfill":
+    if cmd == "/转发组":
+        kind = args[0] if args else "discord"
+        page = _page_number(args[1:]) if len(args) > 1 else 1
+        return await _cmd_route_groups(kind, page)
+
+    if cmd == "/转发组详情":
+        if len(args) < 2 or not str(args[1]).isascii() or not str(args[1]).isdecimal():
+            return "用法：/转发组详情 类型 序号"
+        page = _page_number(args[2:]) if len(args) > 2 else 1
+        return await _cmd_route_group_detail(args[0], int(args[1]), page)
+
+    if cmd == "/Bot账号":
+        return await _cmd_bot_accounts(_page_number(args))
+
+    if cmd == "/注册申请":
+        kind = args[0] if args else "用户"
+        page = _page_number(args[1:]) if len(args) > 1 else 1
+        return await _cmd_registration_requests(kind, page)
+
+    if cmd == "/群列表":
+        return await _cmd_list("qq_group_openids", _page_number(args))
+
+    if cmd == "/频道列表":
+        return await _cmd_list("discord_channels", _page_number(args))
+
+    if cmd == "/权限列表":
+        return await _cmd_list("qq_user_openids", _page_number(args))
+
+    if cmd == "/补发状态":
         return await _cmd_backfill(args)
 
-    if cmd == "timer":
+    if cmd == "/定时消息":
         return await _cmd_timer(args)
 
-    return UNKNOWN_COMMAND_REPLY
+    return PRIVATE_UNKNOWN_COMMAND_REPLY
 
 
 @manage_command.handle()
@@ -489,7 +980,7 @@ async def handle(
     ):
         return
 
-    # 群聊 list 由本处理器响应；relay / register-group 分别由各自处理器处理。
+    # 群聊 /菜单 直接显示转发目标列表；转发 / 注册群由各自处理器处理。
     # @机器人的未知消息提示由下方 group_at_hint 处理。
     if isinstance(
         event,
@@ -497,11 +988,8 @@ async def handle(
     ):
         message = event.get_plaintext().strip()
 
-        if message == "list":
-            await bot.send(
-                event,
-                _group_help_text()
-            )
+        if message == "/菜单":
+            await qq_fwd.send_relay_list(bot, event)
 
         return
 
@@ -532,13 +1020,13 @@ async def handle(
     args = parts[1:]
 
     # relay 私聊转发由 plugins/command.py 处理
-    if cmd == "relay":
+    if cmd == "/转发" or cmd == "/私聊转发":
         return
 
-    # register / register-group 注册指令由 plugins/registration.py 处理
+    # /注册 /注册群 注册指令由 plugins/registration.py 处理
     # （注册对未授权用户开放，不做白名单校验，避免这里回复"未授权"
-    # 造成双重回复）；中文"注册"已删除，按未知命令正常回复
-    if cmd in ("register", "register-group"):
+    # 造成双重回复）
+    if cmd in ("/注册", "/注册群"):
         return
 
     # 白名单校验：与 relay 命令一致，仅允许管理面板勾选放行的用户
@@ -550,9 +1038,11 @@ async def handle(
             event.author.user_openid
         )
 
-        await bot.send(
+        await send_titled_reply(
+            bot,
             event,
-            "未授权使用管理命令（请在管理面板勾选放行）"
+            "准入提示",
+            USER_NOT_AUTHORIZED_TEXT,
         )
 
         return
@@ -562,14 +1052,30 @@ async def handle(
         message
     )
 
+    # 菜单用带按钮的 markdown 消息：按钮点击后发送的就是现有命令文本，
+    # 不引入新的解析路径；按钮消息发送失败时回退为原纯文本清单。
+    if cmd == "/菜单":
+
+        await send_with_buttons(
+            bot,
+            event,
+            _help_markdown(),
+            _private_help_rows(),
+            fallback=_help_text(),
+        )
+
+        return
+
     # restart 由管理面板结束本进程（taskkill 进程树），
     # 确认回复必须先于进程退出发出；同时写标记文件，
     # 供重启后的新进程 QQ 重连时回复"重启完毕"
-    if cmd == "restart":
+    if cmd == "/重启":
 
-        await bot.send(
+        await send_titled_reply(
+            bot,
             event,
-            "正在重启机器人..."
+            "机器人重启",
+            "正在重启机器人...",
         )
 
         try:
@@ -594,7 +1100,12 @@ async def handle(
             logger.warning("调用面板 restart 失败: {}", reason)
             # 重启未发生，清除标记避免之后误发"重启完毕"
             await _clear_restart_pending_async()
-            await bot.send(event, "机器人重启失败，请检查桌面端日志")
+            await send_titled_reply(
+                bot,
+                event,
+                "机器人重启",
+                "机器人重启失败，请检查桌面端日志",
+            )
 
         return
 
@@ -623,20 +1134,54 @@ async def handle(
 
         reply = "管理命令执行失败（请查看日志）"
 
-    if reply:
+    if reply == PRIVATE_UNKNOWN_COMMAND_REPLY:
 
-        await bot.send(
+        rows = _unknown_command_rows()
+        # 不认识的具体命令追加成按原文执行的按钮（enter 模式），误触也是原命令，
+        # 不会改动原有命令语义。
+        if cmd.startswith("/") and len(cmd) <= 20 and len(rows) < 4:
+            rows = rows + command_rows([
+                command_button("try-cmd", cmd, cmd),
+            ], per_row=3)
+
+        await send_titled_reply(
+            bot,
             event,
-            reply
+            "WRelay菜单",
+            reply,
+            rows,
         )
+
+    elif reply:
+
+        # 管理结果页附上对应快捷操作，省去手输常用命令。
+        rows = await _reply_rows(cmd, args, reply)
+
+        if rows:
+
+            await send_titled_reply(
+                bot,
+                event,
+                _reply_title(cmd, reply),
+                reply,
+                rows,
+            )
+
+        else:
+
+            await send_titled_reply(
+                bot,
+                event,
+                _reply_title(cmd, reply),
+                reply,
+            )
 
 
 # =====================================================
-# 群内 @ 机器人的未知命令提示
+# 群内 @ 机器人与未知命令转发到目标列表
 #
-# 只接受 QQ 适配器明确标记为机器人目标的 mention_user 消息段。
-# 事件类型或空文本段无法证明提及对象是机器人，不能作为回退触发条件。
-# 进行中的 relay pending 继续优先消费消息。
+# 优先使用 QQ 事件的 to-me 判定，同时兼容不同适配器版本的提及消息段。
+# 未知斜杠命令和 @机器人消息引导到转发列表；普通待转发内容仍由 relay 消费。
 # =====================================================
 
 group_at_hint = on_message(
@@ -677,52 +1222,96 @@ async def handle_group_at_hint(
 
     bot_id = _qq_bot_id(bot)
     mentions_bot = False
-    for segment in segs:
-        if getattr(segment, "type", None) != "mention_user":
-            continue
+    is_tome = getattr(event, "is_tome", None)
+    try:
+        adapter_mentions_bot = bool(is_tome() if callable(is_tome) else is_tome)
+    except Exception:
+        adapter_mentions_bot = False
+    if adapter_mentions_bot:
+        # 适配器的 to-me 判定使用自己的账号标识，可能与 bot.self_id
+        # 的格式不同；该判定也能覆盖适配器未暴露 mention_user 段的事件。
+        mentions_bot = True
 
+    for segment in segs:
+        segment_type = str(getattr(segment, "type", None) or "").lower()
+        if segment_type == "to_me":
+            mentions_bot = True
+            break
+        if segment_type not in ("mention_user", "at", "mention", "at_user"):
+            continue
         data = getattr(segment, "data", None)
         if not isinstance(data, dict):
             continue
 
-        mention_id = str(data.get("user_id") or "").strip()
-        if bot_id and mention_id:
-            if mention_id == bot_id:
-                mentions_bot = True
-                break
-            # 目标 ID 已明确且不是机器人时，不采信可能不一致的辅助标记。
-            continue
-
-        # 兼容缺少目标 ID 的适配器事件。
+        # is_bot 是适配器提供的直接目标标记，优先于可能采用另一套
+        # 标识格式的 user_id/self_id 比较。
         if data.get("is_bot") is True:
             mentions_bot = True
             break
 
-    if not mentions_bot:
+        mention_id = str(
+            data.get("user_id") or data.get("qq") or data.get("target")
+            or data.get("openid") or data.get("id") or ""
+        ).strip()
+        if bot_id and mention_id:
+            if mention_id == bot_id:
+                mentions_bot = True
+                break
+    is_command = message.startswith("/")
+    if not mentions_bot and not is_command:
         # 事件类型可能覆盖普通成员提及；必须确认提及目标确实是机器人。
+        if any(
+            str(getattr(segment, "type", None) or "").lower()
+            in ("mention_user", "at", "mention", "at_user", "to_me")
+            for segment in segs
+        ):
+            logger.debug(
+                "忽略未确认目标的群聊提及: is_tome={} segment_types={}",
+                adapter_mentions_bot,
+                [str(getattr(segment, "type", None) or "") for segment in segs],
+            )
         return
 
-    if qq_fwd.has_pending(
-        event.group_openid,
-        event.author.member_openid
-    ):
-        # 下一条消息继续由 QQ 群手动转发流程消费。
+    if mentions_bot:
+        logger.info(
+            "收到群聊 @机器人消息: plain_length={} mention_segments={}",
+            len(message),
+            sum(
+                1 for segment in segs
+                if str(getattr(segment, "type", None) or "").lower()
+                in ("mention_user", "at", "mention", "at_user", "to_me")
+            ),
+        )
+
+    # /菜单 由 manage_command 统一返回转发群列表，避免重复回复。
+    if message == "/菜单":
         return
 
-    # 已知命令交给原有处理器，避免重复回复或打断待转发消息。
-    if message == "list":
-        return
+    # 已知转发/注册命令继续由原处理器响应。
     if qq_fwd.parse_relay(message)[0] is not None:
         return
     if (
-        message == "register"
-        or message.startswith("register ")
-        or message == "register-group"
-        or message.startswith("register-group ")
+        message == "/注册"
+        or message.startswith("/注册 ")
+        or message == "/注册群"
+        or message.startswith("/注册群 ")
     ):
         return
 
-    await bot.send(
-        event,
-        UNKNOWN_COMMAND_REPLY
-    )
+    if mentions_bot or is_command:
+        # 群未登记：@ 机器人或未知命令属于「功能请求」，提示先登记群，
+        # 不展示转发目标列表；普通群消息/@其他成员已在上方排除，不提示。
+        registered = await asyncio.to_thread(
+            is_group_registered, event.group_openid, _qq_bot_id(bot)
+        )
+        if not registered:
+            await send_titled_reply(
+                bot,
+                event,
+                "群准入提示",
+                GROUP_NOT_REGISTERED_TEXT,
+            )
+            _stop_group_hint_propagation()
+            return
+        await qq_fwd.send_relay_list(bot, event)
+        _stop_group_hint_propagation()

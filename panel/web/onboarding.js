@@ -119,7 +119,7 @@
   }
   function pendingList(kind) {
     const items = (registrations[kind] || []).filter(item => kind === "users" || item.bot_id === draft.bot_id);
-    return '<div class="onboarding-list">' + items.map(item => '<div class="onboarding-entry"><span>' + esc(item.nickname || item.group_name || shortId(item.openid)) + '<small>待审核 · ' + esc(item.qq_id || shortId(item.openid)) + '</small></span><button type="button" class="sec" data-review="' + esc(item.openid) + '" data-review-kind="' + kind + '">审核通过</button></div>').join("") + '</div>';
+    return '<div class="onboarding-list">' + items.map(item => '<div class="onboarding-entry"><span>' + esc(item.nickname || item.group_name || shortId(item.openid)) + '<small>待审核 · 识别码 ' + esc(item.application_code || "需重新提交") + '</small></span><button type="button" class="sec" data-review="' + esc(item.openid) + '" data-review-kind="' + kind + '">审核通过</button></div>').join("") + '</div>';
   }
   function sourceItems() {
     const items = snapshot[{discord: "discord_channels", x: "x_rss_sources", bilibili: "bilibili_sources"}[draft.purpose]] || [];

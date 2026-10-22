@@ -60,13 +60,13 @@ def main():
     assert cfg.get_bilibili_source_filter("tag:动作游戏") == {
         "filter_keywords": [],
         "filter_bilibili_post_types": ["视频"],
-        "forward_video": False,
+        "filter_message_types": ["文字", "图片", "链接", "视频"],
     }
     keyword_filter = cfg.get_bilibili_source_filter("keyword:独立游戏")
     assert keyword_filter == {
         "filter_keywords": ["精选关键词"],
         "filter_bilibili_post_types": ["视频"],
-        "forward_video": False,
+        "filter_message_types": ["文字", "图片", "链接", "视频"],
     }
     assert not any(key in keyword_filter for key in (
         "filter_tags",

@@ -1985,7 +1985,10 @@ def _registration_items(kind, data=None):
         if not isinstance(entry, dict):
             continue
         item = {"openid": str(openid)}
-        for field in ("qq_id", "nickname", "group_name", "operator_openid", "bot_id", "time"):
+        for field in (
+            "qq_id", "nickname", "group_name", "operator_openid", "bot_id",
+            "application_code", "time",
+        ):
             if field in entry:
                 item[field] = entry[field]
         items.append(item)
@@ -2050,13 +2053,16 @@ def _fill_registration_info(data, list_key, openid, reg_entry):
     """审核通过后把注册信息带入对应权限条目（可选字段 name=名称，
     qq_id=账号）：用户取昵称/QQ号，群取群名/群号。条目不在列表时
     忽略；旧条目/手动添加的条目没有注册信息时无此字段，面板显示
-    为空，不影响旧配置。remark 等原有字段一律保留不动。"""
+    为空，不影响旧配置。按钮申请不采集这些资料，空值不覆盖已有信息。
+    remark 等原有字段一律保留不动。"""
     name = str(reg_entry.get("nickname") or reg_entry.get("group_name") or "")
     qq_id = str(reg_entry.get("qq_id") or "")
     for item in data.get(list_key, []):
         if isinstance(item, dict) and str(item.get("openid")) == str(openid):
-            item["name"] = name
-            item["qq_id"] = qq_id
+            if name:
+                item["name"] = name
+            if qq_id:
+                item["qq_id"] = qq_id
             if list_key == "qq_group_openids" and str(reg_entry.get("bot_id") or "").strip():
                 item["bot_id"] = str(reg_entry["bot_id"]).strip()
             return True

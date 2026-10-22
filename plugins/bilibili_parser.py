@@ -100,6 +100,40 @@ def parse_video_url(value):
     }
 
 
+_OPUS_PATH_RE = re.compile(r"/(?:opus|dynamic)/(\d{6,})", re.I)
+
+
+def parse_manual_post_url(value):
+    """解析私聊手动转发的 Bilibili 链接，返回内容类型与引用信息。
+
+    支持投稿视频（含 b23.tv / bili2233.cn 短链、av/BV 号、?p= 分 P）和
+    opus 链接。专栏与动态共用 /opus/{id} 路径（历史链接为 /dynamic/{id}），
+    仅凭链接无法区分二者，因此这里统一返回 kind="opus"，真实类型由详情
+    接口的 item.type 判定。短链接由调用方跟随重定向后再次调用本函数。
+
+    无法识别时返回 None，由调用方给出用户提示。
+    """
+    raw = str(value or "").strip()
+    try:
+        parsed = urlparse(raw)
+    except ValueError:
+        return None
+    host = (parsed.hostname or "").lower()
+    is_bilibili = host == "bilibili.com" or host.endswith(".bilibili.com")
+    is_short = host in {"b23.tv", "bili2233.cn"}
+    if not (is_bilibili or is_short):
+        return None
+
+    opus_match = _OPUS_PATH_RE.search(parsed.path or "")
+    if opus_match:
+        return {"kind": "opus", "opus_id": opus_match.group(1)}
+
+    video_ref = parse_video_url(raw)
+    if video_ref:
+        return {"kind": "视频", "video_ref": video_ref}
+    return None
+
+
 def _parse_timestamp(value):
     """解析 RSS 日期，返回毫秒时间戳；失败返回 0。"""
     raw = str(value or "").strip()
@@ -243,3 +277,146 @@ def parse_feed(xml_bytes, post_type="视频"):
         seen.add(post["id"])
         posts.append(post)
     return sorted(posts, key=lambda item: int(item["cursor_id"]))
+
+
+# =====================================================
+# opus 详情（专栏 / 动态）→ 统一 post 结构
+#
+# 数据来自 x/polymer/web-dynamic/v1/detail 的 data.item。专栏与动态共用
+# 该接口，由 item.type 区分：
+#   DYNAMIC_TYPE_ARTICLE → 专栏，正文在 major.article
+#   DYNAMIC_TYPE_DRAW / WORD / 其他 → 动态，正文在 module_dynamic.desc
+# 本函数只做纯数据转换，不碰网络与配置。
+# =====================================================
+
+# 视为「专栏」的动态类型；其余按动态渲染。
+_OPUS_ARTICLE_TYPES = {"DYNAMIC_TYPE_ARTICLE"}
+
+
+def _opus_media_urls(src):
+    """规范化 B 站图片地址：补全协议并按项目约定升级为 https。"""
+    value = str(src or "").strip()
+    if not value:
+        return ""
+    if value.startswith("//"):
+        value = "https:" + value
+    elif value.startswith("http://"):
+        value = "https://" + value[len("http://"):]
+    return value
+
+
+def _opus_cover(item, major):
+    """取封面：专栏用 major.article.covers，动态用 major.draw 首图。"""
+    article = (major or {}).get("article") or {}
+    covers = article.get("covers") or []
+    for cover in covers:
+        url = _opus_media_urls(cover)
+        if url:
+            return url
+    draw = (major or {}).get("draw") or {}
+    for entry in draw.get("items") or []:
+        url = _opus_media_urls(entry.get("src"))
+        if url:
+            return url
+    return ""
+
+
+def _opus_archive_title(major):
+    """取转发内容中的视频（archive）标题。"""
+    archive = (major or {}).get("archive") or {}
+    return str(archive.get("title") or "").strip()
+
+
+def parse_opus_detail(item, opus_id=""):
+    """把 opus 详情接口的 item 归一化为项目统一的 post 结构。
+
+    返回 None 表示该 item 没有可转发内容（无标题、无正文、无媒体）。
+    ``post_type`` 为「专栏」或「动态」，供渲染层区分正文位置。
+
+    转发动态（DYNAMIC_TYPE_FORWARD）的原内容在 ``item.orig`` 中，外层
+    ``desc.text`` 通常只是「分享视频」这类转发语。此时以原内容的标题和
+    封面为准，并把转发语作为正文保留；原内容仍取不到标题时只发转发语。
+    """
+    if not isinstance(item, dict):
+        return None
+    modules = item.get("modules") or {}
+    author_module = modules.get("module_author") or {}
+    dynamic_module = modules.get("module_dynamic") or {}
+    major = dynamic_module.get("major") or {}
+
+    item_type = str(item.get("type") or "")
+    is_article = item_type in _OPUS_ARTICLE_TYPES
+    article = major.get("article") or {}
+
+    author = str(author_module.get("name") or "").strip()
+
+    if is_article:
+        title = str(article.get("title") or "").strip()
+        # 专栏正文在接口里只有简介摘要（article.desc），完整正文不在该接口。
+        body = str(article.get("desc") or "").strip()
+        jump_url = str(article.get("jump_url") or "").strip()
+        if jump_url.startswith("//"):
+            jump_url = "https:" + jump_url
+        elif jump_url.startswith("/"):
+            jump_url = "https://www.bilibili.com" + jump_url
+        link = jump_url
+        if not link:
+            link = "https://www.bilibili.com/opus/%s" % (
+                str(item.get("id_str") or opus_id or "").strip()
+            )
+        if not title:
+            # 专栏缺标题时退回首行正文，避免整条无法转发。
+            title = body.splitlines()[0].strip() if body else ""
+    else:
+        desc = dynamic_module.get("desc") or {}
+        body = str(desc.get("text") or "").strip()
+        link = "https://www.bilibili.com/opus/%s" % (
+            str(item.get("id_str") or opus_id or "").strip()
+        )
+        cover = _opus_cover(item, major)
+        # 转发动态：外层通常只有「分享视频」这类转发语，真实内容在同结构
+        # 的 orig 中。原内容能取到标题时以它为准，并把转发语合成一行。
+        title = body
+        if isinstance(item.get("orig"), dict):
+            orig = item["orig"]
+            orig_modules = orig.get("modules") or {}
+            orig_dynamic = orig_modules.get("module_dynamic") or {}
+            orig_major = orig_dynamic.get("major") or {}
+            if not cover:
+                cover = _opus_cover(orig, orig_major)
+            orig_desc = (orig_dynamic.get("desc") or {}).get("text") or ""
+            orig_title = _opus_archive_title(orig_major) or str(orig_desc).strip()
+            if orig_title:
+                title = "%s：%s" % (body, orig_title) if body else orig_title
+                body = ""
+        return _opus_post(
+            item, opus_id, title=title, body=body, link=link,
+            author=author, cover=cover, is_article=False,
+        )
+
+    cover = _opus_cover(item, major)
+    return _opus_post(
+        item, opus_id, title=title, body=body, link=link,
+        author=author, cover=cover, is_article=is_article,
+    )
+
+
+def _opus_post(item, opus_id, title, body, link, author, cover, is_article):
+    """组装统一的 post 结构；无可转发内容时返回 None。"""
+    if not title and not body and not cover:
+        return None
+    return {
+        "id": str(item.get("id_str") or opus_id or "").strip(),
+        "link": link,
+        "title": title,
+        "description": body,
+        "author": author,
+        "pub_date": str(
+            (item.get("modules") or {}).get("module_author", {}).get("pub_time") or ""
+        ).strip(),
+        "post_type": "专栏" if is_article else "动态",
+        "tags": [],
+        "bvid": "",
+        "avid": "",
+        "media": ([{"kind": "图片", "url": cover}] if cover else []),
+    }

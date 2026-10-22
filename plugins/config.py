@@ -70,6 +70,12 @@ from plugins.json_io import (
     ConcurrentWriteError,
 )
 from plugins.settings_model import SettingsModel, validate_settings
+from plugins.filter import (
+    DISCORD_MESSAGE_TYPES,
+    X_MESSAGE_TYPES,
+    BILIBILI_MESSAGE_TYPES,
+    normalize_message_types,
+)
 from plugins.paths import data_path
 from plugins.bilibili_rate_limit import normalize_protection_config, normalize_string_list
 from plugins.x_rate_limit import normalize_x_protection_config
@@ -109,9 +115,16 @@ def get_x_translation_config():
     return _setting_object("translation")
 
 
-def _translation_config_for_item_data(data, config_name, items_name, item_id):
-    """将服务路由与单个来源的翻译开关合并为调用配置。"""
+def _translation_config_for_item_data(
+    data, config_name, items_name, item_id, manual=False
+):
+    """将服务路由与来源翻译开关合并为调用配置。
+
+    ``manual=True`` 用于 QQ 手动转发：启用与否只看共享 ``translation.enabled``，
+    不受来源的自动翻译开关影响；保留原文和显示时间仍沿用来源设置。
+    """
     config = dict(data.get(config_name) or {})
+    manual_enabled = config.get("enabled") is True
     for item in data.get(items_name) or []:
         if not isinstance(item, dict):
             continue
@@ -123,36 +136,64 @@ def _translation_config_for_item_data(data, config_name, items_name, item_id):
             )
         candidate_id = _x_source_key(str(candidate or "")) if items_name == "x_rss_sources" else str(candidate or "")
         if candidate_id == str(item_id):
-            config["enabled"] = item.get("translation_enabled") is True
+            config["enabled"] = (
+                manual_enabled
+                if manual
+                else item.get("translation_enabled") is True
+            )
             config["append_original"] = item.get("translation_append_original") is not False
             config["show_datetime"] = item.get("translation_show_datetime") is True
             return config
-    config["enabled"] = False
+    config["enabled"] = manual_enabled if manual else False
     config["append_original"] = True
     config["show_datetime"] = False
     return config
 
 
-def _translation_config_for_item(config_name, items_name, item_id):
+def _translation_config_for_item(
+    config_name, items_name, item_id, manual=False
+):
     return _translation_config_for_item_data(
-        _load_settings(), config_name, items_name, item_id
+        _load_settings(), config_name, items_name, item_id, manual
     )
 
 
-def get_channel_translation_config(channel_id):
-    return _translation_config_for_item("translation", "discord_channels", channel_id)
+def get_channel_translation_config(channel_id, manual=False):
+    return _translation_config_for_item(
+        "translation", "discord_channels", channel_id, manual
+    )
 
 
-def get_x_source_translation_config(source_key):
-    return _translation_config_for_item("translation", "x_rss_sources", source_key)
+def get_x_source_translation_config(source_key, manual=False):
+    return _translation_config_for_item(
+        "translation", "x_rss_sources", source_key, manual
+    )
 
 
-def get_bilibili_source_translation_config(source_id):
-    return _translation_config_for_item("translation", "bilibili_sources", source_id)
+def get_bilibili_source_translation_config(source_id, manual=False):
+    return _translation_config_for_item(
+        "translation", "bilibili_sources", source_id, manual
+    )
+
+
+def _source_message_types(item, supported):
+    """读取来源级消息类型筛选，缺省全开，并迁移旧类型名。
+
+    显式空列表仍作为全关筛选返回；只有非空的旧值归一化后没有任何支持项，
+    才回退为未筛选，避免旧配置令来源停止投递。
+    """
+    values = item.get("filter_message_types")
+    if not isinstance(values, list):
+        return list(supported)
+    explicit = any(str(value).strip() for value in values)
+    if not explicit:
+        return []
+    normalized = normalize_message_types(values, supported)
+    return normalized or list(supported)
 
 
 def get_x_source_filter(source_key):
-    """返回指定 X RSS 账号的消息筛选配置。"""
+    """读取指定 X RSS 账号的消息筛选配置。"""
     return _x_source_filter(_load_settings(), source_key)
 
 
@@ -169,12 +210,17 @@ def _x_source_filter(data, source_key):
                 if str(keyword).strip()
             ],
             "filter_post_types": item.get("filter_post_types"),
+            "filter_message_types": _source_message_types(item, X_MESSAGE_TYPES),
         }
-    return {"filter_keywords": [], "filter_post_types": None}
+    return {
+        "filter_keywords": [],
+        "filter_post_types": None,
+        "filter_message_types": list(X_MESSAGE_TYPES),
+    }
 
 
 def get_bilibili_source_filter(source_id):
-    """返回指定 Bilibili 来源的关键词、投稿类型和视频本体配置。"""
+    """返回指定 Bilibili 来源的关键词、投稿类型、消息类型和视频本体配置。"""
     return _bilibili_source_filter(_load_settings(), source_id)
 
 
@@ -192,6 +238,7 @@ def _bilibili_source_filter(data, source_id):
             for keyword in (item.get("filter_keywords") or [])
             if str(keyword).strip()
         ]
+        message_types = _source_message_types(item, BILIBILI_MESSAGE_TYPES)
         allowed_types = {"视频", "专栏", "动态"}
         stored_types = item.get("filter_bilibili_post_types")
         post_types = (
@@ -206,9 +253,13 @@ def _bilibili_source_filter(data, source_id):
         return {
             "filter_keywords": keywords,
             "filter_bilibili_post_types": post_types,
-            "forward_video": item.get("forward_video") is True,
+            "filter_message_types": message_types,
         }
-    return {"filter_keywords": [], "filter_bilibili_post_types": ["视频"], "forward_video": False}
+    return {
+        "filter_keywords": [],
+        "filter_bilibili_post_types": ["视频"],
+        "filter_message_types": list(BILIBILI_MESSAGE_TYPES),
+    }
 
 
 def get_x_source_delivery_config(source_key):
@@ -236,6 +287,21 @@ def get_bilibili_source_delivery_config(source_id):
 def get_bilibili_protection():
     """返回 Bilibili → QQ 全局限速与积压保护配置。"""
     return normalize_protection_config(_load_settings().get("bilibili_protection"))
+
+
+def get_bilibili_auto_resolve_enabled():
+    """Bilibili 自动解析总开关（默认关闭）。
+
+    配置缺失、结构损坏或字段类型异常都按关闭处理，避免损坏配置
+    让机器人在群里自发消息。"""
+    return _bilibili_auto_resolve_enabled_from(_load_settings())
+
+
+def _bilibili_auto_resolve_enabled_from(data):
+    config = data.get("bilibili_auto_resolve")
+    if not isinstance(config, dict):
+        return False
+    return config.get("enabled") is True
 
 
 def get_ai_config():
@@ -686,50 +752,57 @@ def get_all_channels():
     return dict(DISCORD_CHANNELS)
 
 
-def get_qq_c2c_relay_filter():
-    """返回私聊 Discord 链接 relay 的全局筛选配置。"""
-    data = _load_settings()
-    value = data.get("qq_c2c_relay_filter")
+def _c2c_relay_filter(data, key, supported):
+    """读取一条手动转发的类型筛选，并按该链路支持的类型归一化。
+
+    X/Bilibili 早期与 Discord 共用六类型集合，存量配置里可能残留「语音」
+    「表情」「链接」等它们不渲染的类型，以及旧名「文件」（现规范名为
+    「视频」）；这里按链路支持集归一化，保证面板显示、保存值与实际渲染
+    一致。
+
+    归一化后为空是个危险边界：老配置若只存了本链路不支持的类型（例如 X
+    只剩「语音」），会得到空列表，而空列表的语义是「不转发任何内容」，
+    会让用户的转发突然全部失效。这种情况按"未筛选"处理（返回 {}），
+    即全部支持类型启用，与老配置缺省字段的行为一致。
+
+    注意与真正的空列表区分：面板允许用户取消勾选全部消息类型，此时
+    ``filter_message_types: []`` 是用户明确选择的"不转发"，必须原样保留。
+    只有「原列表非空、归一化后为空」才回退到未筛选。
+    """
+    value = data.get(key)
     if not isinstance(value, dict):
         return {}
-    result = {}
-    for key in ("filter_message_types",):
-        item = value.get(key)
-        if isinstance(item, list):
-            result[key] = [str(entry).strip() for entry in item if str(entry).strip()]
-    return result
+    types = value.get("filter_message_types")
+    if not isinstance(types, list):
+        return {}
+    has_explicit_values = any(str(item).strip() for item in types)
+    if not has_explicit_values:
+        return {"filter_message_types": []}
+    normalized = normalize_message_types(types, supported)
+    if not normalized:
+        return {}
+    return {"filter_message_types": normalized}
+
+
+def get_qq_c2c_relay_filter():
+    """返回私聊 Discord 链接 relay 的全局筛选配置。"""
+    return _c2c_relay_filter(
+        _load_settings(), "qq_c2c_relay_filter", DISCORD_MESSAGE_TYPES
+    )
 
 
 def get_x_c2c_relay_filter():
     """返回私聊 X 链接手动转发的全局消息类型筛选配置。"""
-    data = _load_settings()
-    value = data.get("x_c2c_relay_filter")
-    if not isinstance(value, dict):
-        return {}
-    types = value.get("filter_message_types")
-    if not isinstance(types, list):
-        return {}
-    return {
-        "filter_message_types": [
-            str(entry).strip() for entry in types if str(entry).strip()
-        ],
-    }
+    return _c2c_relay_filter(
+        _load_settings(), "x_c2c_relay_filter", X_MESSAGE_TYPES
+    )
 
 
 def get_bilibili_c2c_relay_filter():
     """返回私聊 Bilibili 投稿链接手动转发的全局消息类型筛选配置。"""
-    data = _load_settings()
-    value = data.get("bilibili_c2c_relay_filter")
-    if not isinstance(value, dict):
-        return {}
-    types = value.get("filter_message_types")
-    if not isinstance(types, list):
-        return {}
-    return {
-        "filter_message_types": [
-            str(entry).strip() for entry in types if str(entry).strip()
-        ],
-    }
+    return _c2c_relay_filter(
+        _load_settings(), "bilibili_c2c_relay_filter", BILIBILI_MESSAGE_TYPES
+    )
 
 
 def get_active_user_openids():
@@ -746,6 +819,47 @@ def get_active_user_openids():
                 active.append(str(item["openid"]))
         return active
     return []
+
+
+# =====================================================
+# QQ 功能准入提示
+#
+# 准入判断以「当前实际授权/登记状态」为准，绝不把待审核注册申请当作
+# 已授权/已登记：
+#   - 用户是否可用 = 是否在 qq_user_openids（settings.json）勾选放行
+#   - 群是否已登记 = 当前 Bot 对应 group_openid 是否已写入 qq_group_openids
+# /注册 /注册群 仅提交申请，申请 ≠ 授权；审核通过 ≠ 自动启用。
+# =====================================================
+
+USER_NOT_AUTHORIZED_TEXT = (
+    "尚未获准使用该功能。请先私聊发送 /注册 提交用户注册申请，"
+    "等待管理员审核通过并启用后再试。"
+)
+
+GROUP_NOT_REGISTERED_TEXT = (
+    "本群尚未登记，暂不能使用该功能。请发送 /注册群 提交群注册申请，"
+    "等待管理员审核通过并启用后再试。"
+)
+
+
+def is_user_authorized(user_openid):
+    """返回用户当前是否获准使用 QQ 功能（唯一来源 qq_user_openids 勾选状态）。"""
+    return str(user_openid or "").strip() in set(get_active_user_openids())
+
+
+def is_user_registered(user_openid):
+    """返回用户 OpenID 是否已在 qq_user_openids 登记。
+
+    与群注册的 is_group_registered 对应：登记来源只有 settings.json 的
+    qq_user_openids，不看勾选状态，也不把 data/qq_registrations.json 的待审核
+    申请当作已登记。"""
+    openid = str(user_openid or "").strip()
+    if not openid:
+        return False
+    for item in _load_settings().get("qq_user_openids", []):
+        if isinstance(item, dict) and str(item.get("openid") or "").strip() == openid:
+            return True
+    return False
 
 
 def _failure_notification_config_from(data):
@@ -849,6 +963,27 @@ def get_qq_group_entries():
     仅用于枚举候选目标群（openid/name/enabled），不参与
     Discord→QQ 权限判断；缺失/损坏时回退空列表。"""
     return _qq_group_entries_from(_load_settings())
+
+
+def is_group_registered(group_openid, bot_id=""):
+    """返回当前 Bot 对应的 QQ 群是否已登记。
+
+    以 qq_group_openids（settings.json）为唯一登记来源；同一 openid
+    存在未绑定 Bot（空 bot_id 兼容旧配置）或绑定为当前 Bot 的条目即视为
+    已登记。绝不以 data/qq_registrations.json 的待审核申请作为登记依据。
+    """
+    openid = str(group_openid or "").strip()
+    bot = str(bot_id or "").strip()
+    if not openid:
+        return False
+    for item in get_qq_group_entries():
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("openid") or "").strip() != openid:
+            continue
+        if not bot or not str(item.get("bot_id") or "").strip() or str(item.get("bot_id") or "").strip() == bot:
+            return True
+    return False
 
 
 def get_qq_fwd_routing_snapshot(group_openid):
@@ -1076,7 +1211,10 @@ def get_x_protection():
 
 
 def get_scheduled_message_config():
-    """返回多条定时消息计划；读取时仍做安全兜底。"""
+    """返回多条定时消息计划；读取时仍做安全兜底。
+
+    每条消息可自带目标（target_mode / target_groups / forward_groups）；
+    缺少这些字段的旧消息按「指定群」处理并沿用顶层 target_groups。"""
     data = _load_settings()
     value = data.get("scheduled_message")
     if not isinstance(value, dict):
@@ -1085,6 +1223,7 @@ def get_scheduled_message_config():
             "target_groups": [],
             "messages": [],
         }
+    default_targets = _scheduled_group_list(value.get("target_groups"))
     messages = []
     for index, raw in enumerate(value.get("messages") or []):
         if not isinstance(raw, dict):
@@ -1100,6 +1239,7 @@ def get_scheduled_message_config():
             "content": content,
             "schedule_type": raw.get("schedule_type"),
         }
+        item.update(_scheduled_message_targets(raw, default_targets))
         if isinstance(image_data, str) and image_data:
             item["image_data"] = image_data
             item["image_name"] = str(raw.get("image_name") or "")
@@ -1149,13 +1289,121 @@ def get_scheduled_message_config():
         messages.append(item)
     return {
         "enabled": value.get("enabled") is True,
-        "target_groups": [
-            str(openid).strip()
-            for openid in value.get("target_groups") or []
-            if str(openid).strip()
-        ],
+        "target_groups": default_targets,
         "messages": messages,
     }
+
+
+SCHEDULED_TARGET_GROUP = "groups"
+SCHEDULED_TARGET_FORWARD_GROUP = "forward_group"
+SCHEDULED_TARGET_ALL = "all"
+SCHEDULED_TARGET_MODES = (
+    SCHEDULED_TARGET_GROUP,
+    SCHEDULED_TARGET_FORWARD_GROUP,
+    SCHEDULED_TARGET_ALL,
+)
+
+
+def _scheduled_group_list(value):
+    """把群 openid 列表归一为非空字符串列表（保持顺序、去重）。"""
+    if not isinstance(value, list):
+        return []
+    result = []
+    for openid in value:
+        text = str(openid or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
+def _scheduled_forward_group_list(value):
+    if not isinstance(value, list):
+        return []
+    result = []
+    for group_id in value:
+        text = str(group_id or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
+def _scheduled_message_targets(raw, default_targets):
+    """解析单条定时消息的目标设置。
+
+    - 缺少 target_mode：旧消息，按「指定群」并沿用顶层默认目标；
+    - groups：使用消息自己的 target_groups（缺省回落到默认目标）；
+    - forward_group：使用 QQ→QQ 转发组 id，发送时动态取组成员；
+    - all：全部已启用群。
+    """
+    mode = str(raw.get("target_mode") or "").strip()
+    if mode not in SCHEDULED_TARGET_MODES:
+        mode = SCHEDULED_TARGET_GROUP
+    legacy = "target_mode" not in raw
+    if mode == SCHEDULED_TARGET_FORWARD_GROUP:
+        groups = []
+    elif mode == SCHEDULED_TARGET_ALL:
+        groups = []
+    elif legacy or "target_groups" not in raw:
+        # 旧消息或未写消息级列表：沿用顶部「默认目标」。
+        groups = list(default_targets)
+    else:
+        groups = _scheduled_group_list(raw.get("target_groups"))
+    return {
+        "target_mode": mode,
+        "target_groups": groups,
+        "forward_groups": _scheduled_forward_group_list(raw.get("forward_groups")),
+    }
+
+
+def resolve_scheduled_targets(message, qq_groups, qq_forwarding_groups, active_groups):
+    """返回一条定时消息本次应发送的群 openid 列表。
+
+    - 所有模式最终都只保留「全局启用」的群；
+    - 转发组模式取所选组中已启用组的成员并集，组被暂停或成员为空即无目标。
+    """
+    active = set(str(openid) for openid in (active_groups or []))
+    mode = str((message or {}).get("target_mode") or SCHEDULED_TARGET_GROUP)
+    if mode == SCHEDULED_TARGET_ALL:
+        candidates = [str(item.get("openid") or "").strip() for item in (qq_groups or [])]
+    elif mode == SCHEDULED_TARGET_FORWARD_GROUP:
+        wanted = set(
+            str(group_id) for group_id in (message or {}).get("forward_groups") or []
+        )
+        candidates = []
+        for group in qq_forwarding_groups or []:
+            if not isinstance(group, dict) or group.get("enabled") is False:
+                continue
+            if str(group.get("id") or "") not in wanted:
+                continue
+            for openid in group.get("groups") or []:
+                candidates.append(str(openid))
+    else:
+        candidates = list((message or {}).get("target_groups") or [])
+    result = []
+    for openid in candidates:
+        if openid and openid in active and openid not in result:
+            result.append(openid)
+    return result
+
+
+def scheduled_message_has_targets(message, qq_forwarding_groups):
+    """配置层面的目标有效性（不看群启用状态），供面板/命令给出明确提示。"""
+    mode = str((message or {}).get("target_mode") or SCHEDULED_TARGET_GROUP)
+    if mode == SCHEDULED_TARGET_ALL:
+        # 「全部群」表示所有已启用群，是否有群取决于当前群配置。
+        return True
+    if mode == SCHEDULED_TARGET_FORWARD_GROUP:
+        wanted = set(
+            str(group_id) for group_id in (message or {}).get("forward_groups") or []
+        )
+        return any(
+            isinstance(group, dict)
+            and str(group.get("id") or "") in wanted
+            and group.get("enabled") is not False
+            and bool(group.get("groups"))
+            for group in qq_forwarding_groups or []
+        )
+    return bool((message or {}).get("target_groups"))
 
 
 def _x_rsshub_base(data):
@@ -1428,8 +1676,10 @@ def _get_bilibili_sources(data):
             "feeds": feeds,
             "name": value,
             "enabled": item.get("enabled") is True,
-            "forward_video": item.get("forward_video") is True,
             "filter_bilibili_post_types": post_types,
+            "filter_message_types": normalize_message_types(
+                item.get("filter_message_types"), BILIBILI_MESSAGE_TYPES
+            ),
         })
     return sources
 

@@ -57,22 +57,27 @@ def source_spec(draft, settings):
         raise ValueError("所选来源已变更，请重新选择")
     value = draft.get("source_value", "").strip()
     name = draft.get("name", "").strip() or value
+    translation_defaults = {
+        "translation_enabled": False,
+        "translation_append_original": True,
+        "translation_show_datetime": False,
+    }
     if purpose == "discord":
         if not value.isdigit():
             raise ValueError("请扫描并选择一个可读取的 Discord 频道")
-        item = {"id": value, "name": name}
+        item = {"id": value, "name": name, **translation_defaults}
     elif purpose == "x":
         value = value.lstrip("@")
         if not re.fullmatch(r"[A-Za-z0-9_]{1,15}", value):
             raise ValueError("请填写 X 用户名，例如 example，不包含链接或 @")
-        item = {"source": value, "name": name}
+        item = {"source": value, "name": name, **translation_defaults}
     else:
         kind = draft.get("source_kind") or "up"
         if kind not in ("up", "tag", "keyword") or not value:
             raise ValueError("请填写 UP 主 UID、标签或关键词")
         if kind == "up" and not value.isdigit():
             raise ValueError("UP 主 UID 应为数字，可从个人空间地址 space.bilibili.com/ 后获取")
-        item = {"id": kind + ":" + value, "kind": kind, "value": value}
+        item = {"id": kind + ":" + value, "kind": kind, "value": value, **translation_defaults}
     ident = item.get("source", item.get("id"))
     # 新增输入与已登记的来源相同，复用原条目及筛选条件。
     for existing in settings.get(key, []):

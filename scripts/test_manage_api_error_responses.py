@@ -88,7 +88,7 @@ async def main():
     ):
         assert await manage._cmd_backfill([]) == "设置暂不可用"
         assert await manage._cmd_timer([]) == "设置暂不可用"
-        assert await manage._cmd_timer(["on"]) == "设置暂不可用"
+        assert await manage._cmd_timer(["开启"]) == "设置暂不可用"
 
     with mock.patch.object(
         manage,

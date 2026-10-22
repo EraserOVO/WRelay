@@ -3,19 +3,18 @@
 
 任何 QQ 用户在一个已注册的 QQ 接收群里：
 
-  relay list                  列出当前可作为转发目标的、已注册且 enabled 的 QQ 群（带序号）
-  relay {序号}                将用户接下来发送的下一条普通消息，转发到序号对应的目标群
+  /转发 列表      列出当前可作为转发目标的、已注册且 enabled 的 QQ 群（带序号）
+  /转发 1 3       引用一条消息后发送，直接转发到第 1、3 个目标群
 
+引用消息优先；没有引用时使用该用户最近一条普通消息（600 秒内）。
 发送前会再次校验目标群（仍注册 / enabled / 与当前群仍属同一已启用 QQ 转发组 / 排除当前群），
-配置变化导致失效时回复「转发失败」并结束本次交互。等待下一条消息期间绑定
-(当前群, 发送者 member_openid)，防止多人串台；超过 qq_fwd_select_timeout 秒仍未收到
-下一条可转发消息时静默清除 pending（不发送任何提示）。
+配置变化导致失效时回复「转发失败」。
 
 实现要点：
-  - 不再依赖“上一条消息”缓存：转发的就是 relay {序号} 之后收到的下一条普通用户消息。
+  - 优先读取 QQ 引用消息（event.reply / msg_elements），保留文字与附件；机器人消息和
+    命令消息不会被当作转发内容。
   - 候选目标群 = 与当前群至少共同属于一个 QQ→QQ 转发组（qq_forwarding_groups）的其他已注册(enabled)群，
     跨多个转发组合并去重；当前群不属于任何转发组时候选为空。与测试组无关。
-  - 过滤 Bot 消息（author.bot == True），relay / relay list 等指令本身不会进入转发内容。
   - 发送复用 plugins/sender（分片/重试/限流退避/媒体降级）与 plugins/media（图片/音视频字节上传+链接降级）。
   - 不依赖白名单；QQ→QQ 转发组只在本功能内使用，不读取 Discord/X 转发组。
 """
@@ -37,19 +36,35 @@ from nonebot.adapters.qq.event import GroupMessageCreateEvent
 
 from plugins.config import (
     get_qq_fwd_routing_snapshot,
-    get_qq_fwd_select_timeout,
+    is_group_registered,
+    GROUP_NOT_REGISTERED_TEXT,
 )
 from plugins.media import make_text, make_media_link
 from plugins.sender import send_relay_message
 from plugins.translation import translate_text_parts
+from plugins.qq_keyboard import (
+    escape_markdown,
+    send_titled_reply,
+)
 
 
 # =====================================================
 # 指令
+#
+#   /转发 列表      —— 纯文本编号名单与用法提示（不再提供按钮）
+#   /转发 1 3       —— 引用消息后直接转发到第 1、3 个目标群
 # =====================================================
-CMD_LIST = "relay list"
-CMD_PREFIX = "relay "
-CMD_BARE = "relay"
+CMD_LIST = "/转发 列表"
+CMD_PREFIX = "/转发 "
+CMD_BARE = "/转发"
+
+USAGE_TEXT = "请引用要转发的消息，再发送 /转发 序号（可一次写多个，如 /转发 1 3）。"
+NO_CONTENT_TEXT = "没有可转发的内容：请引用一条消息，或先发送要转发的内容再使用 /转发 序号。"
+BOT_QUOTE_TEXT = "请引用普通消息；机器人消息和命令消息不会被转发。"
+EMPTY_QUOTE_TEXT = "引用的消息没有可转发的内容。"
+
+# 记住最近一条可转发内容的时间窗（秒），用于未引用消息时的回退。
+CONTENT_MEMORY_SECONDS = 600
 
 
 # =====================================================
@@ -65,7 +80,7 @@ def compute_target_list(entries, current_openid, related_openids):
     related_openids：与当前群至少共同属于一个转发组的其他群 openid 集合
     （见 config.get_related_group_openids；set 或可 in 判断的容器）。
     返回 [{"openid", "name"}]；只含 enabled、在 related 集合内且非当前群。
-    顺序与 settings 中条目顺序一致，relay list / relay {序号} 共用同一顺序。
+    顺序与 settings 中条目顺序一致，「/转发 列表」与「/转发 {序号}」共用同一顺序。
     """
     current = str(current_openid)
     related = set(related_openids or ())
@@ -89,14 +104,28 @@ def compute_target_list(entries, current_openid, related_openids):
     return targets
 
 
-def build_relay_list(targets):
-    """把目标群列表渲染为 relay list 的回复文本（带连续序号）。"""
+def build_relay_list(targets, allow_all=False):
+    """把目标群列表渲染为纯文本编号名单和转发方法。
+
+    私聊 allow_all=True 时额外说明 /转发 全部；群聊不提供全选。
+    """
+    lines = ["转发群列表"]
     if not targets:
-        return "【Relay群列表】\n当前没有可转发的目标群"
-    lines = ["【Relay群列表】"]
-    for i, t in enumerate(targets, start=1):
-        label = t["name"] or t["openid"]
-        lines.append(f"{i}. {label}")
+        lines.append("当前没有可转发的目标群")
+        return "\n".join(lines)
+    for i, target in enumerate(targets, start=1):
+        lines.append("{}. {}".format(i, target["name"] or target["openid"]))
+    lines.append("")
+    if allow_all:
+        lines.append(
+            "引用要转发的消息后发送 /转发 序号（可写多个，如 /转发 1 3）；"
+            "/转发 全部 可发往全部群。"
+        )
+    else:
+        lines.append(
+            "引用要转发的消息后发送 /转发 序号（可写多个，如 /转发 1 3）。"
+        )
+    lines.append("未引用时使用最近一条消息。")
     return "\n".join(lines)
 
 
@@ -104,94 +133,164 @@ def build_relay_list(targets):
 # 指令解析（纯函数）
 #
 # parse_relay 返回 (kind, payload)：
-#   ("list",     None)   —— relay list
-#   ("number",   int)    —— relay {i}，i 为 >=1 的整数
-#   ("invalid",  None)   —— relay / relay <非数字>，无法定位目标群
-#   (None,       None)   —— 不是 relay 指令
+#   ("list",    None)       —— /转发 列表（也接受裸 /转发）
+#   ("forward", [int, ...]) —— /转发 {序号...}，按序号直接转发
+#   ("invalid", None)       —— 无法解析的 /转发 参数
+#   (None,      None)       —— 不是 relay 指令
 # =====================================================
+
+def _parse_relay_numbers(text):
+    """解析空格分隔的正整数序号；非法或为空返回 None。"""
+    tokens = str(text or "").split()
+    if not tokens:
+        return None
+    numbers = []
+    for token in tokens:
+        if not token.isascii() or not token.isdecimal():
+            return None
+        digits = token.lstrip("0") or "0"
+        if digits == "0" or len(digits) > 9:
+            return None
+        numbers.append(int(digits))
+    return numbers
+
 
 def parse_relay(text):
     st = (text or "").strip()
-    if st == CMD_LIST:
+    if st == CMD_BARE or st == CMD_LIST or st.startswith(CMD_LIST + " "):
         return ("list", None)
-    if st == CMD_BARE:
-        return ("invalid", None)
     if st.startswith(CMD_PREFIX):
-        arg = st[len(CMD_PREFIX):].strip()
-        if arg.isascii() and arg.isdecimal():
-            digits = arg.lstrip("0") or "0"
-            max_number = str(sys.maxsize)
-            # A list index cannot exceed sys.maxsize. Reject oversized input
-            # before int() so malformed messages cannot trigger conversion errors.
-            if len(digits) <= len(max_number) and digits <= max_number:
-                return ("number", int(digits))
-        return ("invalid", None)
+        numbers = _parse_relay_numbers(st[len(CMD_PREFIX):])
+        return ("forward", numbers) if numbers else ("invalid", None)
     return (None, None)
 
 
-def resolve_target_by_number(entries, current_openid, related_openids, number):
-    """relay {序号} → 目标群；序号越界返回 None。"""
-    if number < 1:
-        return None
-    targets = compute_target_list(entries, current_openid, related_openids)
-    if number > len(targets):
-        return None
-    return targets[number - 1]
-
-
 # =====================================================
-# Pending 状态
+# 每成员串行锁与最近内容回退
 #
-# _pending[(group_openid, member_openid)] = {
-#     "created_ts": float,
-#     "target": {"openid","name"},
-# }
-# 绑定 (群, 用户)，超时由 qq_fwd_select_timeout 决定。
+# _last_content[(group, member)] = {"ts", "event", "text"}
+# 未引用消息时使用该成员最近一条普通消息，避免必须补发内容。
 # =====================================================
-_pending = {}
-_pending_locks = WeakValueDictionary()
+_member_locks = WeakValueDictionary()
+
+_last_content = {}
 
 
-def _get_pending_lock(group_openid, member_openid):
+def _get_member_lock(group_openid, member_openid):
     key = (group_openid, member_openid)
-    lock = _pending_locks.get(key)
+    lock = _member_locks.get(key)
     if lock is None:
         lock = asyncio.Lock()
-        _pending_locks[key] = lock
+        _member_locks[key] = lock
     return lock
 
 
-def has_pending(group_openid, member_openid):
-    return (group_openid, member_openid) in _pending
-
-
-def get_pending(group_openid, member_openid):
-    return _pending.get((group_openid, member_openid))
-
-
-def set_pending(group_openid, member_openid, target):
-    _pending[(group_openid, member_openid)] = {
-        "created_ts": time.monotonic(),
-        "target": target,
+def remember_content(group_openid, member_openid, event, text):
+    """记住最近一条可转发内容，供未引用消息时回退。"""
+    now = time.monotonic()
+    if len(_last_content) >= 256:
+        cutoff = now - CONTENT_MEMORY_SECONDS
+        for key, record in list(_last_content.items()):
+            if record.get("ts", 0) < cutoff:
+                _last_content.pop(key, None)
+    _last_content[(group_openid, member_openid)] = {
+        "ts": now,
+        "event": event,
+        "text": text,
     }
 
 
-def clear_pending(group_openid, member_openid):
-    _pending.pop((group_openid, member_openid), None)
-
-
-def is_pending_expired(entry, timeout, now_ts=None):
+def get_remembered_content(group_openid, member_openid, now_ts=None):
+    record = _last_content.get((group_openid, member_openid))
+    if not record:
+        return None
     now = now_ts if now_ts is not None else time.monotonic()
-    return now - entry["created_ts"] > timeout
+    if now - record["ts"] > CONTENT_MEMORY_SECONDS:
+        _last_content.pop((group_openid, member_openid), None)
+        return None
+    return record
 
 
-def collect_expired(now_ts, timeout=None):
-    """返回所有已超时的 pending 键；只收集不删除（由调用方决定如何处理）。"""
-    timeout = get_qq_fwd_select_timeout() if timeout is None else timeout
-    return [
-        key for key, entry in _pending.items()
-        if is_pending_expired(entry, timeout, now_ts)
-    ]
+# =====================================================
+# 引用消息提取
+#
+# 适配器在 event.reply 中放被引用消息；缺失时回退 msg_elements。
+# 引用内容保留文字与附件，供群聊和私聊手动转发共用。
+# =====================================================
+_BOT_REPLY_PREFIXES = (
+    "# 转发群列表",
+    "转发群列表",
+    "# 转发结果",
+    "转发结果",
+    "# WRelay菜单",
+    "WRelay菜单",
+    "# 群准入提示",
+    "群准入提示",
+    "# 准入提示",
+    "准入提示",
+)
+
+
+def extract_quoted_message(event):
+    """提取被引用消息；没有引用时返回 None。
+
+    返回 {"content", "attachments", "from_bot", "author_id", "author_name",
+    "author_known"}，attachments 的结构与 build_forward_content 入参一致。
+    """
+    reply = getattr(event, "reply", None)
+    if reply is None:
+        elements = getattr(event, "msg_elements", None) or []
+        reply = elements[0] if elements else None
+    if reply is None:
+        return None
+
+    author = getattr(reply, "author", None)
+    return {
+        "content": str(getattr(reply, "content", "") or ""),
+        "attachments": [
+            {"url": attachment.url, "content_type": attachment.content_type or ""}
+            for attachment in (getattr(reply, "attachments", None) or [])
+            if getattr(attachment, "url", None)
+        ],
+        "from_bot": bool(getattr(author, "bot", False)),
+        "author_id": str(
+            getattr(author, "id", None)
+            or getattr(author, "member_openid", None)
+            or getattr(author, "user_openid", None)
+            or ""
+        ),
+        "author_name": str(getattr(author, "username", None) or ""),
+        "author_known": author is not None,
+    }
+
+
+def quoted_message_error(quote, bot=None):
+    """校验引用内容；不可转发时返回提示文本，否则返回 None。"""
+    if quote is None:
+        return None
+    text = quote["content"].strip()
+    bot_ids = {
+        _qq_bot_id(bot),
+        str(getattr(bot, "id", "") or ""),
+    }
+    bot_ids.discard("")
+    bot_name = str(
+        getattr(getattr(bot, "self_info", None), "username", "") or ""
+    ).strip()
+    if (
+        quote["from_bot"]
+        or (quote["author_id"] and quote["author_id"] in bot_ids)
+        or (bot_name and quote["author_name"] == bot_name)
+    ):
+        return BOT_QUOTE_TEXT
+    if text.startswith("/"):
+        return BOT_QUOTE_TEXT
+    if not quote["author_known"] and text.startswith(_BOT_REPLY_PREFIXES):
+        # 引用载荷缺少作者时，用 WRelay 固定回复标题兜底识别机器人名单/结果。
+        return BOT_QUOTE_TEXT
+    if not text and not quote["attachments"]:
+        return EMPTY_QUOTE_TEXT
+    return None
 
 
 # =====================================================
@@ -297,7 +396,7 @@ def normalize_event_message(event):
     content = event.get_plaintext() or ""
     attachments = [
         {"url": a.url, "content_type": a.content_type or ""}
-        for a in (event.attachments or [])
+        for a in (getattr(event, "attachments", None) or [])
         if getattr(a, "url", None)
     ]
     return {"content": content, "attachments": attachments}
@@ -353,16 +452,27 @@ async def build_forward_content(message):
 # 测试可替换为桩，验证“发到哪个目标群/发了什么内容”。
 # 只发送到目标群，不发送到全局启用群。
 # =====================================================
-async def send_forward_to_group(target_openid, text_parts, media_items):
+async def send_forward_to_group(
+    target_openids, text_parts, media_items, source_group_name="未知群"
+):
+    """转发到目标群；target_openids 可以是单个 openid 或 openid 列表。"""
+    groups = (
+        [target_openids]
+        if isinstance(target_openids, str)
+        else [str(item) for item in target_openids]
+    )
     return await custom_send(
         text_parts,
         media_items,
-        groups=[target_openid],
+        groups=groups,
+        source_label=source_group_name,
     )
 
 
-async def _default_custom_send(text_parts, media_items, groups=None):
-    return await send_relay_message(text_parts, media_items, groups=groups)
+async def _default_custom_send(text_parts, media_items, groups=None, source_label=None):
+    return await send_relay_message(
+        text_parts, media_items, groups=groups, source_label=source_label
+    )
 
 
 custom_send = _default_custom_send  # 测试可替换
@@ -383,6 +493,39 @@ def _target_still_valid(target, group, entries, related_openids):
 # 事件处理器
 # =====================================================
 
+def _qq_bot_id(bot):
+    return str(getattr(bot, "self_id", "") or getattr(bot, "id", "") or "").strip()
+
+
+async def _group_not_registered(bot, event):
+    """返回当前 Bot 对应的群是否未登记（准入检查，以 qq_group_openids 为准）。
+
+    未登记时回复准入提示并返回 True，调用方应停止后续功能执行；
+    已登记返回 False，继续原逻辑。"""
+    registered = await asyncio.to_thread(
+        is_group_registered, event.group_openid, _qq_bot_id(bot)
+    )
+    if registered:
+        return False
+    await send_titled_reply(
+        bot,
+        event,
+        "群准入提示",
+        GROUP_NOT_REGISTERED_TEXT,
+    )
+    return True
+
+
+def _is_registration_command(text):
+    st = (text or "").strip()
+    return (
+        st == "/注册"
+        or st.startswith("/注册 ")
+        or st == "/注册群"
+        or st.startswith("/注册群 ")
+    )
+
+
 fwd_command = on_message(
     priority=15,
     block=False,
@@ -397,68 +540,131 @@ async def handle_fwd(bot: Bot, event: Event):
         return
     group = event.group_openid
     user = event.author.member_openid
-    async with _get_pending_lock(group, user):
+    async with _get_member_lock(group, user):
         text = event.get_plaintext() or ""
+
+        # 注册申请入口不受群登记限制（未登记群正是用它来提交申请）。
+        if _is_registration_command(text):
+            return
 
         kind, payload = parse_relay(text)
 
-        if kind == "list":
-            await _cmd_relay_list(bot, event)
-            return
-        if kind == "number":
-            await _cmd_relay_number(bot, event, payload)
-            return
-        if kind == "invalid":
-            await bot.send(event, "无法找到对应的转发群")
+        # 群聊命令：群未登记时不执行功能，提示先登记群。
+        if kind is not None:
+            if await _group_not_registered(bot, event):
+                return
+            if kind == "list":
+                await _cmd_relay_list(bot, event)
+            elif kind == "forward":
+                await _cmd_relay_forward(bot, event, payload)
+            else:
+                await send_titled_reply(bot, event, "转发结果", USAGE_TEXT)
             return
 
-        # 普通消息：若有该用户的 pending，则作为「下一条消息」转发
-        await _try_forward_next(bot, event, text)
+        # 普通斜杠命令交给各自处理器，不作为转发内容。
+        if text.strip().startswith("/"):
+            return
+
+        if not text.strip() and not (getattr(event, "attachments", None) or []):
+            return
+        remember_content(group, user, event, text)
 
 
 async def _cmd_relay_list(bot, event):
+    """发送纯文本目标群名单与转发方法。"""
     group = event.group_openid
     entries, related = await asyncio.to_thread(get_qq_fwd_routing_snapshot, group)
     targets = compute_target_list(entries, group, related)
-    await bot.send(event, build_relay_list(targets))
+    await send_titled_reply(
+        bot,
+        event,
+        "转发群列表",
+        build_relay_list(targets),
+    )
 
 
-async def _cmd_relay_number(bot, event, number):
+async def send_relay_list(bot, event):
+    """显示当前群可用的手动转发目标列表。"""
+    await _cmd_relay_list(bot, event)
+
+
+def _selected_targets(targets, numbers):
+    """按序号取目标并去重；出现越界序号时返回 None。"""
+    selected = []
+    seen = set()
+    for number in numbers:
+        if number < 1 or number > len(targets):
+            return None
+        target = targets[number - 1]
+        openid = str(target["openid"])
+        if openid in seen:
+            continue
+        seen.add(openid)
+        selected.append(target)
+    return selected
+
+
+async def _cmd_relay_forward(bot, event, numbers):
+    """引用消息（或最近内容）直接转发到指定序号的目标群。"""
     group = event.group_openid
     user = event.author.member_openid
     entries, related = await asyncio.to_thread(get_qq_fwd_routing_snapshot, group)
-    target = resolve_target_by_number(entries, group, related, number)
-    if target is None:
-        await bot.send(event, "无法找到对应的转发群")
+    targets = compute_target_list(entries, group, related)
+    selected = _selected_targets(targets, numbers) if targets else None
+    if not selected:
+        await send_titled_reply(
+            bot, event, "转发结果", "无法找到对应的转发群"
+        )
         return
-    set_pending(group, user, target)
-    return
+
+    quote = extract_quoted_message(event)
+    error = quoted_message_error(quote, bot)
+    if error:
+        await send_titled_reply(bot, event, "转发结果", error)
+        return
+
+    if quote is not None:
+        message = {
+            "content": quote["content"],
+            "attachments": quote["attachments"],
+        }
+    else:
+        record = get_remembered_content(group, user)
+        if record is None:
+            await send_titled_reply(bot, event, "转发结果", NO_CONTENT_TEXT)
+            return
+        message = normalize_event_message(record["event"])
+        if not message["content"].strip() and not message["attachments"]:
+            await send_titled_reply(bot, event, "转发结果", NO_CONTENT_TEXT)
+            return
+
+    await _forward_to_targets(bot, event, selected, message)
 
 
-async def _try_forward_next(bot, event, text):
+async def _forward_to_targets(bot, event, targets, message):
+    """把给定内容转发到全部目标群，并汇总回复一次结果。"""
     group = event.group_openid
-    user = event.author.member_openid
-    entry = get_pending(group, user)
-    if entry is None:
-        return  # 没有进行中的转发，静默
 
-    timeout = await asyncio.to_thread(get_qq_fwd_select_timeout)
-    if is_pending_expired(entry, timeout):
-        # 超时：只清除 pending，不发任何消息
-        clear_pending(group, user)
-        return
-
-    # 消费 pending：本消息即转发内容
-    clear_pending(group, user)
-    message = normalize_event_message(event)
-
-    # 实际发送前再次校验目标群
+    # 实际发送前再次校验目标群（仍同属至少一个转发组且 enabled）。
     entries, related = await asyncio.to_thread(
         get_qq_fwd_routing_snapshot, group
     )
-    if not _target_still_valid(entry["target"], group, entries, related):
-        await bot.send(event, "转发失败")
+    valid = [t for t in targets if _target_still_valid(t, group, entries, related)]
+    if not valid:
+        await send_titled_reply(
+            bot, event, "转发结果", "未转发：目标群已不可用，请重新选择。"
+        )
         return
+
+    source_group_name = next(
+        (
+            str(item.get("name") or item.get("remark") or "").strip()
+            for item in entries
+            if str(item.get("openid") or "") == str(group)
+            and str(item.get("name") or item.get("remark") or "").strip()
+        ),
+        str(group),
+    )
 
     try:
         text_parts, media_items = await build_forward_content(message)
@@ -469,91 +675,42 @@ async def _try_forward_next(bot, event, text):
         )
     except Exception as exc:
         logger.exception("QQ转发内容处理异常: {}", exc)
-        await bot.send(event, "转发失败")
+        await send_titled_reply(
+            bot, event, "转发结果", "转发失败：内容处理失败。"
+        )
         return
 
     try:
         ok_map = await send_forward_to_group(
-            entry["target"]["openid"], text_parts, media_items)
+            [t["openid"] for t in valid],
+            text_parts,
+            media_items,
+            source_group_name,
+        )
     except Exception as exc:
         logger.exception("QQ转发发送异常: {}", exc)
-        await bot.send(event, "转发失败")
+        await send_titled_reply(
+            bot, event, "转发结果", "转发失败：发送失败。"
+        )
         return
 
-    if ok_map.get(entry["target"]["openid"]):
-        await bot.send(event, "转发成功")
-    else:
-        await bot.send(event, "转发失败")
+    ok_labels = []
+    failed_labels = []
+    for target in valid:
+        label = escape_markdown(
+            str(target.get("name") or "").strip()
+            or str(target.get("openid") or "目标群")
+        )
+        if ok_map.get(target["openid"]):
+            ok_labels.append(label)
+        else:
+            failed_labels.append(label)
 
-
-# =====================================================
-# 超时清扫：用户在 relay {序号} 后一直不发送内容时，超时静默清除 pending
-# （不发送任何提示消息）。
-# 仅在能拿到 QQ Bot 时启动一次后台任务。
-# =====================================================
-_timeout_loop_started = False
-_timeout_task = None
-_timeout_stopping = False
-
-
-async def expire_pendings(now_ts):
-    """清除所有已超时的 pending（不发任何消息）。
-
-    供超时清扫任务与测试复用。"""
-    timeout = await asyncio.to_thread(get_qq_fwd_select_timeout)
-    for key in collect_expired(now_ts, timeout=timeout):
-        async with _get_pending_lock(key[0], key[1]):
-            entry = get_pending(key[0], key[1])
-            if entry is not None and is_pending_expired(entry, timeout, now_ts):
-                clear_pending(key[0], key[1])
-
-
-async def _timeout_loop():
-    while True:
-        try:
-            await asyncio.sleep(2)
-            await expire_pendings(time.monotonic())
-        except asyncio.CancelledError:
-            break
-        except Exception:
-            logger.exception("QQ转发超时清扫异常")
-
-
-def _on_timeout_task_done(task):
-    """Keep the startup guard aligned with the timeout task lifecycle."""
-    global _timeout_loop_started, _timeout_task
-    if _timeout_task is task:
-        _timeout_task = None
-        _timeout_loop_started = False
-    if not task.cancelled():
-        error = task.exception()
-        if error is not None:
-            logger.error("QQ转发超时清扫任务异常退出: {}", error)
-
-
-@get_driver().on_bot_connect
-async def _start_timeout_loop(bot: Bot):
-    global _timeout_loop_started, _timeout_task
-    if not isinstance(bot, QQBot) or _timeout_stopping:
-        return
-    if _timeout_task is not None and not _timeout_task.done():
-        return
-    _timeout_loop_started = True
-    _timeout_task = asyncio.create_task(_timeout_loop())
-    _timeout_task.add_done_callback(_on_timeout_task_done)
-
-
-@get_driver().on_shutdown
-async def _stop_timeout_loop():
-    """Stop and reap the pending-selection cleanup task on shutdown."""
-    global _timeout_loop_started, _timeout_task, _timeout_stopping
-    _timeout_stopping = True
-    task = _timeout_task
-    _timeout_task = None
-    _timeout_loop_started = False
-    if task is not None and not task.done():
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+    lines = []
+    if ok_labels:
+        lines.append("已转发到「{}」。".format("」「".join(ok_labels)))
+    if failed_labels:
+        lines.append("未转发到「{}」：发送失败。".format("」「".join(failed_labels)))
+    await send_titled_reply(
+        bot, event, "转发结果", "\n".join(lines) or "转发失败"
+    )

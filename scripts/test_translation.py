@@ -240,6 +240,66 @@ async def main():
         assert x_route["provider"] == "ai"
         assert x_route["fallback_provider"] == "tencent_tmt"
 
+    # 手动转发只看共享 translation.enabled，自动转发仍看来源自己的开关；
+    # 两种模式都保留来源的「保留原文」和「显示时间」。
+    manual_settings = {
+        "translation": dict(shared_route, enabled=True, append_original=False),
+        "discord_channels": [{
+            "id": "C-manual",
+            "translation_enabled": False,
+            "translation_append_original": False,
+            "translation_show_datetime": True,
+        }],
+        "x_rss_sources": [{
+            "source": "IGN",
+            "translation_enabled": False,
+            "translation_append_original": False,
+            "translation_show_datetime": True,
+        }],
+        "bilibili_sources": [{
+            "id": "up:1",
+            "kind": "up",
+            "value": "1",
+            "translation_enabled": True,
+        }],
+    }
+    with mock.patch.object(config_module, "_load_settings", return_value=manual_settings):
+        auto_channel = config_module.get_channel_translation_config("C-manual")
+        assert auto_channel["enabled"] is False
+        manual_channel = config_module.get_channel_translation_config(
+            "C-manual", manual=True
+        )
+        assert manual_channel["enabled"] is True
+        assert manual_channel["append_original"] is False
+        assert manual_channel["show_datetime"] is True
+
+        auto_x = config_module.get_x_source_translation_config("IGN")
+        assert auto_x["enabled"] is False
+        manual_x = config_module.get_x_source_translation_config("IGN", manual=True)
+        assert manual_x["enabled"] is True
+        assert manual_x["append_original"] is False
+        assert manual_x["show_datetime"] is True
+
+        auto_bilibili = config_module.get_bilibili_source_translation_config("up:1")
+        assert auto_bilibili["enabled"] is True
+        manual_settings["translation"]["enabled"] = False
+        manual_bilibili = config_module.get_bilibili_source_translation_config(
+            "up:1", manual=True
+        )
+        assert manual_bilibili["enabled"] is False
+        assert manual_bilibili["append_original"] is True
+        assert manual_bilibili["show_datetime"] is False
+
+        unknown_manual = config_module.get_channel_translation_config(
+            "C-unknown", manual=True
+        )
+        assert unknown_manual["enabled"] is False
+        manual_settings["translation"]["enabled"] = True
+        unknown_manual = config_module.get_x_source_translation_config(
+            "UNKNOWN", manual=True
+        )
+        assert unknown_manual["enabled"] is True
+
     migrated = SettingsModel.from_data({
         **SettingsModel.default().to_dict(),
         "translation": shared_route,

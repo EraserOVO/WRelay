@@ -50,7 +50,7 @@ from plugins.config import (
     get_x_groups_for_source,
     get_x_source_delivery_config,
 )
-from plugins.filter import check_x_post_filter
+from plugins.filter import check_x_post_filter, get_enabled_message_types, X_MESSAGE_TYPES
 from plugins.media import fetch_bytes_many, make_text, make_media_link
 from plugins.message_time import format_message_datetime
 from plugins.sender import get_qq_bot
@@ -663,7 +663,7 @@ async def _render_post(
 
     all_media = [
         media for media in all_media
-        if type_enabled("图片" if media.get("kind") == "图片" else "文件")
+        if type_enabled("图片" if media.get("kind") == "图片" else "视频")
     ]
 
     if all_media:
@@ -1040,9 +1040,16 @@ async def _dispatch_one_locked():
                     raise XProtectionError("X 积压队列保存失败")
                 continue
 
+            enabled_types = get_enabled_message_types(
+                delivery_config["filter"], X_MESSAGE_TYPES
+            )
+            # 全类型启用时走原有 None 路径，确保未配置或默认全选时输出完全不变。
+            if enabled_types == set(X_MESSAGE_TYPES):
+                enabled_types = None
             rendered = await _render_post(
                 item["post"],
                 source["name"],
+                enabled_types=enabled_types,
                 show_datetime=delivery_config["translation"].get("show_datetime") is True,
             )
             if rendered is None:

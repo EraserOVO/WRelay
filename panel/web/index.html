@@ -53,7 +53,7 @@
     <div class="card" id="backfillCard">
       <h2 style="display:flex;align-items:center;gap:6px;">离线补发 <button class="hintbtn" data-hint="hint-backfill" data-title="离线补发"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
       <div id="backfillContent">
-        <div class="row bf-row" style="padding:0 6px;">
+        <div class="row bf-row">
           <span class="row bf-limit-row">
             <span class="bf-limit-label">单次补发上限</span>
             <input type="number" id="backfillLimit" min="1" max="30" step="1" class="bf-limit-input">
@@ -64,8 +64,8 @@
             <b id="backfillPending" class="bf-limit-label">0</b>
           </span>
         </div>
-        <div class="row" style="margin-top:10px;">
-          <button id="btnBackfillToggle" class="sec" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg><span>启用补发</span></button>
+        <div class="row backfill-actions">
+          <button id="btnBackfillToggle" class="sec pill-switch" type="button" role="switch" aria-checked="false"><span class="pill-switch-label">启用补发</span><span class="settings-switch-track" aria-hidden="true"></span></button>
           <button id="btnBackfillRun" class="sec" disabled>立即补发</button>
           <span class="row bf-right-group">
             <button id="btnBackfillRefresh" class="sec rowicon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></button>
@@ -112,7 +112,7 @@
           <button id="btnBilibiliProtection" class="sec iconbtn" type="button" title="转发保护（限流设置）" aria-label="转发保护（限流设置）"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17a8 8 0 1 1 16 0"/><path d="M7 12.5l1.4.8M12 9v2M17 12.5l-1.4.8"/><path d="M12 17v-6"/><circle cx="12" cy="17" r="1.5" fill="currentColor" stroke="none"/><path d="M5 20h14"/></svg></button>
         </div>
       </div>
-      <div class="hint" id="hint-bilibili" style="display:none">支持 UP 主投稿、Bilibili 标签搜索和关键词搜索；轮询间隔至少 30 秒，保存后下一轮生效。点击来源行右侧的漏斗按钮，可设置筛选规则和单独开启“自动转发视频本体”；超过媒体大小上限或无法上传时会发视频链接。</div>
+      <div class="hint" id="hint-bilibili" style="display:none">支持 UP 主投稿、Bilibili 标签搜索和关键词搜索；轮询间隔至少 30 秒，保存后下一轮生效。点击来源行右侧的漏斗按钮，可设置筛选规则；超过媒体大小上限或无法上传时会发视频链接。</div>
     </div>
 
     <div class="card" id="scheduledMessageCard" style="display:none">
@@ -121,7 +121,7 @@
       <div id="scheduledMessageSummary" class="scheduled-message-summary">尚未添加消息</div>
       <div class="row scheduled-message-actions">
         <button id="btnScheduledMessageEdit" class="rowicon sec" type="button" title="管理定时消息" aria-label="管理定时消息"></button>
-        <button id="btnScheduledMessageToggle" class="sec" type="button"><span>启用定时发送</span></button>
+        <button id="btnScheduledMessageToggle" class="sec pill-switch" type="button" role="switch" aria-checked="false"><span class="pill-switch-label">启用定时发送</span><span class="settings-switch-track" aria-hidden="true"></span></button>
       </div>
     </div>
   </div>
@@ -213,50 +213,22 @@
     </div>
   </div>
 
-  <div class="relay-translation-row">
-  <div class="card" id="relayLinkCard">
-    <h2 style="display:flex;align-items:center;gap:6px;">手动转发 <button class="hintbtn" data-hint="hint-relay-link" data-title="手动转发"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
-    <div class="hint" id="hint-relay-link" style="display:none">白名单账户可通过 relay 序号选择目标 QQ 群，再发送下一条 Discord 消息链接；筛选设置对所有手动转发链接生效。</div>
-    <div class="relay-link-description">私聊发送 relay 序号后，下一条 Discord 链接将转发到选定的目标群。</div>
-    <div class="row relay-link-actions">
-      <button id="btnRelayRegisteredChannels" class="sec" type="button">已注册频道</button>
-      <button id="btnRelayFilter" class="sec iconbtn" type="button" title="消息筛选" aria-label="消息筛选"></button>
-    </div>
-  </div>
-  <div class="card" id="autoTranslationCard">
-    <h2 style="display:flex;align-items:center;gap:6px;">自动翻译 <button class="hintbtn" data-hint="hint-auto-translation" data-title="自动翻译"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
-    <div class="auto-translation-section">
-      <div class="row auto-translation-fields">
-        <label class="auto-translation-field"><span>首选方式</span><select id="translationProvider"><option value="tencent_tmt">腾讯 TMT</option><option value="ai">AI API</option></select></label>
-        <label class="auto-translation-field"><span>次选方式</span><select id="translationFallback"><option value="ai">AI API</option><option value="tencent_tmt">腾讯 TMT</option><option value="">仅原文</option></select></label>
-      </div>
-    </div>
-    <div class="row auto-translation-actions">
-      <div class="hint" id="hint-auto-translation" style="display:none">Discord 和 X 共用这里选择的翻译服务路由；左侧开关可一次启用或关闭全部 Discord 转发频道的翻译，每个频道可通过表格中的翻译图标单独设置。</div>
-      <button id="btnTranslationToggle" class="sec translation-toggle" type="button"><span>启用翻译</span></button>
-      <span class="auto-translation-action-buttons">
-      </span>
-    </div>
-  </div>
-  </div>
   </div>
 
   <div id="scheduledMessageContentModal" class="scheduled-picker-modal" style="display:none;">
     <div class="scheduled-picker-dialog scheduled-message-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="scheduledMessageContentTitle">
       <button type="button" class="modal-x" data-close="scheduledMessageContentModal" aria-label="关闭">×</button>
       <h3 id="scheduledMessageContentTitle">编辑定时消息</h3>
-      <div class="scheduled-message-group scheduled-message-editor-groups">
-        <div class="scheduled-message-group-title">发送目标群</div>
-        <div id="scheduledMessageGroupContent" class="scheduled-message-group-content">
-          <div id="scheduledMessageGroupSummary" class="scheduled-message-group-summary"></div>
-          <button id="btnAddScheduledGroup" type="button">管理</button>
+      <p>每条消息可单独设置发送目标；未单独设置时沿用顶部默认目标。</p>
+      <div class="modal-span-all">
+        <div class="scheduled-message-list-header">
+          <div class="scheduled-message-group-title">消息列表</div>
+          <button id="btnScheduledFoldAll" class="sec" type="button">全部折叠</button>
+          <button id="btnScheduledUnfoldAll" class="sec" type="button">全部展开</button>
+          <button id="btnAddScheduledMessage" class="sec" type="button">＋ 添加消息</button>
         </div>
+        <div id="scheduledMessageEntries" class="scheduled-message-entries"></div>
       </div>
-      <div class="scheduled-message-list-header">
-        <div class="scheduled-message-group-title">消息列表</div>
-        <button id="btnAddScheduledMessage" class="sec" type="button">＋ 添加消息</button>
-      </div>
-      <div id="scheduledMessageEntries" class="scheduled-message-entries"></div>
       <div class="scheduled-picker-actions">
         <button type="button" class="sec" data-close="scheduledMessageContentModal">取消</button>
         <button type="button" id="scheduledMessageContentConfirm">确定</button>
@@ -325,32 +297,6 @@
       </div>
     </div>
 
-    <div class="relay-translation-row">
-    <div class="card" id="xRelayLinkCard">
-      <h2 style="display:flex;align-items:center;gap:6px;">手动转发 <button class="hintbtn" data-hint="hint-x-relay-link" data-title="手动转发"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
-      <div class="hint" id="hint-x-relay-link" style="display:none">白名单账户可通过 relay 序号选择目标 QQ 群，再发送下一条 X 消息链接；筛选设置对所有 X 手动转发链接生效。</div>
-      <div class="relay-link-description">私聊发送 relay 序号后，下一条 X 链接将转发到选定的目标群。</div>
-      <div class="row relay-link-actions">
-        <button id="btnXRelayRegisteredChannels" class="sec" type="button">已注册账号</button>
-        <button id="btnXRelayFilter" class="sec iconbtn" type="button" title="消息筛选" aria-label="消息筛选"></button>
-      </div>
-    </div>
-    <div class="card" id="xAutoTranslationCard">
-      <h2 style="display:flex;align-items:center;gap:6px;">自动翻译 <button class="hintbtn" data-hint="hint-x-auto-translation" data-title="自动翻译"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
-      <div class="auto-translation-section">
-        <div class="row auto-translation-fields">
-        <label class="auto-translation-field"><span>首选方式</span><select id="xTranslationProvider"><option value="tencent_tmt">腾讯 TMT</option><option value="ai">AI API</option></select></label>
-        <label class="auto-translation-field"><span>次选方式</span><select id="xTranslationFallback"><option value="ai">AI API</option><option value="tencent_tmt">腾讯 TMT</option><option value="">仅原文</option></select></label>
-        </div>
-      </div>
-      <div class="row auto-translation-actions">
-        <div class="hint" id="hint-x-auto-translation" style="display:none">这里与上方“自动翻译”共用首选/次选服务；左侧开关可一次启用或关闭全部 X 转发账号的翻译，每个账号可通过表格中的翻译图标单独设置。</div>
-        <button id="btnXTranslationToggle" class="sec translation-toggle" type="button"><span>启用翻译</span></button>
-        <span class="auto-translation-action-buttons">
-        </span>
-      </div>
-    </div>
-    </div>
   </div>
 
   <div id="pageBilibili" class="page-content" style="display:none">
@@ -412,18 +358,17 @@
         </div>
       </div>
     </div>
-    <div class="relay-translation-row">
-    <div class="card" id="bilibiliRelayLinkCard">
-      <h2 style="display:flex;align-items:center;gap:6px;">手动转发 <button class="hintbtn" data-hint="hint-bilibili-relay-link" data-title="手动转发"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
-      <div class="hint" id="hint-bilibili-relay-link" style="display:none">白名单用户私聊发送 relay 序号后，下一条 Bilibili 投稿链接（支持 b23.tv 短链接）将转发到选定目标群；筛选设置对所有 Bilibili 手动转发链接生效。视频会尝试发送封面和本体，超出媒体大小上限、视频分段或无法获取时发送链接。</div>
-      <div class="relay-link-description">私聊发送 relay 序号后，下一条 Bilibili 链接将转发到选定的目标群。</div>
-      <div class="row relay-link-actions">
-        <button id="btnBilibiliRelayRegisteredSources" class="sec" type="button">已注册来源</button>
-        <button id="btnBilibiliRelayFilter" class="sec iconbtn" type="button" title="消息筛选" aria-label="消息筛选"></button>
+    <div class="relay-translation-row func-cards">
+      <div class="card" id="bilibiliAutoResolveCard">
+        <h2 style="display:flex;align-items:center;gap:6px;">自动解析 <button class="hintbtn" data-hint="hint-bilibili-auto-resolve" data-title="Bilibili 自动解析"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
+        <div class="hint" id="hint-bilibili-auto-resolve" style="display:none">打开后，群里有人发 B 站视频链接，机器人会把视频发回本群。需要群管理员先在机器人资料页开启「接收所有消息」。拿不到视频时不回复。</div>
+        <div class="relay-link-description">群成员发送 Bilibili 视频链接时，机器人把视频发回本群。</div>
+        <div class="row relay-link-actions">
+          <button id="btnBilibiliAutoResolveToggle" class="sec pill-switch" type="button" role="switch" aria-checked="false"><span class="pill-switch-label">启用自动解析</span><span class="settings-switch-track" aria-hidden="true"></span></button>
+        </div>
       </div>
     </div>
     </div>
-  </div>
 
   <div id="pageQQ" class="page-content" style="display:none">
     <div class="card">
@@ -459,10 +404,57 @@
             </div>
           </div>
         </div>
+
+        <!-- QQ → QQ 授权用户：与其它转发链路的「来源 / 接收群」并排表格同构。
+             表格与按钮沿用原白名单弹窗中的元素 ID，事件绑定不变。 -->
+        <div class="fgsection">
+          <h3 class="fgh3" style="display:flex;justify-content:space-between;align-items:center;"><span>QQ 授权用户</span> <button class="foldbtn" data-fold="userContent" aria-label="展开/折叠"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 5l8 14H4z"/></svg></button></h3>
+          <div id="userContent">
+            <div class="hint" id="hint-qq-whitelist" style="display:none">仅启用的 QQ 用户可使用私聊 relay 命令；Discord、X 和 Bilibili 链接手动转发共用此名单。修改立即生效。</div>
+            <div class="tablewrap">
+              <table id="userList" style="table-layout:fixed">
+                <colgroup><col class="fg-drag-col"><col class="fg-enable-col"></colgroup>
+                <thead><tr>
+                  <th style="width:34px"></th>
+                  <th style="width:38px;text-align:center" class="col-muted" title="启用 = 是否允许该用户使用私聊手动转发"><input type="checkbox" id="userAllEnabled"></th>
+                  <th style="width:11.2%">名称</th><th style="width:18%">账号</th><th style="width:13%">User OpenID</th><th style="width:8%"></th>
+                </tr></thead>
+                <tbody id="userBody"></tbody>
+              </table>
+            </div>
+            <div class="row addrow">
+              <span class="pane-main-actions">
+                <button id="btnAddUser">＋ 新增</button>
+                <button id="btnSyncUsers" class="sec">注册审核</button>
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
+    <div class="card" id="unifiedRelayCard">
+      <h2 style="display:flex;align-items:center;gap:6px;">手动转发 <button class="hintbtn" data-hint="hint-unified-relay" data-title="手动转发"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
+      <div class="hint" id="hint-unified-relay" style="display:none">在私聊发送 relay 序号选定目标群，再发一条 Discord / X / Bilibili 链接即可转发到该群。「消息筛选」按链路设置要转发的消息类型，「已注册来源」查看已登记的频道与账号。</div>
+      <div class="relay-link-description">私聊发送 relay 序号后，下一条链接转发到选定的目标群。</div>
+      <div class="row relay-link-actions">
+        <button id="btnUnifiedRelaySources" class="sec" type="button">已注册来源</button>
+        <button id="btnUnifiedRelayFilter" class="sec iconbtn" type="button" title="消息筛选" aria-label="消息筛选"></button>
+      </div>
     </div>
-  </div>
+    <div class="card" id="autoTranslationCard">
+      <h2 style="display:flex;align-items:center;gap:6px;">自动翻译 <button class="hintbtn" data-hint="hint-auto-translation" data-title="自动翻译"><svg class="help-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01"/></svg></button></h2>
+      <div class="hint" id="hint-auto-translation" style="display:none">设置四条链路共用的首选 / 次选翻译服务。点「翻译链路」可批量开关某条链路的翻译；单个频道或账号仍可在来源表格里单独设置。</div>
+      <div class="auto-translation-section">
+        <div class="row auto-translation-fields">
+          <label class="auto-translation-field"><span>首选方式</span><select id="translationProvider"><option value="tencent_tmt">腾讯 TMT</option><option value="ai">AI API</option></select></label>
+          <label class="auto-translation-field"><span>次选方式</span><select id="translationFallback"><option value="ai">AI API</option><option value="tencent_tmt">腾讯 TMT</option><option value="">仅原文</option></select></label>
+        </div>
+      </div>
+      <div class="row relay-link-actions">
+        <button id="btnTranslationChains" class="sec" type="button">翻译链路</button>
+      </div>
+    </div>
+</div>
 
   <div class="card page-content" id="recentMessageCard" style="display:none">
     <h2 style="display:flex;align-items:center;justify-content:space-between;gap:10px;">最近消息 <button type="button" class="sec" data-action-target="btnOpenMessageTrace">更多 ›</button></h2>
@@ -520,10 +512,6 @@
           <button type="button" class="sec" id="btnQQConfig" aria-label="配置 QQ Bot">配置 ›</button>
         </div>
         <div class="settings-row">
-          <div class="settings-item-copy"><strong>QQ 用户白名单</strong><small>管理可使用 Discord、X 和 Bilibili 链接手动转发的用户</small></div>
-          <button type="button" class="sec" id="btnManageQQWhitelist" aria-label="管理 QQ 用户白名单">管理 ›</button>
-        </div>
-        <div class="settings-row">
           <div class="settings-item-copy"><strong>翻译服务</strong><small>管理翻译服务与凭据</small></div>
           <button type="button" class="sec" id="btnTranslationConfig" aria-label="配置翻译服务">配置 ›</button>
         </div>
@@ -570,8 +558,9 @@
     <div>
       <button type="button" class="modal-x" data-close="runtimeLogModal" aria-label="关闭">×</button>
       <h3>运行日志</h3>
-      <pre id="log" class="log">加载中…</pre>
-      <div class="log-toolbar-group log-toolbar-left">
+      <p>日志级别切换后立即生效；清空只影响面板显示的日志文件。</p>
+      <pre id="log" class="log modal-span-all">加载中…</pre>
+      <div class="log-toolbar-group log-toolbar-left modal-split">
         <label for="logLevel">级别</label>
         <select id="logLevel" title="日志级别（选择后立即生效）">
           <option value="DEBUG">DEBUG</option>
@@ -580,10 +569,12 @@
           <option value="ERROR">ERROR</option>
         </select>
         <button id="btnOpenMessageTrace" class="sec" type="button">消息追踪</button>
-        <button id="btnLogAutoScroll" class="sec log-auto-scroll" type="button" aria-pressed="true">自动滚动：开</button>
+        <button id="btnLogAutoScroll" class="sec log-auto-scroll pill-switch" type="button" role="switch" aria-pressed="true" aria-checked="true"><span class="pill-switch-label">自动滚动：开</span><span class="settings-switch-track" aria-hidden="true"></span></button>
       </div>
-      <div>
-        <button id="btnCopyLog" class="sec" type="button">复制日志</button>
+      <div class="modal-actions">
+        <span class="modal-actions-start">
+          <button id="btnCopyLog" class="sec" type="button">复制日志</button>
+        </span>
         <button id="btnClearLog" class="danger">清空日志</button>
       </div>
   </div>
@@ -652,21 +643,23 @@
   <div class="backup-dialog" role="dialog" aria-modal="true" aria-labelledby="backupRestoreTitle">
     <button type="button" class="modal-x" data-close="backupRestoreModal" aria-label="关闭">×</button>
     <div class="backup-title"><h3 id="backupRestoreTitle">安全备份与恢复</h3></div>
-    <div class="settings-row">
+    <div class="backup-auto">
       <div class="settings-item-copy"><strong>每小时自动备份</strong><small>默认开启，保留最近 30 份，包含运行状态</small></div>
-      <button id="btnAutoBackupToggle" type="button" class="sec" aria-pressed="true">已开启</button>
+      <button id="btnAutoBackupToggle" type="button" class="sec pill-switch" role="switch" aria-pressed="true" aria-checked="true"><span class="pill-switch-label">已开启</span><span class="settings-switch-track" aria-hidden="true"></span></button>
     </div>
-    <div class="backup-actions">
+    <div class="modal-actions modal-split">
       <button id="btnAutoBackupNow" class="sec" type="button">立即备份</button>
-      <select id="autoBackupSelect" aria-label="选择自动备份"><option value="">正在读取备份…</option></select>
       <button id="btnAutoBackupRestore" class="danger" type="button">恢复所选备份</button>
     </div>
+    <select id="autoBackupSelect" aria-label="选择自动备份"><option value="">正在读取备份…</option></select>
     <p id="maintenanceDetail" class="backup-warning" aria-live="polite"></p>
     <p class="backup-note">手动导出默认仅包含配置；自动备份包含配置、游标、队列和来源状态。ZIP 上限为 5 MB，超限会提醒并保留旧备份。</p>
     <label class="backup-runtime"><input id="backupIncludeRuntime" type="checkbox"> <span>包含运行状态（游标和重试队列）</span></label>
-    <div class="backup-actions">
-      <button id="btnBackupExport" class="sec" type="button">导出 ZIP</button>
-      <label class="sec backup-file-select">选择 ZIP<input id="backupRestoreFile" type="file" accept="application/zip,.zip"></label>
+    <div class="modal-actions">
+      <span class="modal-actions-start">
+        <button id="btnBackupExport" class="sec" type="button">导出 ZIP</button>
+        <label class="sec backup-file-select">选择 ZIP<input id="backupRestoreFile" type="file" accept="application/zip,.zip"></label>
+      </span>
       <button id="btnBackupRestoreConfirm" class="danger" type="button">恢复配置</button>
     </div>
     <p class="backup-warning">恢复游标和重试队列前请先停止机器人，避免内存状态覆盖恢复文件。恢复运行状态仍可能造成重复投递、漏发或改变待补发状态。</p>
@@ -676,6 +669,11 @@
   <div style="position:relative;background:var(--modal-bg);border:1px solid var(--modal-border);border-radius:10px;padding:18px;max-width:560px;width:92%;display:flex;flex-direction:column;">
     <button type="button" class="modal-x" data-close="filterModal" aria-label="关闭">×</button>
     <h3 style="margin:0 0 12px;">消息筛选 <span id="filterChanName" style="font-size:13px;color:var(--muted);font-weight:normal;"></span></h3>
+    <div id="filterScopeTabs" class="filter-scope-tabs" style="display:none;margin-bottom:14px;">
+      <button type="button" class="sec fscope-tab" data-scope="relay">Discord</button>
+      <button type="button" class="sec fscope-tab" data-scope="xrelay">X</button>
+      <button type="button" class="sec fscope-tab" data-scope="birelay">Bilibili</button>
+    </div>
     <div id="filterAudienceFields" style="display:flex;gap:14px;">
       <div id="filterUsernameField" style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">
         <span class="flt-col-title">用户名筛选 <span class="flt-col-hint">（不区分大小写）</span></span>
@@ -695,7 +693,7 @@
       </div>
     </div>
     <div id="filterMessageTypeFields" style="margin-top:14px;">
-      <span class="flt-col-title">消息类型 <span class="flt-col-hint">（过滤后无内容则不转发）</span></span>
+      <span class="flt-col-title">消息类型 <span class="flt-col-hint">（未选择时转发全部类型；与推文/投稿类型同时启用时需同时符合）</span></span>
       <div id="filterTypeList" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;"></div>
     </div>
     <div id="filterXPostTypeFields" style="display:none;margin-top:14px;">
@@ -706,35 +704,35 @@
       <span class="flt-col-title">投稿类型 <span class="flt-col-hint">（至少选择一种；标签与关键词来源仅支持视频）</span></span>
       <div id="filterBilibiliPostTypeList" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;"></div>
     </div>
-    <label id="filterBilibiliForwardVideoField" class="bili-forward-video-option" style="display:none;margin-top:14px;">
-      <input id="filterBilibiliForwardVideo" type="checkbox" role="switch" aria-label="自动转发视频本体">
-      <span class="bili-forward-video-copy"><strong>自动转发视频本体</strong><small>仅适用于视频投稿；上传失败或视频过大时发送视频链接。</small></span>
-      <span class="bili-forward-video-switch" aria-hidden="true"><span class="settings-switch-track"></span></span>
-    </label>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
       <button id="filterSave">保存</button>
     </div>
   </div>
 </div>
-<div id="translationSourceModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;align-items:center;justify-content:center;">
-  <div style="position:relative;background:var(--modal-bg);border:1px solid var(--modal-border);border-radius:10px;padding:18px;max-width:420px;width:92%;display:flex;flex-direction:column;gap:14px;">
+<div id="translationSourceModal" style="display:none;">
+  <div style="position:relative;display:flex;flex-direction:column;">
     <button type="button" class="modal-x" data-close="translationSourceModal" aria-label="关闭">×</button>
     <h3 style="margin:0;">翻译设置 <span id="translationSourceName" style="font-size:13px;color:var(--muted);font-weight:normal;"></span></h3>
+    <p>这里的设置只对当前来源生效；开关点击后随「保存」一起写入。</p>
     <div class="translation-setting-buttons">
-      <button type="button" class="sec translation-setting-toggle" id="translationSourceEnabled"></button>
-      <button type="button" class="sec translation-setting-toggle" id="translationSourceAppendOriginal"></button>
-      <button type="button" class="sec translation-setting-toggle" id="translationSourceShowDatetime"></button>
+      <button type="button" class="sec translation-setting-toggle pill-switch" role="switch" id="translationSourceEnabled"></button>
+      <button type="button" class="sec translation-setting-toggle pill-switch" role="switch" id="translationSourceAppendOriginal"></button>
+      <button type="button" class="sec translation-setting-toggle pill-switch" role="switch" id="translationSourceShowDatetime"></button>
     </div>
-    <span class="flt-col-hint">翻译开启时，译文会附在原文后</span>
     <div style="display:flex;gap:10px;justify-content:flex-end;">
       <button type="button" class="sec" data-close="translationSourceModal">取消</button>
       <button type="button" id="translationSourceSave">保存</button>
     </div>
   </div>
 </div>
-<div id="relayChannelsModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;align-items:center;justify-content:center;">
+<div id="relayChannelsModal" style="display:none;">
   <div class="relay-channels-dialog" role="dialog" aria-modal="true" aria-labelledby="relayChannelsTitle">
     <button type="button" class="modal-x" data-close="relayChannelsModal" aria-label="关闭">×</button>
+    <div id="relayScopeTabs" class="filter-scope-tabs" style="display:flex;">
+      <button type="button" class="sec fscope-tab" data-rscope="discord">Discord</button>
+      <button type="button" class="sec fscope-tab" data-rscope="x">X</button>
+      <button type="button" class="sec fscope-tab" data-rscope="bilibili">Bilibili</button>
+    </div>
     <h3 id="relayChannelsTitle">已注册频道</h3>
     <p class="relay-channels-desc">这里显示全部已登记、可用于手动转发链接的频道。修改备注后点击保存即可。</p>
     <div id="relayChannelsList" class="relay-channels-list"></div>
@@ -744,30 +742,22 @@
     </div>
   </div>
 </div>
-<div id="qqWhitelistModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1001;align-items:center;justify-content:center;">
-  <div class="qq-whitelist-dialog" role="dialog" aria-modal="true" aria-labelledby="qqWhitelistTitle" aria-describedby="qqWhitelistDescription">
-    <button type="button" class="modal-x" data-close="qqWhitelistModal" aria-label="关闭">×</button>
-    <h3 id="qqWhitelistTitle">QQ 用户白名单</h3>
-    <p class="qq-whitelist-desc" id="qqWhitelistDescription">仅启用的 QQ 用户可使用私聊 relay 命令；Discord、X 和 Bilibili 链接手动转发共用此名单。修改立即生效。</p>
-    <div id="userContent">
-      <div class="tablewrap">
-        <table id="userList" style="table-layout:fixed">
-          <thead><tr><th style="width:1.6%"></th><th style="width:2.3%;text-align:center"><input type="checkbox" id="userAllEnabled"></th><th style="width:11.2%">名称</th><th style="width:18%">账号</th><th style="width:13%">User OpenID</th><th style="width:8%"></th></tr></thead>
-          <tbody id="userBody"></tbody>
-        </table>
-      </div>
-      <div class="qq-whitelist-footer">
-        <div class="row addrow">
-          <button id="btnAddUser">＋ 新增</button>
-          <button id="btnSyncUsers" class="sec">注册审核</button>
-        </div>
-        <button type="button" class="sec" data-close="qqWhitelistModal">完成</button>
-      </div>
+<div id="translationChainsModal" style="display:none;">
+  <div class="translation-chains-dialog" role="dialog" aria-modal="true" aria-labelledby="translationChainsTitle">
+    <button type="button" class="modal-x" data-close="translationChainsModal" aria-label="关闭">×</button>
+    <h3 id="translationChainsTitle">翻译链路</h3>
+    <p>开关批量作用于该链路的全部来源，点击后立即保存；关闭后该链路只发原文。</p>
+    <div class="translation-chain-toggles">
+      <button id="btnTranslationDiscord" class="sec translation-toggle pill-switch" type="button" role="switch" aria-checked="false" title="启用或关闭 Discord→QQ 翻译"><span class="pill-switch-label">Discord → QQ 翻译</span><span class="settings-switch-track" aria-hidden="true"></span></button>
+      <button id="btnTranslationX" class="sec translation-toggle pill-switch" type="button" role="switch" aria-checked="false" title="启用或关闭 X→QQ 翻译"><span class="pill-switch-label">X → QQ 翻译</span><span class="settings-switch-track" aria-hidden="true"></span></button>
+      <button id="btnTranslationBilibili" class="sec translation-toggle pill-switch" type="button" role="switch" aria-checked="false" title="启用或关闭 Bilibili→QQ 翻译"><span class="pill-switch-label">Bilibili → QQ 翻译</span><span class="settings-switch-track" aria-hidden="true"></span></button>
+      <button id="btnTranslationManual" class="sec translation-toggle pill-switch" type="button" role="switch" aria-checked="false" title="启用或关闭 QQ→QQ 手动转发翻译"><span class="pill-switch-label">QQ → QQ 手动转发翻译</span><span class="settings-switch-track" aria-hidden="true"></span></button>
     </div>
   </div>
 </div>
-<div id="translationConfigModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;align-items:center;justify-content:center;">
-  <div class="translation-config-dialog" style="position:relative;background:var(--modal-bg);border:1px solid var(--modal-border);border-radius:10px;padding:16px;max-width:460px;width:92%;display:flex;flex-direction:column;">
+<div id="qqWhitelistModal" class="legacy-whitelist-modal" style="display:none"></div>
+<div id="translationConfigModal" style="display:none;">
+  <div class="translation-config-dialog" style="position:relative;display:flex;flex-direction:column;">
     <button type="button" class="modal-x" data-close="translationConfigModal" aria-label="关闭">×</button>
     <h3 style="margin:0 0 10px;">翻译服务配置</h3>
     <div id="translationRuntimeStatus" class="translation-runtime-banner" aria-live="polite">当前工作模型：尚未成功翻译</div>
@@ -810,10 +800,10 @@
     </div>
   </div>
 </div>
-<div id="qqConfigModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;align-items:center;justify-content:center;">
-  <div style="position:relative;background:var(--modal-bg);border:1px solid var(--modal-border);border-radius:10px;padding:18px;max-width:620px;width:92%;display:flex;flex-direction:column;">
+<div id="qqConfigModal" style="display:none;">
+  <div style="position:relative;display:flex;flex-direction:column;">
     <button type="button" class="modal-x" data-close="qqConfigModal" aria-label="关闭">×</button>
-    <h3 style="margin:0 0 14px;">QQ Bot 配置</h3>
+    <h3 style="margin:0;">QQ Bot 配置</h3>
     <div id="qqConfigBots"></div>
     <div style="margin-top:12px;"><button type="button" id="qqConfigAddBot" class="sec">＋ 添加 QQ Bot</button></div>
     <p style="font-size:12px;color:var(--muted);margin:14px 0 0;line-height:1.6;">已有 Bot 的 AppSecret 留空表示不修改；新增 Bot 必须填写。删除前请先解除相关群的绑定。保存后机器人会自动重启。</p>
@@ -823,10 +813,10 @@
     </div>
   </div>
 </div>
-<div id="discordConfigModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;align-items:center;justify-content:center;">
-  <div style="position:relative;background:var(--modal-bg);border:1px solid var(--modal-border);border-radius:10px;padding:18px;max-width:400px;width:92%;display:flex;flex-direction:column;">
+<div id="discordConfigModal" style="display:none;">
+  <div style="position:relative;display:flex;flex-direction:column;">
     <button type="button" class="modal-x" data-close="discordConfigModal" aria-label="关闭">×</button>
-    <h3 style="margin:0 0 14px;">Discord Bot 配置</h3>
+    <h3 style="margin:0;">Discord Bot 配置</h3>
     <label for="discordConfigToken" style="font-size:13px;color:var(--muted);margin-bottom:4px;">Token</label>
     <div style="display:flex;gap:8px;align-items:center;">
       <input type="password" id="discordConfigToken" autocomplete="new-password" spellcheck="false" style="flex:1;min-width:0;">
@@ -839,10 +829,10 @@
   </div>
 </div>
 <script src="./local-api.js"></script>
-<script src="./app.js"></script>
+<script src="./app.js?v=20261020-scheduled-card-layout"></script>
 <script src="./desktop.js"></script>
 <script src="./ui-components.js"></script>
-<script src="./discord-page.js"></script>
+<script src="./discord-page.js?v=20261020-qq-whitelist-pane"></script>
 <script src="./onboarding.js"></script>
 </body>
 </html>

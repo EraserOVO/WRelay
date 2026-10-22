@@ -33,7 +33,17 @@ def load_media_proxy_function():
         if isinstance(node, ast.FunctionDef) and node.name == "_get_proxy"
     )
     module = ast.Module(body=[function], type_ignores=[])
-    namespace = {"urlsplit": urlsplit}
+
+    class Config:
+        discord_proxy = "http://127.0.0.1:7897"
+
+    class Driver:
+        config = Config()
+
+    namespace = {
+        "urlsplit": urlsplit,
+        "get_driver": lambda: Driver(),
+    }
     exec(compile(module, str(MEDIA_PATH), "exec"), namespace)
     return namespace["_get_proxy"]
 
@@ -45,7 +55,13 @@ def main():
             os.environ[key] = "http://127.0.0.1:7897"
         load_routing_function()()
         assert all(key not in os.environ for key in PROXY_KEYS)
-        assert load_media_proxy_function()("https://media.example.net/image.png") is None
+        get_proxy = load_media_proxy_function()
+        proxy = "http://127.0.0.1:7897"
+        assert get_proxy("https://media.example.net/image.png") is None
+        assert get_proxy("https://i0.hdslb.com/bfs/archive/a.jpg") is None
+        assert get_proxy("https://cdn.discordapp.com/attachments/1/2/a.png") == proxy
+        assert get_proxy("https://pbs.twimg.com/media/a.jpg") == proxy
+        assert get_proxy("https://video.twimg.com/ext_tw_video/a.mp4") == proxy
     finally:
         for key, value in original.items():
             if value is None:

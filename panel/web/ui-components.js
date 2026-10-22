@@ -20,19 +20,20 @@
   }
 
   const specs = {
-    runtimeLogModal: {size: "large", footer: "btnClearLog", backdrop: true},
-    discordConfigModal: {size: "medium", footer: "discordConfigSave", backdrop: true},
-    qqConfigModal: {size: "medium", footer: "qqConfigSave", backdrop: true},
+    runtimeLogModal: {size: "large", footer: "btnClearLog", grid: true, backdrop: true},
+    discordConfigModal: {size: "medium", footer: "discordConfigSave", grid: true, backdrop: true},
+    qqConfigModal: {size: "medium", footer: "qqConfigSave", grid: true, backdrop: true},
     translationConfigModal: {size: "large", footer: "translationConfigSave", backdrop: true},
-    backupRestoreModal: {size: "small", footer: "btnBackupRestoreConfirm", heading: ".backup-title"},
+    backupRestoreModal: {size: "small", footer: "btnBackupRestoreConfirm", heading: ".backup-title", grid: true},
     diagnosticModal: {size: "small", heading: ".diagnostic-toolbar", tools: ["btnDiagnosticRefresh"]},
     messageTraceModal: {size: "large", heading: ".message-trace-toolbar", tools: ["messageTraceSummary", "btnMessageTraceRefresh"]},
     confirmModal: {size: "small", footer: "confirmOk"},
     bilibiliSourceModal: {size: "medium", footer: "bilibiliSourceSave", heading: ".bilibili-source-heading", backdrop: true},
     filterModal: {size: "medium", footer: "filterSave", backdrop: true},
-    translationSourceModal: {size: "small", footer: "translationSourceSave", backdrop: true},
-    relayChannelsModal: {size: "medium", footer: "relayChannelsSave", backdrop: true},
-    scheduledMessageContentModal: {size: "large", footer: "scheduledMessageContentConfirm", backdrop: true},
+    translationSourceModal: {size: "small", footer: "translationSourceSave", grid: true, backdrop: true},
+    relayChannelsModal: {size: "medium", footer: "relayChannelsSave", grid: true, tools: ["relayScopeTabs"], backdrop: true},
+    translationChainsModal: {size: "small", grid: true, backdrop: true},
+    scheduledMessageContentModal: {size: "large", footer: "scheduledMessageContentConfirm", grid: true, backdrop: true},
   };
   function closeButton(id, text) {
     const button = document.createElement("button");
@@ -83,7 +84,7 @@
     } else footer.append(closeButton(id, "关闭"));
     if (id === "filterModal") footer.prepend(closeButton(id, "取消"));
     const body = document.createElement("div");
-    body.className = "modal-body";
+    body.className = spec.grid ? "modal-body modal-grid" : "modal-body";
     body.append(...shell.childNodes);
     shell.append(header, body, footer);
     body.querySelectorAll('p, .flt-col-hint').forEach(node => node.classList.add("help-text"));
@@ -102,6 +103,20 @@
     autoScroll.setAttribute("role", "switch");
     autoScroll.setAttribute("aria-checked", String(autoScroll.dataset.on === "1"));
     autoScroll.removeAttribute("aria-pressed");
+    if (autoScroll.classList.contains("pill-switch")) {
+      // 胶囊开关：文字在左、轨道在右；渲染函数只更新 .pill-switch-label，不重建轨道。
+      let label = autoScroll.querySelector(".pill-switch-label");
+      if (!label) {
+        label = document.createElement("span");
+        label.className = "pill-switch-label";
+        label.textContent = autoScroll.textContent.trim();
+        autoScroll.prepend(label);
+      }
+      if (!autoScroll.querySelector(".settings-switch-track")) {
+        autoScroll.append(Object.assign(document.createElement("span"), {className: "settings-switch-track", ariaHidden: "true"}));
+      }
+      return;
+    }
     if (!autoScroll.querySelector(".settings-switch-track")) {
       autoScroll.innerHTML = '<span>自动滚动</span><span class="settings-switch-track" aria-hidden="true"></span>';
     }

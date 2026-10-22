@@ -16,7 +16,9 @@ body .external-link-button:hover:not(:disabled) { background: var(--hover-bg, va
 body .external-link-button:active:not(:disabled) { filter: brightness(.94); }
 body .external-link-button:disabled { opacity: .45; cursor: not-allowed; }
 .external-link-button:focus-visible, .modal-shell :is(button, input, select, textarea):focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-body .modal-overlay { position: fixed; inset: 0; z-index: 1000; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; background: rgba(0,0,0,.6); backdrop-filter: blur(3px); }
+body .modal-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; background: rgba(0,0,0,.6); backdrop-filter: blur(3px); }
+/* 窗口正文容器只负责起排：旧的内联底色、边框、内边距一律失效，外观统一由 .modal-shell 提供。 */
+body .modal-shell > .modal-body > div[style] { background: transparent !important; border: 0 !important; border-radius: 0 !important; padding: 0 !important; box-shadow: none !important; max-width: none !important; }
 body #confirmModal.modal-overlay { z-index: 1100; }
 body .modal-overlay > .modal-shell { --modal-width: 640px; position: relative; display: flex; flex-direction: column; gap: 0; width: min(var(--modal-width), 100%); max-width: var(--modal-width); height: auto; min-height: 0; max-height: 85vh; padding: 0; margin: 0; overflow: hidden; background: var(--modal-bg); color: var(--fg); border: 1px solid var(--modal-border); border-radius: var(--radius-card); box-shadow: 0 20px 64px rgba(0,0,0,.4); }
 body .modal-overlay > .modal-small { --modal-width: 520px; }
@@ -39,6 +41,59 @@ body.theme-light .modal-shell select { color-scheme: light; }
 .modal-shell :is(button:not(.flt-chip-x), .backup-file-select) { height: 36px; box-sizing: border-box; }
 .modal-shell .form-field { font-size: 13px; color: var(--muted); }
 .modal-shell .form-field > input { margin-top: 6px; }
+
+/* ---------- 二级窗口统一规则（长期有效） ----------
+   1. 内容网格式对齐：加 .modal-grid 的窗口正文一律单列起排、同宽同间距；
+      需要并排的容器加 .modal-split（等宽两列），跨整行用 .modal-span-all。
+      标题下方的每一行（直接子 label / .modal-split / 列表）左缘与正文内边距对齐。
+   2. 底栏左右分区：主要动作（保存 / 确定）贴右下角，其余按钮（取消、清空、
+      上下文入口）贴左下角；由 DOM 顺序决定，第一个按钮左贴、最后一个右贴。
+   3. 开关一律胶囊式：加 .pill-switch 的按钮沿用「启用补发」的轨道 + 圆点外观，
+      文字在左、开关在右；按钮外围没有边框和底色，只在悬停时显示浅色圆角底，
+      开启态只点亮轨道。 */
+body .modal-shell .modal-body.modal-grid { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; justify-items: stretch; gap: 14px; }
+body .modal-shell .modal-body.modal-grid > label { min-width: 0; }
+body .modal-shell .modal-body.modal-grid > label.form-field { display: flex; flex-direction: column; gap: 6px; }
+body .modal-shell .modal-body.modal-grid > :is(input, select, textarea) { width: 100%; min-width: 0; box-sizing: border-box; }
+.modal-split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; align-items: end; min-width: 0; }
+.modal-split > label { min-width: 0; }
+.modal-split > label.form-field { display: flex; flex-direction: column; gap: 6px; }
+.modal-split > :is(select, input, textarea) { width: 100%; min-width: 0; box-sizing: border-box; }
+.modal-span-all { grid-column: 1 / -1; }
+/* 正文内的按钮行：与卡片底栏同样的左右分区（左起排、右贴边）。 */
+body .modal-shell .modal-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.modal-actions > .modal-actions-start { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; margin-right: auto; }
+.modal-actions > .modal-actions-start > button { flex: 0 0 auto; white-space: nowrap; }
+.modal-actions > :nth-child(1):not(.modal-actions-start):not(:only-child) { margin-right: auto; }
+.modal-actions > :last-child { margin-left: auto; margin-right: 0; }
+body .modal-shell .modal-footer > button:first-child:not(:only-child) { margin-right: auto; }
+body .modal-shell .modal-footer > button:last-child { margin-left: auto; margin-right: 0; }
+/* 只剩一个按钮的窗口（自动生成的「关闭」）不贴左，保持贴右。 */
+body .modal-shell .modal-footer > button:only-child { margin-left: 0; }
+body .modal-shell .pill-switch,
+button.pill-switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 36px; padding: 0 8px; box-sizing: border-box; border: 0; border-radius: 999px; background: transparent; color: var(--field-fg); font: inherit; font-size: 13px; text-align: left; }
+.pill-switch > .pill-switch-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 轨道统一为「启用补发」同款 32×18（圆点 14、位移 14）；功能页原有的同尺寸规则与此一致。 */
+.pill-switch > .settings-switch-track { flex: 0 0 32px; width: 32px; height: 18px; pointer-events: none; }
+.pill-switch > .settings-switch-track::after { width: 14px; height: 14px; }
+/* 外围不画描边或常态底色；悬停时只铺一层浅色圆角底，和「启用补发」一致。
+   键盘聚焦时把焦点框缩到轨道上，避免按钮外围再次出现圆环。 */
+body .modal-shell .pill-switch:not(:disabled):hover,
+button.pill-switch:not(:disabled):hover { background: var(--sec-bg); }
+body .pill-switch:focus-visible { outline: none; }
+body .pill-switch:focus-visible .settings-switch-track { outline: 2px solid var(--primary-border); outline-offset: 2px; }
+body .modal-shell .pill-switch[data-on="1"] .settings-switch-track,
+button.pill-switch[data-on="1"] .settings-switch-track { background: var(--toggle-on, var(--primary)); }
+body .modal-shell .pill-switch[data-on="1"] .settings-switch-track::after,
+button.pill-switch[data-on="1"] .settings-switch-track::after { transform: translateX(14px); }
+body .modal-shell .pill-switch:disabled { opacity: .45; cursor: not-allowed; }
+/* 「翻译链路」「翻译设置」窗口里的开关：每个开关独占一行，与正文左右对齐。 */
+body .modal-shell .modal-grid > :is(.translation-chain-toggles, .translation-setting-buttons) { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+/* 头部工具区里的链路 tab（已注册频道）等宽，不被压缩。 */
+.modal-header-actions .fscope-tab { flex: 1 1 92px; min-width: 92px; }
+@media (max-width: 620px) {
+  .modal-split { grid-template-columns: minmax(0, 1fr); }
+}
 body .modal-shell .help-text { color: var(--muted); font-size: 12px; line-height: 1.6; }
 body .modal-shell .danger-text { color: var(--badge-off-fg); background: var(--badge-off-bg); border: 1px solid color-mix(in srgb, var(--danger-icon) 30%, transparent); border-radius: var(--radius-control); padding: 12px; margin: 16px 0 0; }
 .modal-body, .modal-body * { scrollbar-width: thin; scrollbar-color: var(--field-border) var(--modal-bg); }
@@ -61,8 +116,14 @@ body #translationConfigModal > .modal-shell { max-width: 880px; max-height: 85vh
 .qq-bot-form-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) auto; gap: 12px; align-items: end; padding: 12px 0; border-bottom: 1px solid var(--panel-border); }
 .qq-bot-form-row label { min-width: 0; }
 .modal-shell .qq-bot-remove { min-width: 64px; border: 1px solid var(--field-border) !important; }
-.modal-shell .backup-runtime { display: flex; align-items: center; gap: 8px; margin: 16px 0; }
-.modal-shell .backup-runtime input { margin: 0; }
+/* 复选框行需要横向排布：必须比 .modal-grid > label.form-field（含 id 级选择器）更具体才能覆盖。 */
+body .modal-shell .modal-body.modal-grid > .backup-runtime.form-field { flex-direction: row; align-items: center; gap: 8px; width: 100%; margin: 0; }
+body .modal-shell .modal-body.modal-grid > .backup-runtime.form-field input { margin: 0; }
+/* 自动备份一行：说明在左、胶囊开关在右。 */
+.modal-shell .backup-auto { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.modal-shell .backup-auto .settings-item-copy { flex: 1 1 auto; min-width: 0; }
+.modal-shell .backup-auto .pill-switch { flex: 0 0 200px; width: 200px; }
+.modal-shell .backup-warning:empty { display: none; }
 .modal-footer .backup-file-select { display: inline-flex; align-items: center; justify-content: center; min-width: 88px; padding: 0 12px; border: 1px solid var(--field-border); border-radius: var(--radius-control); background: var(--sec-bg); }
 body .modal-shell :is(.diagnostic-row, .status-row) { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border: 0; border-bottom: 1px solid var(--panel-border); background: transparent; border-radius: 0; }
 .modal-shell :is(.diagnostic-row, .status-row):last-child { border-bottom: 0; }
@@ -96,20 +157,19 @@ body #runtimeLogModal #log { width: 100%; height: 320px; min-height: 180px; max-
 #runtimeLogModal .log-toolbar-left { flex-wrap: wrap; }
 body #runtimeLogModal #btnLogAutoScroll { display: inline-flex; align-items: center; gap: 8px; padding: 0 8px; border: 0; background: transparent; color: var(--fg); }
 #runtimeLogModal #btnLogAutoScroll[data-on="1"] .settings-switch-track { background: var(--primary); }
-#runtimeLogModal #btnLogAutoScroll[data-on="1"] .settings-switch-track::after { transform: translateX(16px); }
 #runtimeLogModal .modal-footer #btnClearLog { background: transparent; color: var(--danger-icon); border: 1px solid var(--field-border); }
 #runtimeLogModal .modal-footer #btnClearLog:hover { background: var(--badge-off-bg); }
 body .foldbtn svg { width: 10px; height: 10px; }
 
 /* Desktop secondary actions share one hover/focus treatment; stateful and icon-only controls keep their own feedback. */
 body.desktop-host :is(
-  button.sec:not(.danger):not(.warn):not(.iconbtn):not(.rowicon):not(.settings-switch):not(.foldbtn):not(.hintbtn):not([data-on="1"]),
+  button.sec:not(.danger):not(.warn):not(.iconbtn):not(.rowicon):not(.settings-switch):not(.pill-switch):not(.foldbtn):not(.hintbtn):not([data-on="1"]),
   .external-link-button
 ):not(:disabled) {
   transition: background-color .14s ease, border-color .14s ease, color .14s ease, opacity .14s ease;
 }
 body.desktop-host :is(
-  button.sec:not(.danger):not(.warn):not(.iconbtn):not(.rowicon):not(.settings-switch):not(.foldbtn):not(.hintbtn):not([data-on="1"]),
+  button.sec:not(.danger):not(.warn):not(.iconbtn):not(.rowicon):not(.settings-switch):not(.pill-switch):not(.foldbtn):not(.hintbtn):not([data-on="1"]),
   .external-link-button
 ):not(:disabled):is(:hover, :focus-visible) {
   background: color-mix(in srgb, var(--sec-bg) 78%, var(--fg));
@@ -118,15 +178,11 @@ body.desktop-host :is(
   opacity: 1;
 }
 
-/* Settings switches highlight the control shell without changing the on/off track. */
-body.desktop-host #pageSettings .settings-switch:not(:disabled) {
-  transition: background-color .14s ease, border-color .14s ease, color .14s ease, opacity .14s ease;
-}
-body.desktop-host #pageSettings .settings-switch:not(:disabled):is(:hover, :focus-visible) {
-  background: color-mix(in srgb, var(--sec-bg) 78%, var(--fg));
-  border-color: var(--muted);
-  color: var(--hover-fg);
-  opacity: 1;
+/* 设置页开关没有外围按钮框，键盘焦点同样只画在轨道上。 */
+body #pageSettings :is(.settings-switch, #btnSettingsAutostart):focus-visible { outline: none; }
+body #pageSettings :is(.settings-switch, #btnSettingsAutostart):focus-visible .settings-switch-track {
+  outline: 2px solid var(--primary-border);
+  outline-offset: 2px;
 }
 
 /* The ID-based restart action needs a specific override to share the secondary-button feedback. */

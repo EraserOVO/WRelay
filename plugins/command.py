@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import math
+import re
 import time
 from dataclasses import dataclass
 from weakref import WeakValueDictionary
@@ -18,34 +19,39 @@ from nonebot.adapters.qq.event import (
 )
 
 from plugins import identities
+from plugins import qq_fwd
 from plugins.config import (
-    get_active_groups,
     get_all_channels,
     get_active_user_openids,
     get_qq_group_entries,
-    get_qq_fwd_select_timeout,
     get_qq_c2c_relay_filter,
     get_bilibili_c2c_relay_filter,
     get_channel_translation_config,
     get_x_c2c_relay_filter,
     get_x_source_translation_config,
+    is_user_authorized,
+    USER_NOT_AUTHORIZED_TEXT,
 )
 from plugins.fetch import (
     is_discord_url,
     fetch_message,
     build_parts,
 )
-from plugins.media import make_text
 from plugins.sender import send_relay_message
 from plugins.translation import translate_text_parts
 from plugins.user_errors import localize_user_error
-from plugins.filter import get_enabled_message_types
+from plugins.filter import (
+    DISCORD_MESSAGE_TYPES,
+    X_MESSAGE_TYPES,
+    BILIBILI_MESSAGE_TYPES,
+    get_enabled_message_types,
+)
 from plugins.x_rss import (
     is_x_status_url,
     fetch_x_post,
     render_x_post,
 )
-from plugins.bilibili_parser import parse_video_url
+from plugins.bilibili_parser import parse_manual_post_url
 from plugins.bilibili import fetch_bilibili_manual_post, render_bilibili_post
 from plugins.json_io import (
     load_json,
@@ -53,12 +59,15 @@ from plugins.json_io import (
 )
 from plugins.paths import data_path
 from plugins.c2c_consumed import mark_consumed
+from plugins.qq_keyboard import send_titled_reply
 
 
 relay_command = on_message(
     priority=14,
     block=False
 )
+
+_PRIVATE_LINK_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 
 # =====================================================
@@ -285,26 +294,29 @@ async def log_group_add_openid(
 
 
 # =====================================================
-# 私聊 relay 命令（两步式：先指定目标，再发送下一条内容）
+# 私聊 relay 命令（引用直发）
 #
-#   relay list            列出可转发目标群（全部已注册且 enabled，私聊不做测试/正式隔离）
-#   relay {序号1} {序号2}  选择多个群，静默等待下一条普通消息转发
-#   relay all             选择全部可用群，静默等待下一条普通消息转发
-#   relay / relay abc / relay 999 → 无法找到对应的转发群
+#   /转发 列表 / /私聊转发   列出全部已注册且 enabled 的群（纯文本，无按钮）
+#   /转发 1 3               把引用消息转发到指定群（可多个）
+#   /转发 全部              转发到全部可用群
 #
-# 下一条普通消息才执行转发；成功/失败回复结果；超时（qq_fwd_select_timeout）
-# 只清 pending 不回复。交互状态绑定 user_openid，避免多人串台。
-# 私聊专属：下一条消息若是 Discord / X / Bilibili 链接，分别走对应平台的
-# 单条消息抓取与渲染机制；relay 命令入口统一使用已授权 QQ 用户白名单。
+# 优先使用 QQ 自带「回复」引用的消息；未引用时回退到最近一条普通私聊
+# （600 秒内）。私聊专属：链接仍分别走 Discord / X / Bilibili 的
+# 单条消息抓取与渲染机制；命令入口统一使用已授权 QQ 用户白名单。
 #
-# 与 manage.py（priority=20）的关系：本 matcher priority=14 先执行；凡是被本段
-# 消费的消息（relay 指令、待转发的下一条内容）都 stop_propagation，避免 manage
-# 再把同一消息当私聊命令回复「未知命令」造成双回复。
+# 与 manage.py（priority=20）的关系：本 matcher priority=14 先执行；relay
+# 指令会 mark_consumed / stop_propagation，避免 manage.py 再把同一消息当
+# 私聊命令回复。授权用户的普通文字只写入最近内容缓存、不消费消息，仍由
+# manage.py 回复「未知命令」提示；含链接的内容同样缓存，但会消费事件，
+# 不再回复提示。未授权用户不记录内容，由 manage.py 回复准入提示。
 # =====================================================
 
-# 私聊两步式 pending：user_openid -> {"created_ts": float, "targets": "all" | [openid,...]}
-_c2c_pending = {}
 _c2c_locks = WeakValueDictionary()
+
+# 最近一条可转发内容：user_openid -> {"ts", "event", "message", "qq_message"}
+_c2c_last_content = {}
+
+CONTENT_MEMORY_SECONDS = 600
 
 
 def _get_c2c_lock(user_openid):
@@ -334,46 +346,39 @@ def _c2c_enabled_groups():
     ]
 
 
-def _c2c_menu_text():
-    groups = _c2c_enabled_groups()
-    lines = ["【Relay群列表】"]
-    if not groups:
-        lines.append("当前没有可用的QQ接收群（请在管理面板勾选）")
-    for i, g in enumerate(groups, start=1):
-        name = str(g.get("name") or g.get("remark") or "").strip() or g.get("openid")
-        lines.append(f"{i}. {name}")
-    return "\n".join(lines)
+def _c2c_group_label(group):
+    """群显示名：优先名称，其次备注，最后 openid。"""
+    return (
+        str(group.get("name") or group.get("remark") or "").strip()
+        or str(group.get("openid") or "")
+    )
 
 
-def set_c2c_pending(user_openid, targets):
-    _c2c_pending[user_openid] = {
-        "created_ts": time.monotonic(),
-        "targets": targets,
+def remember_c2c_content(user_openid, event, message, qq_message):
+    """记住最近一条可转发内容，供未引用消息时回退。"""
+    now = time.monotonic()
+    if len(_c2c_last_content) >= 256:
+        cutoff = now - CONTENT_MEMORY_SECONDS
+        for key, record in list(_c2c_last_content.items()):
+            if record.get("ts", 0) < cutoff:
+                _c2c_last_content.pop(key, None)
+    _c2c_last_content[user_openid] = {
+        "ts": now,
+        "event": event,
+        "message": message,
+        "qq_message": qq_message,
     }
 
 
-def get_c2c_pending(user_openid):
-    return _c2c_pending.get(user_openid)
-
-
-def clear_c2c_pending(user_openid):
-    _c2c_pending.pop(user_openid, None)
-
-
-def expire_c2c_pendings(now_ts=None, skip=None, timeout=None):
-    """清除所有已超时的私聊 pending（静默，不回复）；返回清除的用户列表。
-
-    skip：跳过不清除的用户（当前用户由 _consume_next 内联处理，
-    避免其过期 pending 被提前删掉后下一条消息落入 manage.py 被误回）。"""
+def get_c2c_content(user_openid, now_ts=None):
+    record = _c2c_last_content.get(user_openid)
+    if not record:
+        return None
     now = now_ts if now_ts is not None else time.monotonic()
-    timeout = get_qq_fwd_select_timeout() if timeout is None else timeout
-    expired = [
-        u for u, e in _c2c_pending.items()
-        if u != skip and now - e["created_ts"] > timeout
-    ]
-    for u in expired:
-        clear_c2c_pending(u)
-    return expired
+    if now - record["ts"] > CONTENT_MEMORY_SECONDS:
+        _c2c_last_content.pop(user_openid, None)
+        return None
+    return record
 
 
 def _parse_c2c_relay_indexes(argument, group_count):
@@ -419,143 +424,180 @@ async def handle(
 
     qq_message = event.get_message()
     message = event.get_plaintext()
-
-    if not message and not qq_message["emoji"]:
-        # 空文本（如纯图片）不打扰；纯表情需要交给 pending relay 处理
-        return
-
     user = event.author.user_openid
+
     async with _get_c2c_lock(user):
         stripped = message.strip()
 
-        # 懒清扫：清掉其他用户已超时的 pending（当前用户的过期由 _consume_next 内联处理）
-        selection_timeout = await asyncio.to_thread(get_qq_fwd_select_timeout)
-        expire_c2c_pendings(
-            time.monotonic(), skip=user, timeout=selection_timeout
-        )
-
-        # ---- relay 指令 ----
+        # ---- 私聊转发命令 ----
         if (
-            stripped == "relay"
-            or stripped.startswith("relay ")
+            stripped == "/转发"
+            or stripped.startswith("/转发 ")
+            or stripped.startswith("/私聊转发")
         ):
             mark_consumed(event)
             await _handle_relay_cmd(bot, event, stripped, user)
             return
 
-        # ---- 下一条消息消费（有 pending 时）----
-        entry = get_c2c_pending(user)
-        if entry is not None:
-            mark_consumed(event)
-            await _consume_next(
-                bot,
-                event,
-                message,
-                entry,
-                user,
-                qq_message,
-                selection_timeout=selection_timeout,
-            )
+        # 普通斜杠命令交给各自处理器，不作为转发内容。
+        if stripped.startswith("/"):
             return
 
-    # 无 pending、非 relay：交给 manage.py 正常处理
+        if (
+            not message
+            and not qq_message["emoji"]
+            and not (getattr(event, "attachments", None) or [])
+        ):
+            return
+
+        # 未授权用户不记录内容，保留 manage.py 的准入提示。
+        if not await asyncio.to_thread(is_user_authorized, user):
+            return
+
+        remember_c2c_content(user, event, message, qq_message)
+
+        # 链接通常就是待转发内容；缓存后不再让 manage.py 回复「未知命令」。
+        # 普通文字保持原有提示，未授权用户仍在上面提前返回。
+        if _PRIVATE_LINK_RE.search(message):
+            mark_consumed(event)
+
+
+async def _send_c2c_list(bot, event):
+    """发送纯文本目标群名单与转发方法。"""
+    groups = await asyncio.to_thread(_c2c_enabled_groups)
+    targets = [
+        {"openid": str(group.get("openid")), "name": _c2c_group_label(group)}
+        for group in groups
+    ]
+    await send_titled_reply(
+        bot,
+        event,
+        "转发群列表",
+        qq_fwd.build_relay_list(targets, allow_all=True),
+    )
 
 
 async def _handle_relay_cmd(bot, event, stripped, user):
 
-    # 白名单校验：私聊 relay 仅允许管理面板中勾选放行的用户使用
+    # 白名单校验：私聊转发仅允许管理面板中勾选放行的用户使用
     active_users = await asyncio.to_thread(get_active_user_openids)
     if user not in active_users:
 
         logger.info(
-            "拒绝未授权用户relay: {}",
+            "拒绝未授权用户转发: {}",
             user
         )
 
-        await bot.send(
+        await send_titled_reply(
+            bot,
             event,
-            "未授权使用relay命令（请在管理面板勾选放行）"
+            "准入提示",
+            USER_NOT_AUTHORIZED_TEXT,
         )
 
         _stop_propagation()
         return
 
-    # relay list：列出可转发目标群
-    if stripped == "relay list":
-
-        await bot.send(
-            event,
-            await asyncio.to_thread(_c2c_menu_text)
-        )
-
+    # /转发 列表、裸 /转发 与「私聊转发」入口显示同一份纯文本名单。
+    if (
+        stripped in ("/转发", "/转发 列表", "/私聊转发", "/转发 私聊")
+        or stripped.startswith("/转发 列表 ")
+        or stripped.startswith("/私聊转发 ")
+    ):
+        await _send_c2c_list(bot, event)
         _stop_propagation()
         return
 
-    arg = stripped[6:].strip() if stripped.startswith("relay ") else ""
+    arg = stripped[len("/转发"):].strip() if stripped.startswith("/转发 ") else ""
 
-    # 裸 relay / 非数字 / 越界 → 无法找到对应的转发群
-    if arg == "":
-
-        await bot.send(
-            event,
-            "无法找到对应的转发群"
-        )
-
-        _stop_propagation()
-        return
-
-    if arg == "all":
-
-        groups = await asyncio.to_thread(_c2c_enabled_groups)
-
-        if not groups:
-
-            await bot.send(
-                event,
-                "当前没有可用的QQ接收群（请在管理面板勾选）"
-            )
-
-            _stop_propagation()
-            return
-
-        set_c2c_pending(user, "all")
-        _stop_propagation()
-        return
-
-    # relay {序号1} {序号2} ...：一次选择多个目标群。
-    # 序号必须全部有效；重复序号去重，避免同一群重复发送。
     groups = await asyncio.to_thread(_c2c_enabled_groups)
-    indexes = _parse_c2c_relay_indexes(arg, len(groups))
-    if indexes is not None:
-        selected = []
-        selected_openids = set()
-
-        for idx in indexes:
-            openid = str(groups[idx - 1]["openid"])
-            if openid not in selected_openids:
-                selected.append(openid)
-                selected_openids.add(openid)
-
-        if not selected:
-            await bot.send(
-                event,
-                "无法找到对应的转发群"
-            )
-
-            _stop_propagation()
-            return
-
-        set_c2c_pending(user, selected)
+    if not groups:
+        await send_titled_reply(
+            bot,
+            event,
+            "转发结果",
+            "当前没有可用的QQ接收群（请在管理面板勾选）",
+        )
         _stop_propagation()
         return
 
-    # relay <其他内容>：不识别
-    await bot.send(
-        event,
-        "无法找到对应的转发群"
-    )
+    # /转发 全部：直接发往全部可用群。
+    if arg == "全部":
+        targets = [str(group.get("openid")) for group in groups]
+        await _forward_quoted_or_recent(bot, event, targets, user)
+        _stop_propagation()
+        return
 
+    # /转发 {序号1} {序号2} ...：按名单序号直接转发。
+    indexes = _parse_c2c_relay_indexes(arg, len(groups))
+    if indexes is None:
+        tokens = arg.split()
+        if tokens and all(token.isascii() and token.isdecimal() for token in tokens):
+            reply = "无法找到对应的转发群"
+        else:
+            reply = qq_fwd.USAGE_TEXT
+        await send_titled_reply(
+            bot,
+            event,
+            "转发结果",
+            reply,
+        )
+        _stop_propagation()
+        return
+
+    targets = []
+    seen = set()
+    for index in indexes:
+        openid = str(groups[index - 1].get("openid"))
+        if openid in seen:
+            continue
+        seen.add(openid)
+        targets.append(openid)
+
+    await _forward_quoted_or_recent(bot, event, targets, user)
     _stop_propagation()
+
+
+async def _forward_quoted_or_recent(bot, event, targets, user):
+    """优先转发引用消息，未引用时回退最近一条普通私聊内容。"""
+    quote = qq_fwd.extract_quoted_message(event)
+    error = qq_fwd.quoted_message_error(quote, bot)
+    if error:
+        await send_titled_reply(bot, event, "转发结果", error)
+        return
+
+    content_event = event
+    qq_message = None
+    if quote is not None:
+        message = {
+            "content": quote["content"],
+            "attachments": quote["attachments"],
+        }
+    else:
+        record = get_c2c_content(user)
+        if record is None:
+            await send_titled_reply(
+                bot, event, "转发结果", qq_fwd.NO_CONTENT_TEXT
+            )
+            return
+        message = qq_fwd.normalize_event_message(record["event"])
+        if not message["content"].strip() and not message["attachments"]:
+            await send_titled_reply(
+                bot, event, "转发结果", qq_fwd.NO_CONTENT_TEXT
+            )
+            return
+        content_event = record["event"]
+        qq_message = record.get("qq_message")
+
+    await _consume_next(
+        bot,
+        event,
+        message,
+        targets,
+        user,
+        qq_message=qq_message,
+        content_event=content_event,
+    )
 
 
 @dataclass
@@ -584,12 +626,14 @@ async def _prepare_discord_relay_content(message):
     msg["channel_name"] = all_channels.get(msg["channel_id"])
     relay_filter = await asyncio.to_thread(get_qq_c2c_relay_filter)
     translation_config = await asyncio.to_thread(
-        get_channel_translation_config, msg["channel_id"]
+        get_channel_translation_config, msg["channel_id"], manual=True
     )
     text_parts, media_items, has_content = await build_parts(
         msg,
         source_label="手动转发来自",
-        enabled_types=get_enabled_message_types(relay_filter),
+        enabled_types=get_enabled_message_types(
+            relay_filter, DISCORD_MESSAGE_TYPES
+        ),
         show_datetime=translation_config.get("show_datetime") is True,
     )
     if not has_content:
@@ -619,11 +663,12 @@ async def _prepare_x_relay_content(message):
     translation_config = await asyncio.to_thread(
         get_x_source_translation_config,
         x_match.group(1) if x_match else source_name,
+        manual=True,
     )
     rendered = await render_x_post(
         post,
         source_name,
-        enabled_types=get_enabled_message_types(x_filter),
+        enabled_types=get_enabled_message_types(x_filter, X_MESSAGE_TYPES),
         show_datetime=translation_config.get("show_datetime") is True,
     )
     if rendered is None:
@@ -649,8 +694,9 @@ async def _prepare_bilibili_relay_content(message):
     rendered = await render_bilibili_post(
         post,
         source_name,
-        include_video=True,
-        enabled_types=get_enabled_message_types(bilibili_filter),
+        enabled_types=get_enabled_message_types(
+            bilibili_filter, BILIBILI_MESSAGE_TYPES
+        ),
     )
     if rendered is None:
         raise _ManualRelayContentError("消息被筛选，未转发")
@@ -660,80 +706,89 @@ async def _prepare_bilibili_relay_content(message):
     return _ManualRelayContent(text_parts, media_items, translation_key)
 
 
-async def _prepare_manual_relay_content(message, event, qq_message):
-    if is_discord_url(message):
-        return await _prepare_discord_relay_content(message)
-    if is_x_status_url(message):
-        return await _prepare_x_relay_content(message)
-    if parse_video_url(message):
-        return await _prepare_bilibili_relay_content(message)
+async def _prepare_manual_relay_content(
+    message,
+    qq_message=None,
+    content_event=None,
+):
+    text = str((message or {}).get("content") or "").strip()
+    if is_discord_url(text):
+        return await _prepare_discord_relay_content(text)
+    if is_x_status_url(text):
+        return await _prepare_x_relay_content(text)
+    if parse_manual_post_url(text):
+        return await _prepare_bilibili_relay_content(text)
+
+    text_parts, media_items = await qq_fwd.build_forward_content(message or {})
 
     if qq_message is not None and qq_message["emoji"]:
-        # QQ 表情不在 get_plaintext() 中；只保留原有文本和表情段。
-        text_parts = [
+        # QQ 表情不在 get_plaintext() 中；优先保留原有文本和表情段。
+        emoji_parts = [
             segment.copy()
             for segment in qq_message
             if segment.type in ("text", "emoji")
         ]
-    else:
-        text_parts = [make_text(message)]
-    event_id = str(getattr(event, "id", "") or "")
+        if emoji_parts:
+            text_parts = emoji_parts
+
+    event_id = str(getattr(content_event, "id", "") or "")
     translation_key = ("qq_c2c", event_id) if event_id else None
-    return _ManualRelayContent(text_parts, [], translation_key)
+    return _ManualRelayContent(text_parts, media_items, translation_key)
 
 
 async def _consume_next(
     bot,
     event,
     message,
-    entry,
+    targets,
     user,
     qq_message=None,
-    selection_timeout=None,
+    content_event=None,
 ):
 
-    # 超时：只清 pending，不回复、不转发
-    timeout = selection_timeout
-    if timeout is None:
-        timeout = await asyncio.to_thread(get_qq_fwd_select_timeout)
-    if time.monotonic() - entry["created_ts"] > timeout:
-
-        clear_c2c_pending(user)
+    # 准入复查：授权状态可能在引用内容后被撤销，未获准不再转发。
+    if not await asyncio.to_thread(is_user_authorized, user):
+        await send_titled_reply(
+            bot,
+            event,
+            "准入提示",
+            USER_NOT_AUTHORIZED_TEXT,
+        )
         _stop_propagation()
         return
 
-    clear_c2c_pending(user)
-
-    # 目标群
-    if entry["targets"] == "all":
-        groups = await asyncio.to_thread(get_active_groups)
-    else:
-        groups = entry["targets"]
-
+    groups = [str(group) for group in targets or [] if group]
     if not groups:
 
-        await bot.send(
+        await send_titled_reply(
+            bot,
             event,
-            "转发失败"
+            "转发结果",
+            "无法找到对应的转发群",
         )
 
         _stop_propagation()
         return
 
     try:
-        content = await _prepare_manual_relay_content(message, event, qq_message)
+        content = await _prepare_manual_relay_content(
+            message,
+            qq_message=qq_message,
+            content_event=content_event,
+        )
     except _ManualRelayContentError as exc:
-        await bot.send(event, str(exc))
+        await send_titled_reply(bot, event, "转发结果", str(exc))
         _stop_propagation()
         return
 
+    text = str((message or {}).get("content") or "").strip()
     text_parts = await translate_text_parts(
         content.text_parts,
         content.translation_key,
         skip_leading_parts=1 if (
-            is_discord_url(message)
-            or is_x_status_url(message)
-            or parse_video_url(message)
+            is_discord_url(text)
+            or is_x_status_url(text)
+            or parse_manual_post_url(text)
         ) else 0,
         config=content.translation_config,
     )
@@ -744,33 +799,15 @@ async def _consume_next(
         groups=groups,
     )
 
-    if not ok_map:
-
-        await bot.send(
-            event,
-            "转发失败"
-        )
-
-    elif all(ok_map.values()):
-
-        await bot.send(
-            event,
-            "转发成功"
-        )
-
+    if ok_map and all(ok_map.values()):
+        result = "转发成功"
     else:
+        result = "转发失败"
 
-        await bot.send(
-            event,
-            "转发失败"
-        )
-
+    await send_titled_reply(
+        bot,
+        event,
+        "转发结果",
+        result,
+    )
     _stop_propagation()
-
-
-# =====================================================
-# 私聊 pending 超时采用懒清扫（见 handle() 顶部的 expire_c2c_pendings）：
-# 每次收到 C2C 消息时顺带清除其他用户已超时的 pending；当前用户的过期
-# 由 _consume_next 内联判定（只清 pending，不回复）。不启用后台循环，
-# 避免模块级 get_driver 依赖（管理面板/测试直接导入本模块时 nonebot 未初始化）。
-# =====================================================

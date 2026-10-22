@@ -35,12 +35,12 @@ class FakeC2CEvent:
         self.author = SimpleNamespace(id="command-openid", user_openid="command-openid")
 
     def get_plaintext(self):
-        return "restart"
+        return "/重启"
 
 
 class FakeListEvent(FakeC2CEvent):
     def get_plaintext(self):
-        return "list"
+        return "/菜单"
 
 
 async def assert_io_does_not_block(target, invoke, result=None):
@@ -158,7 +158,19 @@ async def main():
             invoke_manage_list,
             result={"command-openid"},
         )
-    assert authorized_bot.messages == [("command-openid", "管理命令清单")]
+    # list 现在发送 markdown + 按钮消息（正文来自 _help_markdown），
+    # 不再是 _dispatch 返回的纯文本清单。
+    assert len(authorized_bot.messages) == 1, authorized_bot.messages
+    openid, reply = authorized_bot.messages[0]
+    assert openid == "command-openid"
+    if isinstance(reply, str):
+        assert "管理命令" in reply or "命令" in reply, reply
+    else:
+        text = "".join(
+            str(getattr((getattr(seg, "data", {}) or {}).get("markdown"), "content", "") or "")
+            for seg in reply
+        )
+        assert "命令" in text, text
 
     with tempfile.TemporaryDirectory() as directory:
         marker = Path(directory) / "restart_pending.json"

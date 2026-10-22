@@ -31,7 +31,7 @@
     moves.push({node, slot});
     parent.append(node);
   }
-  const toggles = ["btnBackfillToggle", "btnTranslationToggle", "btnXTranslationToggle", "btnScheduledMessageToggle"].map(byId);
+  const toggles = ["btnBackfillToggle", "btnScheduledMessageToggle"].map(byId);
   function decorateToggle(button) {
     if (!enabled) return;
     button.setAttribute("role", "switch");
@@ -88,15 +88,16 @@
       group(status, "desktop-statistics-group", [...status.querySelectorAll(".robot-stat")]);
       const config = pages[active];
       if (active === "discord") {
-        const card = byId("backfillCard");
-        const lowerCards = byId("pageDiscord").querySelector(".relay-translation-row");
-        if (lowerCards) move(card, lowerCards);
-        group(card, "desktop-backfill-parameters", [card.querySelector("h2"), byId("btnBackfillToggle"), card.querySelector(".bf-limit-row"), card.querySelector(".bf-pending-row")]);
-        group(card, "desktop-backfill-actions", [byId("btnBackfillRun"), byId("btnBackfillRefresh"), byId("btnBackfillClear")]);
+        // 离线补发与其它功能页的小卡片共用两列网格。
+        const lowerCards = group(byId("pageDiscord"), "relay-translation-row func-cards", []);
+        move(byId("backfillCard"), lowerCards);
       }
       if (active === "qq") {
-        const lowerCards = group(byId("pageQQ"), "relay-translation-row qq-other-cards", []);
+        // 转发组下方的所有小卡片共用同一个两列网格：同宽同高，从左至右、从上至下排列。
+        const lowerCards = group(byId("pageQQ"), "relay-translation-row func-cards", []);
         move(byId("scheduledMessageCard"), lowerCards);
+        move(byId("unifiedRelayCard"), lowerCards);
+        move(byId("autoTranslationCard"), lowerCards);
       }
       // Align the primary and external actions in the two table footers.
       byId(config.workspace).querySelectorAll(".addrow").forEach(bar => {

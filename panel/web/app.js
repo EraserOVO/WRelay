@@ -505,8 +505,9 @@ async function refreshMaintenance() {
     const last = st.last_backup_ts ? new Date(st.last_backup_ts * 1000).toLocaleString() : "尚未成功备份";
     document.getElementById("maintenanceStatus").textContent = alerts.length ? "有 " + alerts.length + " 项维护提醒，请查看" : (st.enabled ? "自动备份已开启 · 最近备份 " + last : "自动备份已关闭");
     const toggle = document.getElementById("btnAutoBackupToggle");
-    toggle.textContent = st.enabled ? "已开启" : "已关闭";
+    toggle.querySelector(".pill-switch-label").textContent = st.enabled ? "已开启" : "已关闭";
     toggle.setAttribute("aria-pressed", String(st.enabled));
+    toggle.setAttribute("aria-checked", String(st.enabled));
     document.getElementById("maintenanceDetail").textContent = alerts.length ? alerts.map(function (a) { return a.message; }).join("\n") : "维护检查正常。最近备份：" + last;
     const banner = document.getElementById("maintenanceBanner");
     banner.style.display = alerts.length ? "block" : "none";
@@ -601,7 +602,11 @@ function renderLogAutoScrollToggle() {
   if (!button) return;
   button.dataset.on = logAutoScroll ? "1" : "0";
   button.setAttribute("aria-pressed", logAutoScroll ? "true" : "false");
-  button.textContent = "自动滚动：" + (logAutoScroll ? "开" : "关");
+  button.setAttribute("aria-checked", logAutoScroll ? "true" : "false");
+  // 只改标签文字，保留胶囊轨道（轨道由 ui-components 的装饰逻辑维持）。
+  const label = button.querySelector(".pill-switch-label");
+  if (label) label.textContent = "自动滚动：" + (logAutoScroll ? "开" : "关");
+  else button.textContent = "自动滚动：" + (logAutoScroll ? "开" : "关");
   button.title = logAutoScroll ? "仅在日志底部时跟随最新内容" : "已暂停自动滚动";
 }
 renderLogAutoScrollToggle();
@@ -772,15 +777,13 @@ function renderAutostart(btn, on) {
   btn.disabled = false;
 }
 
-// 离线补发开关按钮：与开机自启同款（√/× SVG + 文字），data-on 记录状态供点击切换
+// 离线补发开关按钮：胶囊式（文字在左、轨道在右），data-on 记录状态供点击切换
 function renderBackfillToggle(on) {
   const btn = document.getElementById("btnBackfillToggle");
   if (!btn) return;
   btn.dataset.on = on ? "1" : "0";
-  var icon = on
-    ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
-    : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
-  btn.innerHTML = icon + "<span>启用补发</span>";
+  btn.setAttribute("aria-checked", on ? "true" : "false");
+  btn.innerHTML = pillSwitchMarkup("启用补发", on);
 }
 
 function renderFailureNotificationToggle(on) {
@@ -801,17 +804,26 @@ function renderStatusSheenToggle(on) {
   btn.setAttribute("aria-label", "界面动画：" + (on ? "已开启" : "已关闭"));
 }
 
+// 定时消息的目标模式：指定群 / QQ→QQ 转发组 / 全部已启用群。
+const SCHEDULED_TARGET_MODES = ["groups", "forward_group", "all"];
+const SCHEDULED_TARGET_LABELS = { groups: "指定群", forward_group: "转发组", all: "全部群" };
+
 let scheduledMessageDraft = null;
 let scheduledMessageId = 0;
+// 折叠状态只影响当前编辑会话（按消息 id 记录），不写入 settings。
+const scheduledCollapsed = new Set();
+
+function pillSwitchMarkup(label, on) {
+  // 胶囊开关统一外观：文字在左、轨道在右，与「启用补发」一致（✓/× 图标不再出现在按钮里）。
+  return '<span class="pill-switch-label">' + label + '</span><span class="settings-switch-track" aria-hidden="true"></span>';
+}
 
 function renderScheduledMessageToggle(on) {
   const btn = document.getElementById("btnScheduledMessageToggle");
   if (!btn) return;
   btn.dataset.on = on ? "1" : "0";
-  const icon = on
-    ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
-    : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
-  btn.innerHTML = icon + "<span>启用定时发送</span>";
+  btn.setAttribute("aria-checked", on ? "true" : "false");
+  btn.innerHTML = pillSwitchMarkup("启用定时发送", on);
 }
 
 function scheduledLocalDateTimeValue() {
@@ -827,6 +839,10 @@ function newScheduledMessage() {
     content: "",
     image_data: "",
     image_name: "",
+    // 目标：未显式设置时沿用顶部「默认目标」（target_groups 为空 + groups 模式）。
+    target_mode: "groups",
+    target_groups: [],
+    forward_groups: [],
     schedule_type: "interval",
     interval_days: 1,
     interval_hours: 0,
@@ -848,6 +864,12 @@ function normalizeScheduledMessages(config) {
       const message = Object.assign(newScheduledMessage(), raw || {});
       message.id = String(message.id || "message-" + (index + 1));
       message.content = String(message.content || "");
+      message.target_mode = SCHEDULED_TARGET_MODES.includes(message.target_mode)
+        ? message.target_mode : "groups";
+      message.target_groups = Array.isArray(message.target_groups)
+        ? message.target_groups.map(String).filter(Boolean) : [];
+      message.forward_groups = Array.isArray(message.forward_groups)
+        ? message.forward_groups.map(String).filter(Boolean) : [];
       message.schedule_type = message.schedule_type === "calendar" ? "calendar" : "interval";
       message.interval_days = Math.max(0, Math.min(3650, Number(message.interval_days) || 0));
       message.interval_hours = Math.max(0, Math.min(23, Number(message.interval_hours) || 0));
@@ -891,9 +913,14 @@ function normalizeScheduledMessages(config) {
 
 function scheduledOptionMarkup(message, index) {
   const weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
-  return '<div class="scheduled-message-entry" data-index="' + index + '">' +
-    '<div class="scheduled-message-entry-header"><strong>消息 ' + (index + 1) + '</strong>' +
-    '<button type="button" class="rowicon sec scheduled-message-remove" title="删除消息" aria-label="删除消息">' + SVG_ORIGINAL_OFF + '</button></div>' +
+  const collapsed = scheduledCollapsed.has(String((message && message.id) || "")) || scheduledCollapsed.has("index:" + index);
+  return '<div class="scheduled-message-entry' + (collapsed ? ' is-collapsed' : '') + '" data-index="' + index + '">' +
+    // 卡片头：序号在左，折叠按钮复用转发组的 .foldbtn，固定在右上角。
+    '<div class="scheduled-message-entry-header">' +
+    '<strong>消息 ' + (index + 1) + '</strong>' +
+    '<button type="button" class="foldbtn scheduled-message-fold' + (collapsed ? ' folded' : '') + '" title="折叠/展开" aria-label="折叠/展开" aria-expanded="' + (collapsed ? "false" : "true") + '">' +
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button></div>' +
+    '<div class="scheduled-message-entry-body">' +
     '<label class="scheduled-message-entry-label">消息正文' +
     '<textarea class="scheduled-message-entry-content" data-field="content" maxlength="20000" placeholder="输入消息正文"></textarea></label>' +
     '<div class="scheduled-message-image-row">' +
@@ -902,8 +929,14 @@ function scheduledOptionMarkup(message, index) {
     '<button type="button" class="sec scheduled-message-image-remove">移除图片</button>' +
     '<span class="scheduled-message-image-name"></span>' +
     '</div>' +
-    '<div class="scheduled-message-image-hint">可附加一张 PNG、JPEG、GIF 或 WebP 图片；单张不超过 2 MiB，所有定时消息图片合计不超过 3 MiB。正文可留空以仅发送图片。</div>' +
-    '<div class="scheduled-message-entry-row">' +
+    '<div class="scheduled-message-entry-row scheduled-message-target-row">' +
+    '<label>发送目标<select class="scheduled-message-entry-select" data-field="target_mode">' +
+    '<option value="groups">指定群</option><option value="forward_group">转发组</option><option value="all">全部群</option></select></label>' +
+    '<span class="scheduled-message-target-summary"></span>' +
+    '<button type="button" class="sec scheduled-message-target-manage">管理</button>' +
+    '</div>' +
+    '<div class="scheduled-message-timing-row">' +
+    '<div class="scheduled-message-timing-mode">' +
     '<label>发送方式<select class="scheduled-message-entry-select" data-field="schedule_type">' +
     '<option value="interval">按间隔发送</option><option value="calendar">按日历发送</option></select></label>' +
     '</div>' +
@@ -929,6 +962,13 @@ function scheduledOptionMarkup(message, index) {
       return '<option value="' + (month + 1) + '">' + (month + 1) + ' 月</option>';
     }).join("") + '</select></label>' +
     '<label><input type="number" data-field="day" min="1" max="31" step="1"> 号</label></div>' +
+    '</div>' +
+    '</div>' +
+    '<div class="scheduled-message-image-hint">可附加一张 PNG、JPEG、GIF 或 WebP 图片；单张不超过 2 MiB，所有定时消息图片合计不超过 3 MiB。正文可留空以仅发送图片。</div>' +
+    // 卡片动作栏：删除按钮在右下角，复用转发组表格的 .danger.rowicon 样式。
+    '<div class="scheduled-message-entry-actions">' +
+    '<button type="button" class="danger rowicon scheduled-message-remove" title="删除消息" aria-label="删除消息">' + SVG_TRASH + '</button>' +
+    '</div>' +
     '</div></div>';
 }
 
@@ -943,6 +983,49 @@ function updateScheduledMessageEntryVisibility(entry) {
   entry.querySelectorAll(".scheduled-message-calendar-panel").forEach(function (panel) {
     panel.style.display = isCalendar && calendarType && panel.dataset.calendarType === calendarType.value ? "flex" : "none";
   });
+}
+
+function scheduledTargetSummary(message) {
+  const mode = message.target_mode || "groups";
+  const qqGroups = (settings && Array.isArray(settings.qq_group_openids)) ? settings.qq_group_openids : [];
+  const qqByOpenid = {};
+  qqGroups.forEach(function (group) { qqByOpenid[String(group.openid || "")] = group; });
+  const groupName = function (id) {
+    const group = qqByOpenid[String(id)];
+    if (!group) return String(id);
+    return group.name || group.remark || identityName("groups", String(id)) || String(id);
+  };
+  if (mode === "all") {
+    return "全部已启用群（" + qqGroups.filter(function (group) { return group.enabled === true; }).length + " 个）";
+  }
+  if (mode === "forward_group") {
+    const forwardGroups = (settings && Array.isArray(settings.qq_forwarding_groups)) ? settings.qq_forwarding_groups : [];
+    const byId = {};
+    forwardGroups.forEach(function (group) { byId[String(group.id || "")] = group; });
+    const picked = (message.forward_groups || []).map(function (id) {
+      const group = byId[String(id)];
+      if (!group) return String(id);
+      const name = String(group.name || group.id || "");
+      return name + (group.enabled === false ? "（已暂停）" : "");
+    });
+    return picked.length ? "转发组：" + picked.join("、") : "未选择转发组（点击管理选择）";
+  }
+  if (!(message.target_groups || []).length) {
+    const defaults = ((settings && settings.scheduled_message && settings.scheduled_message.target_groups) || []).length;
+    return defaults ? "默认目标 " + defaults + " 个群" : "未选择群（点击管理选择）";
+  }
+  return (message.target_groups || []).map(groupName).join("、");
+}
+
+function updateScheduledMessageTargetVisibility(entry, message) {
+  const modeField = entry.querySelector('[data-field="target_mode"]');
+  const mode = modeField ? modeField.value : (message && message.target_mode) || "groups";
+  const manage = entry.querySelector(".scheduled-message-target-manage");
+  const summary = entry.querySelector(".scheduled-message-target-summary");
+  if (manage) manage.style.display = mode === "all" ? "none" : "";
+  if (summary) {
+    summary.textContent = scheduledTargetSummary(Object.assign({}, message || {}, { target_mode: mode }));
+  }
 }
 
 function renderScheduledMessageEditor() {
@@ -961,6 +1044,8 @@ function renderScheduledMessageEditor() {
     const imagePick = entry.querySelector(".scheduled-message-image-pick");
     if (imagePick) imagePick.textContent = message.image_data ? "更换图片" : "选择图片";
     entry.querySelector('[data-field="schedule_type"]').value = message.schedule_type;
+    const targetMode = entry.querySelector('[data-field="target_mode"]');
+    if (targetMode) targetMode.value = message.target_mode || "groups";
     ["anchor_at", "interval_days", "interval_hours", "interval_minutes", "day_of_month", "month", "day", "send_time", "calendar_type"].forEach(function (key) {
       const field = entry.querySelector('[data-field="' + key + '"]');
       if (field && message[key] !== undefined && message[key] !== null) field.value = message[key];
@@ -969,6 +1054,7 @@ function renderScheduledMessageEditor() {
       field.checked = message.weekdays.includes(Number(field.value));
     });
     updateScheduledMessageEntryVisibility(entry);
+    updateScheduledMessageTargetVisibility(entry, message);
   });
 }
 
@@ -983,6 +1069,10 @@ function readScheduledMessageEditor() {
       content: get("content").value,
       image_data: (scheduledMessageDraft[index] && scheduledMessageDraft[index].image_data) || "",
       image_name: (scheduledMessageDraft[index] && scheduledMessageDraft[index].image_name) || "",
+      // 目标来自草稿（由「管理」弹窗写入），不是 DOM 输入。
+      target_mode: (scheduledMessageDraft[index] && scheduledMessageDraft[index].target_mode) || (get("target_mode") ? get("target_mode").value : "groups"),
+      target_groups: ((scheduledMessageDraft[index] && scheduledMessageDraft[index].target_groups) || []).slice(),
+      forward_groups: ((scheduledMessageDraft[index] && scheduledMessageDraft[index].forward_groups) || []).slice(),
       schedule_type: type,
       interval_days: Number(get("interval_days").value) || 0,
       interval_hours: Number(get("interval_hours").value) || 0,
@@ -997,6 +1087,83 @@ function readScheduledMessageEditor() {
     };
     return message;
   });
+}
+
+// 单条定时消息的目标选择：指定群（多个 QQ 群）或转发组（QQ→QQ 转发组）。
+function openScheduledTargetPicker(index) {
+  const message = scheduledMessageDraft && scheduledMessageDraft[index];
+  if (!message) return;
+  const mode = message.target_mode || "groups";
+  if (mode === "all") {
+    showAlert("发送目标", "「全部群」会发送到所有已启用的 QQ 群，无需选择。");
+    return;
+  }
+  if (mode === "forward_group") {
+    const forwardGroups = (settings && Array.isArray(settings.qq_forwarding_groups))
+      ? settings.qq_forwarding_groups : [];
+    if (!forwardGroups.length) {
+      showAlert("发送目标", "当前没有 QQ→QQ 转发组，请先在「QQ → QQ」页创建转发组");
+      return;
+    }
+    const selected = new Set((message.forward_groups || []).map(String));
+    showConfirmSelect(
+      "消息 " + (index + 1) + "：选择转发组",
+      forwardGroups,
+      function (group) {
+        const id = String(group.id || "");
+        const members = Array.isArray(group.groups) ? group.groups.length : 0;
+        const state = group.enabled === false ? "（已暂停）" : "";
+        return (group.name || id) + state + " · " + members + " 个群";
+      },
+      function (picked) {
+        message.forward_groups = picked.map(function (group) { return String(group.id); });
+        renderScheduledMessageEditor();
+      },
+      {
+        defaultChecked: function (group) { return selected.has(String(group.id || "")); },
+        okText: "保存选择",
+      }
+    );
+    return;
+  }
+  const groups = (settings && Array.isArray(settings.qq_group_openids))
+    ? settings.qq_group_openids.filter(function (group) { return group && group.openid; })
+    : [];
+  if (!groups.length) {
+    showAlert("发送目标", "当前没有已审核的 QQ 群");
+    return;
+  }
+  const selected = new Set((message.target_groups || []).map(String));
+  showConfirmSelect(
+    "消息 " + (index + 1) + "：选择目标群",
+    groups,
+    function (group) {
+      const id = String(group.openid);
+      const name = group.name || group.remark || identityName("groups", id) || "";
+      const state = selected.has(id) ? "（已选）" : "（未选）";
+      const enabled = group.enabled === true ? "" : "（当前未启用）";
+      return (name + " " + id).trim() + state + enabled;
+    },
+    function (picked) {
+      message.target_groups = picked.map(function (group) { return String(group.openid); });
+      renderScheduledMessageEditor();
+    },
+    {
+      defaultChecked: function (group) { return selected.has(String(group.openid)); },
+      okText: "保存选择",
+    }
+  );
+}
+
+function setScheduledMessagesCollapsed(collapsed) {
+  scheduledMessageDraft = readScheduledMessageEditor();
+  scheduledCollapsed.clear();
+  if (collapsed) {
+    (scheduledMessageDraft || []).forEach(function (message, index) {
+      scheduledCollapsed.add(String(message.id || "index:" + index));
+    });
+  }
+  renderScheduledMessageEditor();
 }
 
 function openScheduledMessageEditor() {
@@ -1015,11 +1182,26 @@ async function confirmScheduledMessageEditor() {
     return;
   }
   const messages = readScheduledMessageEditor();
+  const defaultTargets = ((settings.scheduled_message && settings.scheduled_message.target_groups) || []).length;
   let totalImageBytes = 0;
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
     if (!message.content.trim() && !message.image_data) {
       showAlert("定时消息", "消息 " + (index + 1) + " 需要填写正文或附加图片");
+      return;
+    }
+    const missingTarget = message.target_mode === "forward_group"
+      ? !message.forward_groups.length
+      : message.target_mode === "groups"
+        ? (!message.target_groups.length && !defaultTargets)
+        : false;
+    if (missingTarget) {
+      showAlert(
+        "定时消息",
+        "消息 " + (index + 1) + " 还没有目标：请点「管理」选择"
+          + (message.target_mode === "forward_group" ? "转发组" : "目标群")
+          + "，或改用「全部群」"
+      );
       return;
     }
     totalImageBytes += scheduledImageDataSize(message.image_data);
@@ -1051,6 +1233,7 @@ async function confirmScheduledMessageEditor() {
   const saved = await saveAndReload();
   if (saved) {
     scheduledMessageDraft = null;
+    scheduledCollapsed.clear();
     document.getElementById("scheduledMessageContentModal").style.display = "none";
   }
 }
@@ -1084,11 +1267,45 @@ function initScheduledPickers() {
   document.getElementById("btnAddScheduledMessage").addEventListener("click", function () {
     if (scheduledImageReadPending) return;
     scheduledMessageDraft = readScheduledMessageEditor();
-    scheduledMessageDraft.push(newScheduledMessage());
+    const message = newScheduledMessage();
+    scheduledCollapsed.delete(String(message.id));
+    scheduledMessageDraft.push(message);
     renderScheduledMessageEditor();
   });
+  const foldAll = document.getElementById("btnScheduledFoldAll");
+  if (foldAll) foldAll.addEventListener("click", function () { setScheduledMessagesCollapsed(true); });
+  const unfoldAll = document.getElementById("btnScheduledUnfoldAll");
+  if (unfoldAll) unfoldAll.addEventListener("click", function () { setScheduledMessagesCollapsed(false); });
   document.getElementById("scheduledMessageEntries").addEventListener("click", function (event) {
     if (scheduledImageReadPending) return;
+    const fold = event.target.closest(".scheduled-message-fold");
+    if (fold) {
+      const entry = fold.closest(".scheduled-message-entry");
+      const index = entry ? Number(entry.dataset.index) : -1;
+      const message = scheduledMessageDraft && scheduledMessageDraft[index];
+      // 折叠前先落盘当前编辑，避免重绘丢内容。
+      scheduledMessageDraft = readScheduledMessageEditor();
+      const collapsed = entry.classList.toggle("is-collapsed");
+      // 与转发组折叠按钮一致：折叠态使用 .folded 旋转 chevron。
+      fold.classList.toggle("folded", collapsed);
+      fold.setAttribute("aria-expanded", String(!collapsed));
+      if (collapsed) {
+        scheduledCollapsed.add(message && message.id ? String(message.id) : "index:" + index);
+      } else {
+        if (message && message.id) scheduledCollapsed.delete(String(message.id));
+        scheduledCollapsed.delete("index:" + index);
+      }
+      return;
+    }
+    const manage = event.target.closest(".scheduled-message-target-manage");
+    if (manage) {
+      const entry = manage.closest(".scheduled-message-entry");
+      const index = entry ? Number(entry.dataset.index) : -1;
+      if (index < 0) return;
+      scheduledMessageDraft = readScheduledMessageEditor();
+      openScheduledTargetPicker(index);
+      return;
+    }
     const imagePick = event.target.closest(".scheduled-message-image-pick");
     if (imagePick) {
       const entry = imagePick.closest(".scheduled-message-entry");
@@ -1119,6 +1336,18 @@ function initScheduledPickers() {
       scheduledMessageDraft.splice(index, 1);
       renderScheduledMessageEditor();
     }, "删除");
+  });
+  document.getElementById("scheduledMessageEntries").addEventListener("change", function (event) {
+    if (event.target.dataset.field !== "target_mode") return;
+    const entry = event.target.closest(".scheduled-message-entry");
+    if (!entry) return;
+    scheduledMessageDraft = readScheduledMessageEditor();
+    const message = scheduledMessageDraft[Number(entry.dataset.index)];
+    if (message) {
+      message.target_mode = SCHEDULED_TARGET_MODES.includes(event.target.value)
+        ? event.target.value : "groups";
+      updateScheduledMessageTargetVisibility(entry, message);
+    }
   });
   document.getElementById("scheduledMessageEntries").addEventListener("change", async function (event) {
     const entry = event.target.closest(".scheduled-message-entry");
@@ -1196,24 +1425,6 @@ function renderScheduledMessage(config) {
     summary.innerHTML = messages.length
       ? "已配置 " + messages.length + " 条消息"
       : "<strong>暂无定时消息</strong><small>点击添加创建定时任务</small>";
-  }
-  const groupSummary = document.getElementById("scheduledMessageGroupSummary");
-  if (groupSummary) {
-    const selected = (value.target_groups || []).map(function (id) { return String(id); });
-    const groups = settings && Array.isArray(settings.qq_group_openids) ? settings.qq_group_openids : [];
-    const byId = {};
-    groups.forEach(function (group) { byId[String(group.openid || "")] = group; });
-    const rows = selected.map(function (id) { return byId[id]; }).filter(Boolean);
-    if (!rows.length) {
-      groupSummary.textContent = "当前未添加目标群";
-    } else {
-      groupSummary.innerHTML = rows.map(function (group) {
-        const id = String(group.openid || "");
-        const name = group.name || group.remark || identityName("groups", id) || id;
-        const suffix = group.enabled === true ? "" : "（未启用）";
-        return '<span class="scheduled-message-group-summary-item">' + escapeHtml(name + suffix) + '</span>';
-      }).join("、");
-    }
   }
   renderScheduledMessageToggle(value.enabled === true);
 }
@@ -1392,39 +1603,6 @@ function openFgAddPicker(ctx, kind) {
   );
 }
 
-function openScheduledGroupPicker() {
-  settings.scheduled_message = settings.scheduled_message || {};
-  const selected = new Set((settings.scheduled_message.target_groups || []).map(String));
-  const groups = (settings.qq_group_openids || []).filter(function (group) {
-    return group && group.openid;
-  });
-  if (!groups.length) {
-    showAlert("管理定时消息目标群", "当前没有已审核的 QQ 群");
-    return;
-  }
-  showConfirmSelect(
-    "管理定时消息目标群",
-    groups,
-    function (group) {
-      const id = String(group.openid);
-      const name = group.name || group.remark || identityName("groups", id) || "";
-      const state = selected.has(id) ? "（已添加）" : "（未添加）";
-      const enabled = group.enabled === true ? "" : "（当前未启用）";
-      return (name + " " + id).trim() + state + enabled;
-    },
-    async function (picked) {
-      settings.scheduled_message.target_groups = picked.map(function (group) {
-        return String(group.openid);
-      });
-      await saveAndReload();
-    },
-    {
-      defaultChecked: function (group) { return selected.has(String(group.openid)); },
-      okText: "保存选择",
-    }
-  );
-}
-
 // 白名单「＋ 新增」：从已注册用户中选择加入白名单（勾选 = 放行 enabled）
 function openUserAddPicker() {
   const candidates = (settings.qq_user_openids || []).filter(function (u) { return u.enabled !== true; });
@@ -1526,7 +1704,10 @@ async function scanReadableChannels(btn) {
     selected.forEach(function (ch) {
       const id = String(ch.id);
       if (known[id]) return;
-      settings.discord_channels.push({id: id, name: String(ch.name || "").replace(/^#/, ""), enabled: false});
+      settings.discord_channels.push({
+        id: id, name: String(ch.name || "").replace(/^#/, ""), enabled: false,
+        translation_enabled: false, translation_append_original: true, translation_show_datetime: false,
+      });
       known[id] = true;
       added++;
     });
@@ -1850,7 +2031,7 @@ function renderSettings() {
   const bfLimit = document.getElementById("backfillLimit");
   if (bfLimit) bfLimit.value = Number(settings.backfill_limit) > 0 ? settings.backfill_limit : 10;
   renderScheduledMessage(settings.scheduled_message);
-  renderRelayLinkCard();
+  renderUnifiedRelayFilter();
   // 表头全选框状态仅反映「当前转发组」实际显示的成员（而非全部全局实体），
   // 避免隐藏的非本组成员导致半选误判：全部→勾选，全不→取消，部分→半选，无成员→两者均 false
   syncHeaderAll("groupAllEnabled", grpRows, "enabled");
@@ -1868,9 +2049,16 @@ function renderAIControls() {
   document.getElementById("translationProvider").value = translation.provider || "tencent_tmt";
   document.getElementById("translationFallback").value = translation.fallback_provider || "";
   syncTranslationFallback("translationProvider", "translationFallback");
-  renderTranslationToggle((settings.discord_channels || []).length > 0 && (settings.discord_channels || []).every(function (channel) {
-    return channel.translation_enabled === true;
-  }));
+  const allEnabled = function (items) {
+    const list = items || [];
+    return list.length > 0 && list.every(function (item) {
+      return item.translation_enabled === true;
+    });
+  };
+  renderTranslationToggleFor("btnTranslationDiscord", allEnabled(settings.discord_channels), "Discord → QQ 翻译");
+  renderTranslationToggleFor("btnTranslationX", allEnabled(settings.x_rss_sources), "X → QQ 翻译");
+  renderTranslationToggleFor("btnTranslationBilibili", allEnabled(settings.bilibili_sources), "Bilibili → QQ 翻译");
+  renderTranslationToggleFor("btnTranslationManual", translation.enabled === true, "QQ → QQ 手动转发翻译");
 }
 
 function aiProfilesForDisplay() {
@@ -1904,42 +2092,18 @@ function syncLegacyAiConfig(profile) {
   });
 }
 
-function renderTranslationToggle(on) {
-  renderTranslationToggleFor("btnTranslationToggle", on);
-}
-
-function renderTranslationToggleFor(buttonId, on) {
+function renderTranslationToggleFor(buttonId, on, label) {
   const btn = document.getElementById(buttonId);
   if (!btn) return;
   btn.dataset.on = on ? "1" : "0";
-  const icon = on
-    ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
-    : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
-  btn.innerHTML = icon + "<span>启用翻译</span>";
+  btn.setAttribute("aria-checked", on ? "true" : "false");
+  btn.innerHTML = pillSwitchMarkup(label, on);
 }
 
 function saveAIControls() {
   settings.translation = settings.translation || {};
   settings.translation.provider = document.getElementById("translationProvider").value;
   settings.translation.fallback_provider = document.getElementById("translationFallback").value;
-  syncLegacyXTranslationConfig();
-}
-
-function renderXTranslationControls() {
-  if (!settings) return;
-  const translation = settings.translation || {};
-  document.getElementById("xTranslationProvider").value = translation.provider || "tencent_tmt";
-  document.getElementById("xTranslationFallback").value = translation.fallback_provider || "";
-  syncTranslationFallback("xTranslationProvider", "xTranslationFallback");
-  renderTranslationToggleFor("btnXTranslationToggle", (settings.x_rss_sources || []).length > 0 && (settings.x_rss_sources || []).every(function (source) {
-    return source.translation_enabled === true;
-  }));
-}
-
-function saveXTranslationControls() {
-  settings.translation = settings.translation || {};
-  settings.translation.provider = document.getElementById("xTranslationProvider").value;
-  settings.translation.fallback_provider = document.getElementById("xTranslationFallback").value;
   syncLegacyXTranslationConfig();
 }
 
@@ -2024,8 +2188,6 @@ function renderQQPage() {
 function renderXPage() {
   const srcBody = document.getElementById("xSourceBody");
   if (!srcBody || !settings) return;
-  renderXRelayLinkCard();
-  renderXTranslationControls();
   renderFgTabs(FG_X);
   const xfg = getActiveFg(FG_X);
 
@@ -2063,7 +2225,7 @@ function renderXPage() {
       '</td>' +
       '<td style="text-align:right"><div class="table-actions">' +
         '<button class="sec rowicon translation-toggle-icon' + (s.translation_enabled ? ' translation-active' : '') + '" title="设置此来源的翻译方式" aria-label="设置此来源的翻译方式" data-kind="xSourceTranslation" data-i="' + i + '">' + SVG_TRANSLATE + '</button>' +
-        '<button class="sec rowicon' + (channelFilterActive(s) ? ' filter-active' : '') + '" title="设置此来源的消息筛选规则" aria-label="设置此来源的消息筛选规则" data-kind="xSourceFilter" data-i="' + i + '">' + SVG_FUNNEL + '</button>' +
+        '<button class="sec rowicon' + (xSourceFilterActive(s) ? ' filter-active' : '') + '" title="设置此来源的消息筛选规则" aria-label="设置此来源的消息筛选规则" data-kind="xSourceFilter" data-i="' + i + '">' + SVG_FUNNEL + '</button>' +
         '<button class="danger rowicon" data-kind="xFgSourceRemove" data-id="' + escapeHtml(handle) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
     srcBody.appendChild(tr);
   });
@@ -2151,20 +2313,9 @@ function bilibiliKindText(source) {
   return source && source.kind === "up" ? "UP主" : source && source.kind === "tag" ? "标签" : "关键词";
 }
 
-function bilibiliSourceFilterActive(source) {
-  if (!source) return false;
-  if (source.forward_video === true) return true;
-  if (Array.isArray(source.filter_keywords) && source.filter_keywords.length) return true;
-  const postTypes = source.kind === "up" && Array.isArray(source.filter_bilibili_post_types)
-    ? source.filter_bilibili_post_types
-    : ["视频"];
-  return postTypes.length < FILTER_BILIBILI_POST_TYPES.length;
-}
-
 function renderBilibiliPage() {
   const sourceBody = document.getElementById("bilibiliSourceBody");
   if (!sourceBody || !settings) return;
-  renderBilibiliRelayLinkCard();
   renderFgTabs(FG_BILIBILI);
   const fg = getActiveFg(FG_BILIBILI);
   const allSources = Array.isArray(settings.bilibili_sources) ? settings.bilibili_sources : [];
@@ -2246,6 +2397,15 @@ function renderBilibiliPage() {
   if (overflowPolicy && document.activeElement !== overflowPolicy) {
     overflowPolicy.value = protection.overflow_policy === "oldest" ? "oldest" : "latest";
   }
+  renderBilibiliAutoResolveToggle(!!(settings.bilibili_auto_resolve && settings.bilibili_auto_resolve.enabled));
+}
+
+function renderBilibiliAutoResolveToggle(on) {
+  const btn = document.getElementById("btnBilibiliAutoResolveToggle");
+  if (!btn) return;
+  btn.dataset.on = on ? "1" : "0";
+  btn.setAttribute("aria-checked", on ? "true" : "false");
+  btn.innerHTML = pillSwitchMarkup("启用自动解析", on);
 }
 
 // ---------------- X RSS 状态卡片（真实运行状态，轻量轮询） ----------------
@@ -2663,7 +2823,10 @@ function openXSourceRegister() {
       return xSourceKey(s.source).toLowerCase() === handle.toLowerCase();
     });
     if (dup) { showAlert("注册新源", "该账号已在源列表中"); return; }
-    settings.x_rss_sources.push({source: handle, name: nameInput.value.trim(), enabled: true});
+    settings.x_rss_sources.push({
+      source: handle, name: nameInput.value.trim(), enabled: true,
+      translation_enabled: false, translation_append_original: true, translation_show_datetime: false,
+    });
     await saveAndReload();
   };
   document.getElementById("confirmModal").style.display = "flex";
@@ -2737,8 +2900,10 @@ function openBilibiliSourceRegister() {
       kind: type,
       value: value,
       enabled: true,
-      forward_video: false,
       filter_bilibili_post_types: ["视频"],
+      translation_enabled: false,
+      translation_append_original: true,
+      translation_show_datetime: false,
     });
     closeBilibiliSourceModal();
     await saveAndReload();
@@ -3468,16 +3633,43 @@ function renderRegistrationReview(data) {
     empty.textContent = "没有待审核的注册申请";
     body.appendChild(empty);
   }
+  let codeFilter = null;
+  let noMatch = null;
+  if (items.length) {
+    const filterHint = document.createElement("div");
+    filterHint.style.cssText = "font-size:12px;color:var(--muted);margin:0 0 6px;";
+    filterHint.textContent = "输入申请人提供的识别码，可快速定位待审核记录。";
+    body.appendChild(filterHint);
+    codeFilter = document.createElement("input");
+    codeFilter.type = "search";
+    codeFilter.setAttribute("aria-label", "按申请识别码筛选");
+    codeFilter.placeholder = "粘贴申请识别码";
+    codeFilter.style.cssText = "width:100%;box-sizing:border-box;margin:0 0 8px;";
+    body.appendChild(codeFilter);
+    noMatch = document.createElement("div");
+    noMatch.style.cssText = "display:none;color:var(--muted);padding:8px 0;";
+    noMatch.textContent = "没有匹配的申请识别码";
+    body.appendChild(noMatch);
+  }
+  const reviewRows = [];
   items.forEach(function (it) {
     const label = regReviewKind === "groups"
-      ? "群号 " + (it.qq_id || "?") + " · " + (it.group_name || "未命名")
-      : "QQ " + (it.qq_id || "?") + " · " + (it.nickname || "未命名");
+      ? (it.qq_id || it.group_name
+        ? "群号 " + (it.qq_id || "未提供") + " · " + (it.group_name || "未提供群名")
+        : "群注册申请（按当前群身份提交）")
+      : (it.qq_id || it.nickname
+        ? "QQ " + (it.qq_id || "未提供") + " · " + (it.nickname || "未提供昵称")
+        : "用户注册申请（按当前账号身份提交）");
     const row = document.createElement("div");
+    row.className = "registration-review-row";
+    row.dataset.applicationCode = String(it.application_code || "")
+      .replace(/[^a-z0-9]/gi, "").toUpperCase();
     row.style.cssText = "display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--panel-border);";
     const info = document.createElement("div");
     info.style.cssText = "flex:1;min-width:0;";
     info.innerHTML =
       '<div>' + escapeHtml(label) + '</div>' +
+      '<div style="font-size:12px;color:var(--name-green);">申请识别码：' + escapeHtml(it.application_code || "旧申请需重新提交") + '</div>' +
       '<div class="mono" style="font-size:11px;color:var(--muted);word-break:break-all;">' + escapeHtml(it.openid) + '</div>';
     row.appendChild(info);
     const ok = document.createElement("button");
@@ -3496,7 +3688,20 @@ function renderRegistrationReview(data) {
     row.appendChild(ok);
     row.appendChild(no);
     body.appendChild(row);
+    reviewRows.push(row);
   });
+  if (codeFilter) {
+    codeFilter.addEventListener("input", function () {
+      const query = codeFilter.value.replace(/[^a-z0-9]/gi, "").toUpperCase();
+      let visibleCount = 0;
+      reviewRows.forEach(function (row) {
+        const matches = !query || row.dataset.applicationCode.includes(query);
+        row.style.display = matches ? "flex" : "none";
+        if (matches) visibleCount += 1;
+      });
+      noMatch.style.display = visibleCount ? "none" : "block";
+    });
+  }
 }
 
 async function reviewRegistration(openid, action) {
@@ -3523,6 +3728,44 @@ async function reviewRegistration(openid, action) {
 const FILTER_MESSAGE_TYPES = ["文字", "图片", "语音", "文件", "链接", "表情"];
 const FILTER_X_POST_TYPES = ["原创", "转发", "引用"];
 const FILTER_BILIBILI_POST_TYPES = ["视频", "专栏", "动态"];
+
+// 各链路实际支持的消息类型（与 plugins/filter.py 的常量保持一致）。
+// Discord 六类齐备；X 为文字/图片/视频；Bilibili 为文字/图片/链接/视频。
+// 消息类型只渲染该链路支持的项：不支持的类型不出现，用户看不到也点不到。
+// 「视频」是 X/Bilibili 的规范类型名（早期与 Discord 共用「文件」，读取时自动迁移）。
+const FILTER_SUPPORTED_MESSAGE_TYPES = {
+  channel: FILTER_MESSAGE_TYPES,
+  relay: FILTER_MESSAGE_TYPES,
+  xsource: ["文字", "图片", "视频"],
+  bsource: ["文字", "图片", "链接", "视频"],
+  xrelay: ["文字", "图片", "视频"],
+  birelay: ["文字", "图片", "链接", "视频"],
+};
+
+// 旧配置里 X/Bilibili 的「文件」= 现在的「视频」，加载时迁移，避免打开弹窗
+// 显示出一个已选中的无效项。
+const FILTER_MESSAGE_TYPE_LEGACY = { "文件": "视频" };
+
+// 当前 scope 支持的消息类型；Bilibili 标签/关键词 source 的投稿集合只有视频，
+// 但消息组件筛选仍保持独立（文字/封面/链接/视频可以分别控制）。
+function supportedFilterTypes(scope, config) {
+  if (scope === "bsource" && String((config || {}).kind || "up") !== "up") {
+    return ["文字", "图片", "链接", "视频"];
+  }
+  return FILTER_SUPPORTED_MESSAGE_TYPES[scope] || FILTER_MESSAGE_TYPES;
+}
+
+function filterSupportedTypes() {
+  return supportedFilterTypes(filterEditScope, {
+    kind: filterBilibiliSourceKind,
+  });
+}
+
+// 把已保存的类型名迁移为规范名（仅对「文件」→「视频」这类历史值生效）。
+function migrateFilterMessageType(type) {
+  const mapped = FILTER_MESSAGE_TYPE_LEGACY[type];
+  return mapped && filterSupportedTypes().indexOf(mapped) >= 0 ? mapped : type;
+}
 
 let filterEditIndex = -1;
 let filterEditScope = "channel";
@@ -3595,14 +3838,18 @@ function addFilterItem(kind) {
   input.focus();
 }
 
-// 消息类型按钮：样式参照「开机自启」（√/× SVG + 文字，data-on 记录状态）
+// 消息类型按钮：只渲染当前链路实际支持的类型，不支持的类型直接不出现，
+// 避免出现点了没有效果的按钮。样式参照「开机自启」（√/× SVG + 文字，
+// data-on 记录选中态）。
 function renderFilterTypes() {
   const wrap = document.getElementById("filterTypeList");
   wrap.innerHTML = "";
-  FILTER_MESSAGE_TYPES.forEach(function (t) {
+  // 按该链路支持集渲染（顺序与 plugins/filter.py 的类型表一致）。
+  filterSupportedTypes().forEach(function (t) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "sec flt-type-btn";
+    // 类型名即显示文案（X/Bilibili 的规范名已是「视频」）。
     btn.dataset.type = t;
     btn.title = t;
     btn.addEventListener("click", function () {
@@ -3629,21 +3876,34 @@ function renderFilterXPostTypes() {
   const wrap = document.getElementById("filterXPostTypeList");
   if (!wrap) return;
   wrap.innerHTML = "";
+  // 与 Bilibili 投稿类型一致：不支持的类型置灰禁用，且至少保留一种。
+  const supported = filterXPostSupportedTypes();
   FILTER_X_POST_TYPES.forEach(function (t) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "sec flt-type-btn";
     btn.dataset.type = t;
-    btn.title = t;
+    btn.title = supported.indexOf(t) < 0 ? t + "（该来源不支持）" : t;
+    btn.disabled = supported.indexOf(t) < 0;
     btn.addEventListener("click", function () {
+      if (btn.disabled) return;
       const idx = filterXPostTypes.indexOf(t);
-      if (idx >= 0) filterXPostTypes.splice(idx, 1);
-      else filterXPostTypes.push(t);
+      if (idx >= 0) {
+        if (filterXPostTypes.length === 1) return;
+        filterXPostTypes.splice(idx, 1);
+      } else {
+        filterXPostTypes.push(t);
+      }
       renderFilterTypeBtnState(btn, filterXPostTypes);
     });
     wrap.appendChild(btn);
     renderFilterTypeBtnState(btn, filterXPostTypes);
   });
+}
+
+// X 来源支持的推文类型：三种都可筛（RSS 同时提供原创、转发与引用内容）。
+function filterXPostSupportedTypes() {
+  return FILTER_X_POST_TYPES;
 }
 
 function renderFilterTypeBtnState(btn, selected) {
@@ -3683,49 +3943,97 @@ function renderFilterBilibiliPostTypes() {
   });
 }
 
-// 筛选配置是否生效（漏斗图标高亮）：用户名/关键词任一非空，
-// 或 Discord 消息类型 / X 推文类型显式保存过且不是"全部启用"
-// （缺省/全选 = 未筛选）
-function filterConfigActive(c, includeAudience) {
+// 筛选配置是否生效（漏斗图标高亮）：用户名/关键词、消息类型，或 X 推文类型
+// 任一实际缩减默认支持集时高亮；缺省/全选 = 未筛选。
+function selectedFilterMessageTypes(config, scope) {
+  const supported = supportedFilterTypes(scope, config);
+  const values = config && config.filter_message_types;
+  if (!Array.isArray(values)) return supported.slice();
+  if (!values.length) return [];
+  const migrated = values.map(function (type) {
+    return supported.indexOf("视频") >= 0 && type === "文件" ? "视频" : type;
+  });
+  const selected = supported.filter(function (type) {
+    return migrated.indexOf(type) >= 0;
+  });
+  return selected.length ? selected : supported.slice();
+}
+
+function saveSourceMessageTypes(source, scope) {
+  const supported = supportedFilterTypes(scope, source);
+  const selected = filterMessageTypes.filter(function (type) {
+    return supported.indexOf(type) >= 0;
+  });
+  if (selected.length < supported.length) {
+    source.filter_message_types = selected;
+  } else {
+    delete source.filter_message_types;
+  }
+}
+
+function filterConfigActive(c, includeAudience, supported, scope) {
   c = c || {};
   if (includeAudience !== false) {
     if ((c.filter_usernames || []).length) return true;
     if ((c.filter_keywords || []).length) return true;
   }
-  const t = c.filter_message_types;
-  if (Array.isArray(t) && t.length < FILTER_MESSAGE_TYPES.length) return true;
+  const base = supported || FILTER_MESSAGE_TYPES;
+  if (Array.isArray(c.filter_message_types)) {
+    const actualTypes = supportedFilterTypes(scope, c);
+    const selected = selectedFilterMessageTypes(c, scope);
+    const explicit = c.filter_message_types.length === 0 || c.filter_message_types.some(function (type) { return String(type).trim(); });
+    // 只含不支持的旧值时后端按未筛选处理，不点亮漏斗；显式空列表是全关筛选，应点亮。
+    if (explicit && selected.length < actualTypes.length) return true;
+  }
   const x = c.filter_post_types;
   return Array.isArray(x) && x.length > 0 && x.length < FILTER_X_POST_TYPES.length;
 }
 
-function renderManualRelayCard(cardId, filterButtonId, filterKey) {
-  const btn = document.getElementById(filterButtonId);
+// 统一手动转发卡：漏斗高亮按各链路支持的类型集判定；三条链路任一有生效筛选即点亮。
+const MANUAL_RELAY_FILTER_SUPPORTED = {
+  qq_c2c_relay_filter: FILTER_SUPPORTED_MESSAGE_TYPES.relay,
+  x_c2c_relay_filter: FILTER_SUPPORTED_MESSAGE_TYPES.xrelay,
+  bilibili_c2c_relay_filter: FILTER_SUPPORTED_MESSAGE_TYPES.birelay,
+};
+
+const MANUAL_RELAY_FILTER_SCOPE = {
+  qq_c2c_relay_filter: "relay",
+  x_c2c_relay_filter: "xrelay",
+  bilibili_c2c_relay_filter: "birelay",
+};
+
+function renderUnifiedRelayFilter() {
+  const btn = document.getElementById("btnUnifiedRelayFilter");
   if (!btn) return;
+  const active = Object.keys(MANUAL_RELAY_FILTER_SUPPORTED).some(function (key) {
+    return filterConfigActive(
+      settings && settings[key],
+      false,
+      MANUAL_RELAY_FILTER_SUPPORTED[key],
+      MANUAL_RELAY_FILTER_SCOPE[key]
+    );
+  });
   btn.innerHTML = SVG_FUNNEL;
-  btn.classList.toggle("filter-active", filterConfigActive(settings && settings[filterKey], false));
-}
-
-function renderRelayLinkCard() {
-  renderManualRelayCard("relayLinkCard", "btnRelayFilter", "qq_c2c_relay_filter");
-}
-
-function renderXRelayLinkCard() {
-  renderManualRelayCard("xRelayLinkCard", "btnXRelayFilter", "x_c2c_relay_filter");
-}
-
-function renderBilibiliRelayLinkCard() {
-  renderManualRelayCard("bilibiliRelayLinkCard", "btnBilibiliRelayFilter", "bilibili_c2c_relay_filter");
+  btn.classList.toggle("filter-active", active);
 }
 
 let relayChannelsEditScope = "discord";
 
-function openRelayChannelsModal(scope) {
-  relayChannelsEditScope = scope === "x" || scope === "bilibili" ? scope : "discord";
+function renderRelayScopeTabs() {
+  const tabs = document.getElementById("relayScopeTabs");
+  if (!tabs) return;
+  tabs.querySelectorAll(".fscope-tab").forEach(function (tab) {
+    tab.classList.toggle("active", tab.dataset.rscope === relayChannelsEditScope);
+  });
+}
+
+function renderRelayChannelsList() {
   const list = document.getElementById("relayChannelsList");
   if (!list) return;
   list.innerHTML = "";
-  const isX = relayChannelsEditScope === "x";
-  const isBilibili = relayChannelsEditScope === "bilibili";
+  const scope = relayChannelsEditScope;
+  const isX = scope === "x";
+  const isBilibili = scope === "bilibili";
   const saveButton = document.getElementById("relayChannelsSave");
   const doneButton = document.querySelector("#relayChannelsModal .relay-channels-actions [data-close]");
   if (saveButton) saveButton.style.display = isBilibili ? "none" : "";
@@ -3813,19 +4121,51 @@ function openRelayChannelsModal(scope) {
       list.appendChild(row);
     });
   }
+  renderRelayScopeTabs();
+}
+
+function openUnifiedRelaySourcesModal() {
+  relayChannelsEditScope = "discord";
+  renderRelayChannelsList();
   document.getElementById("relayChannelsModal").style.display = "flex";
+}
+
+function switchRelayChannelsTab(scope) {
+  relayChannelsEditScope = scope === "x" || scope === "bilibili" ? scope : "discord";
+  renderRelayChannelsList();
 }
 
 function closeRelayChannelsModal() {
   document.getElementById("relayChannelsModal").style.display = "none";
 }
 
+function openTranslationChainsModal() {
+  renderAIControls();
+  document.getElementById("translationChainsModal").style.display = "flex";
+}
+
+function closeTranslationChainsModal() {
+  document.getElementById("translationChainsModal").style.display = "none";
+}
+
 function openQQWhitelistModal() {
-  document.getElementById("qqWhitelistModal").style.display = "flex";
+  // 兼容旧入口/外部调用：白名单已迁到「QQ → QQ」页转发组的工作区分栏，
+  // 不再使用独立弹窗，直接切到该页面。
+  openQQWhitelistPane();
+}
+
+function openQQWhitelistPane() {
+  setActivePage("qq");
+  const pane = document.getElementById("userContent");
+  const section = pane && pane.closest(".fgsection");
+  if (section && section.style.display === "none") section.style.display = "";
+  if (section) section.scrollIntoView({block: "nearest"});
 }
 
 function closeQQWhitelistModal() {
-  document.getElementById("qqWhitelistModal").style.display = "none";
+  // 白名单已内嵌在 QQ → QQ 页，无需关闭弹窗；保留函数供旧引用安全调用。
+  const modal = document.getElementById("qqWhitelistModal");
+  if (modal) modal.style.display = "none";
 }
 
 async function saveRelayChannels() {
@@ -3851,34 +4191,58 @@ async function saveRelayChannels() {
 function prepareFilterModal(config, label) {
   const c = config || {};
   document.getElementById("filterChanName").textContent = label;
+  // 受众筛选（用户名/关键词）只在 Discord 频道与 X/Bilibili 来源弹窗出现。
+  const showAudienceFields = ["channel", "xsource", "bsource"].includes(filterEditScope);
   const audienceFields = document.getElementById("filterAudienceFields");
-  if (audienceFields) audienceFields.style.display = ["channel", "xsource", "bsource"].includes(filterEditScope) ? "flex" : "none";
+  if (audienceFields) audienceFields.style.display = showAudienceFields ? "flex" : "none";
   const usernameField = document.getElementById("filterUsernameField");
   if (usernameField) usernameField.style.display = filterEditScope === "channel" ? "flex" : "none";
   const keywordField = document.getElementById("filterKeywordField");
-  if (keywordField) keywordField.style.display = ["channel", "xsource", "bsource"].includes(filterEditScope) ? "flex" : "none";
+  if (keywordField) keywordField.style.display = showAudienceFields ? "flex" : "none";
   const keywordTitle = document.getElementById("filterKeywordTitle");
   if (keywordTitle) keywordTitle.firstChild.textContent = filterEditScope === "xsource" ? "关键词/话题 " : "关键词筛选 ";
   const keywordInput = document.getElementById("filterKeywordInput");
   if (keywordInput) keywordInput.placeholder = filterEditScope === "xsource" ? "关键词或 #话题" : "关键词";
+  // 消息类型筛选对所有 scope 都可用：Discord 频道与手动转发用六类型集合，
+  // X 用文字/图片/视频，Bilibili 用文字/图片/链接/视频。
+  // 曾误写成只允许 channel/xsource/bsource，导致手动转发（relay/xrelay/birelay）
+  // 弹窗整块消息类型区域被隐藏，只剩标题和按钮。
   const messageTypeFields = document.getElementById("filterMessageTypeFields");
-  if (messageTypeFields) messageTypeFields.style.display = filterEditScope === "xsource" || filterEditScope === "bsource" ? "none" : "block";
+  if (messageTypeFields) {
+    messageTypeFields.style.display = "block";
+    // 没有受众筛选区时它就是内容区第一块，顶部间距交给 .modal-body 的 padding；
+    // 否则会再叠加 14px margin，标题与内容之间多出一段空白。
+    messageTypeFields.style.marginTop = showAudienceFields ? "14px" : "0";
+  }
   const xPostTypeFields = document.getElementById("filterXPostTypeFields");
   if (xPostTypeFields) xPostTypeFields.style.display = filterEditScope === "xsource" ? "block" : "none";
   const bilibiliPostTypeFields = document.getElementById("filterBilibiliPostTypeFields");
   if (bilibiliPostTypeFields) bilibiliPostTypeFields.style.display = filterEditScope === "bsource" ? "block" : "none";
-  const bilibiliForwardVideoField = document.getElementById("filterBilibiliForwardVideoField");
-  if (bilibiliForwardVideoField) bilibiliForwardVideoField.style.display = filterEditScope === "bsource" ? "flex" : "none";
-  const bilibiliForwardVideo = document.getElementById("filterBilibiliForwardVideo");
-  if (bilibiliForwardVideo) bilibiliForwardVideo.checked = c.forward_video === true;
   filterBilibiliSourceKind = String(c.kind || "up");
-  // 兼容现有已保存的筛选配置（数组）；类型字段缺省 = 全部启用
+  // 手动转发统一弹窗：用 Tab 分屏编辑 Discord / X / Bilibili 三套筛选。
+  renderFilterScopeTabs();
+  // 兼容现有已保存的筛选配置（数组）；类型字段缺省 = 该链路全部支持类型启用。
+  // 存量配置可能带着本链路不支持的类型（X/Bilibili 早期与 Discord 共用六类型），
+  // 这里按支持集过滤，避免打开弹窗就显示出一堆无效的已选项。
+  // 过滤后为空要区分两种情况：用户明确取消勾选全部（空数组，保持不转发），
+  // 与老配置只存了不支持的类型（回退为全部支持类型，避免转发意外全失效）。
   filterUsernames = (c.filter_usernames || []).slice();
   filterKeywords = (c.filter_keywords || []).slice();
+  const supportedMessageTypes = filterSupportedTypes();
   const storedTypes = c.filter_message_types;
-  filterMessageTypes = Array.isArray(storedTypes)
-    ? storedTypes.slice()
-    : FILTER_MESSAGE_TYPES.slice();
+  if (Array.isArray(storedTypes)) {
+    // 先迁移历史名，再按当前 scope 的支持集规范化；来源弹窗只处理消息类型，
+    // Discord 频道与手动 relay 的旧逻辑保持原样。
+    const migrated = storedTypes.map(migrateFilterMessageType);
+    const kept = supportedMessageTypes.filter(function (t) {
+      return migrated.indexOf(t) >= 0;
+    });
+    filterMessageTypes = kept.length || !storedTypes.length
+      ? kept
+      : supportedMessageTypes.slice();
+  } else {
+    filterMessageTypes = supportedMessageTypes.slice();
+  }
   const storedXPostTypes = c.filter_post_types;
   filterXPostTypes = Array.isArray(storedXPostTypes)
     ? storedXPostTypes.slice()
@@ -3895,11 +4259,39 @@ function prepareFilterModal(config, label) {
   renderFilterTypes();
   renderFilterXPostTypes();
   renderFilterBilibiliPostTypes();
+  renderFilterScopeTabs();
   document.getElementById("filterModal").style.display = "flex";
+}
+
+// 来源级筛选的漏斗状态应与实际支持集一致，并覆盖关键词、媒体开关及内容类型。
+function sourceFilterActive(source, scope, includeAudience) {
+  if (!source) return false;
+  const supported = FILTER_SUPPORTED_MESSAGE_TYPES[scope] || FILTER_MESSAGE_TYPES;
+  if (filterConfigActive(source, includeAudience !== false, supported, scope)) return true;
+  if (scope === "xsource") {
+    const types = source.filter_post_types;
+    return Array.isArray(types) && types.length > 0 && types.length < FILTER_X_POST_TYPES.length;
+  }
+  if (scope === "bsource") {
+    const supportedPosts = source.kind === "up" ? FILTER_BILIBILI_POST_TYPES : ["视频"];
+    const posts = Array.isArray(source.filter_bilibili_post_types)
+      ? source.filter_bilibili_post_types.filter(function (type) { return supportedPosts.indexOf(type) >= 0; })
+      : supportedPosts;
+    return posts.length < supportedPosts.length;
+  }
+  return false;
 }
 
 function channelFilterActive(c) {
   return filterConfigActive(c);
+}
+
+function xSourceFilterActive(source) {
+  return sourceFilterActive(source, "xsource", true);
+}
+
+function bilibiliSourceFilterActive(source) {
+  return sourceFilterActive(source, "bsource", true);
 }
 
 function openFilterModal(index) {
@@ -3926,31 +4318,36 @@ function openBilibiliSourceFilterModal(index) {
   prepareFilterModal(source, String(source.value || ""));
 }
 
-function openRelayFilterModal() {
-  filterEditScope = "relay";
-  filterEditIndex = -1;
-  prepareFilterModal(
-    settings.qq_c2c_relay_filter || {},
-    "# Discord 手动转发（全部频道）"
-  );
+const MANUAL_RELAY_SCOPE_META = {
+  relay:   { key: "qq_c2c_relay_filter",       label: "Discord 手动转发", tab: "Discord" },
+  xrelay:  { key: "x_c2c_relay_filter",        label: "X 手动转发",       tab: "X" },
+  birelay: { key: "bilibili_c2c_relay_filter", label: "Bilibili 手动转发", tab: "Bilibili" },
+};
+
+// 统一「消息筛选」二级窗口：三个链路 Tab（Discord / X / Bilibili），
+// 各自用独立 scope 编辑与保存；每次保存只写当前 Tab 对应的配置键。
+function renderFilterScopeTabs() {
+  const tabs = document.getElementById("filterScopeTabs");
+  if (!tabs) return;
+  const show = !!MANUAL_RELAY_SCOPE_META[filterEditScope];
+  tabs.style.display = show ? "flex" : "none";
+  if (!show) return;
+  tabs.querySelectorAll(".fscope-tab").forEach(function (tab) {
+    tab.classList.toggle("active", tab.dataset.scope === filterEditScope);
+  });
 }
 
-function openXRelayFilterModal() {
-  filterEditScope = "xrelay";
-  filterEditIndex = -1;
-  prepareFilterModal(
-    settings.x_c2c_relay_filter || {},
-    "# X 手动转发（全部账号）"
-  );
+function openUnifiedRelayFilterModal() {
+  switchRelayFilterTab("relay");
 }
 
-function openBilibiliRelayFilterModal() {
-  filterEditScope = "birelay";
+function switchRelayFilterTab(scope) {
+  const meta = MANUAL_RELAY_SCOPE_META[scope];
+  if (!meta) return;
+  filterEditScope = scope;
   filterEditIndex = -1;
-  prepareFilterModal(
-    settings.bilibili_c2c_relay_filter || {},
-    "# Bilibili 手动转发（全部来源）"
-  );
+  prepareFilterModal(settings[meta.key] || {}, meta.label);
+  renderFilterScopeTabs();
 }
 
 function closeFilterModal() {
@@ -3982,12 +4379,8 @@ function renderTranslationSettingButton(id, on, label) {
   const btn = document.getElementById(id);
   if (!btn) return;
   btn.dataset.on = on ? "1" : "0";
-  const icon = id === "translationSourceAppendOriginal"
-    ? (on ? SVG_ORIGINAL_ON : SVG_ORIGINAL_OFF)
-    : (on
-      ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
-      : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>');
-  btn.innerHTML = icon + "<span>" + label + "</span>";
+  btn.setAttribute("aria-checked", on ? "true" : "false");
+  btn.innerHTML = pillSwitchMarkup(label, on);
 }
 
 function syncTranslationSourceModalButtons() {
@@ -4031,8 +4424,14 @@ document.getElementById("filterSave").addEventListener("click", async function (
       : filterEditScope === "birelay"
         ? "bilibili_c2c_relay_filter"
         : "qq_c2c_relay_filter";
+    // 只保存该链路支持的类型。全选（= 不过滤）时同样落盘为完整支持集，
+    // 而不是删除字段：X/Bilibili 的支持集与 Discord 六类型不同，删除字段
+    // 会被读成"全部六类启用"，与面板显示不一致。
+    const supported = filterSupportedTypes();
     settings[key] = {
-      filter_message_types: filterMessageTypes.slice(),
+      filter_message_types: filterMessageTypes.filter(function (t) {
+        return supported.indexOf(t) >= 0;
+      }),
     };
   } else {
     if (filterEditIndex < 0) return;
@@ -4044,6 +4443,7 @@ document.getElementById("filterSave").addEventListener("click", async function (
     if (!c) return;
     if (filterEditScope === "xsource") {
       c.filter_keywords = filterKeywords.slice();
+      saveSourceMessageTypes(c, "xsource");
       if (filterXPostTypes.length > 0 && filterXPostTypes.length < FILTER_X_POST_TYPES.length) {
         c.filter_post_types = filterXPostTypes.slice();
       } else {
@@ -4051,8 +4451,8 @@ document.getElementById("filterSave").addEventListener("click", async function (
       }
     } else if (filterEditScope === "bsource") {
       c.filter_keywords = filterKeywords.slice();
+      saveSourceMessageTypes(c, "bsource");
       c.filter_bilibili_post_types = filterBilibiliPostTypes.slice();
-      c.forward_video = document.getElementById("filterBilibiliForwardVideo").checked;
       delete c.filter_tags;
       delete c.filter_title_keywords;
       delete c.filter_exclude_keywords;
@@ -4634,12 +5034,14 @@ document.addEventListener("click", async function (e) {
       filterModal: closeFilterModal,
       translationSourceModal: closeTranslationSourceModal,
       relayChannelsModal: closeRelayChannelsModal,
+      translationChainsModal: closeTranslationChainsModal,
       qqWhitelistModal: closeQQWhitelistModal,
       translationConfigModal: closeTranslationConfigModal,
       qqConfigModal: closeQQConfigModal,
       discordConfigModal: closeDiscordConfigModal,
       scheduledMessageContentModal: function () {
         scheduledMessageDraft = null;
+        scheduledCollapsed.clear();
         document.getElementById("scheduledMessageContentModal").style.display = "none";
       },
       messageTraceModal: closeMessageTraceModal,
@@ -4714,10 +5116,6 @@ document.addEventListener("click", async function (e) {
     }
     return;
   }
-  if (btn.id === "btnManageQQWhitelist") {
-    openQQWhitelistModal();
-    return;
-  }
   if (["btnMaintenanceOpen", "btnMaintenanceBanner"].includes(btn.id)) { openBackupRestore(); return; }
   if (["btnAutoBackupToggle", "btnAutoBackupNow", "btnAutoBackupRestore"].includes(btn.id)) { await runMaintenanceAction(btn); return; }
   if (btn.id === "btnBackupRestore") { openBackupRestore(); return; }
@@ -4783,28 +5181,24 @@ document.addEventListener("click", async function (e) {
     renderTranslationSettingButton("translationSourceShowDatetime", btn.dataset.on !== "1", "显示时间");
     return;
   }
-  if (btn.id === "btnRelayRegisteredChannels") {
-    openRelayChannelsModal("discord");
+  if (btn.id === "btnUnifiedRelaySources") {
+    openUnifiedRelaySourcesModal();
     return;
   }
-  if (btn.id === "btnRelayFilter") {
-    openRelayFilterModal();
+  if (btn.id === "btnUnifiedRelayFilter") {
+    openUnifiedRelayFilterModal();
     return;
   }
-  if (btn.id === "btnXRelayRegisteredChannels") {
-    openRelayChannelsModal("x");
+  if (btn.id === "btnTranslationChains") {
+    openTranslationChainsModal();
     return;
   }
-  if (btn.id === "btnXRelayFilter") {
-    openXRelayFilterModal();
+  if (btn.dataset.rscope) {
+    switchRelayChannelsTab(btn.dataset.rscope);
     return;
   }
-  if (btn.id === "btnBilibiliRelayRegisteredSources") {
-    openRelayChannelsModal("bilibili");
-    return;
-  }
-  if (btn.id === "btnBilibiliRelayFilter") {
-    openBilibiliRelayFilterModal();
+  if (btn.dataset.scope && MANUAL_RELAY_SCOPE_META[btn.dataset.scope]) {
+    switchRelayFilterTab(btn.dataset.scope);
     return;
   }
   if (btn.id === "translationSourceSave") {
@@ -5004,10 +5398,6 @@ document.addEventListener("click", async function (e) {
     openFgAddPicker(FG_DISCORD, "group");
     return;
   }
-  if (btn.id === "btnAddScheduledGroup") {
-    openScheduledGroupPicker();
-    return;
-  }
   if (btn.id === "btnScanChannels") {
     scanReadableChannels(btn);
     return;
@@ -5178,19 +5568,33 @@ document.addEventListener("click", async function (e) {
   } else if (btn.id === "btnBackfillToggle") {
     settings.backfill_enabled = btn.dataset.on !== "1";
     await saveAndReload();
+  } else if (btn.id === "btnBilibiliAutoResolveToggle") {
+    settings.bilibili_auto_resolve = settings.bilibili_auto_resolve || {};
+    settings.bilibili_auto_resolve.enabled = btn.dataset.on !== "1";
+    await saveAndReload();
   } else if (btn.id === "btnScheduledMessageToggle") {
     await saveScheduledMessageSettings(btn.dataset.on !== "1");
-  } else if (btn.id === "btnTranslationToggle") {
+  } else if (btn.id === "btnTranslationDiscord") {
     const enabled = btn.dataset.on !== "1";
     (settings.discord_channels || []).forEach(function (channel) {
       channel.translation_enabled = enabled;
     });
     await saveAndReload();
-  } else if (btn.id === "btnXTranslationToggle") {
+  } else if (btn.id === "btnTranslationX") {
     const enabled = btn.dataset.on !== "1";
     (settings.x_rss_sources || []).forEach(function (source) {
       source.translation_enabled = enabled;
     });
+    await saveAndReload();
+  } else if (btn.id === "btnTranslationBilibili") {
+    const enabled = btn.dataset.on !== "1";
+    (settings.bilibili_sources || []).forEach(function (source) {
+      source.translation_enabled = enabled;
+    });
+    await saveAndReload();
+  } else if (btn.id === "btnTranslationManual") {
+    settings.translation = settings.translation || {};
+    settings.translation.enabled = btn.dataset.on !== "1";
     await saveAndReload();
   } else if (btn.id === "btnCheckUpdates") {
     await runUpdateAction();
@@ -5223,12 +5627,14 @@ const keyboardModalClosers = {
   filterModal: closeFilterModal,
   translationSourceModal: closeTranslationSourceModal,
   relayChannelsModal: closeRelayChannelsModal,
+  translationChainsModal: closeTranslationChainsModal,
   qqWhitelistModal: closeQQWhitelistModal,
   translationConfigModal: closeTranslationConfigModal,
   qqConfigModal: closeQQConfigModal,
   discordConfigModal: closeDiscordConfigModal,
   scheduledMessageContentModal: function () {
     scheduledMessageDraft = null;
+    scheduledCollapsed.clear();
     document.getElementById("scheduledMessageContentModal").style.display = "none";
   },
   messageTraceModal: closeMessageTraceModal,
@@ -5335,12 +5741,6 @@ document.addEventListener("change", async function (e) {
   if (el.id === "translationProvider" || el.id === "translationFallback") {
     if (el.id === "translationProvider") syncTranslationFallback("translationProvider", "translationFallback");
     saveAIControls();
-    await saveAndReload();
-    return;
-  }
-  if (el.id === "xTranslationProvider" || el.id === "xTranslationFallback") {
-    if (el.id === "xTranslationProvider") syncTranslationFallback("xTranslationProvider", "xTranslationFallback");
-    saveXTranslationControls();
     await saveAndReload();
     return;
   }

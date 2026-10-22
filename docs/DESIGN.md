@@ -12,23 +12,37 @@
 
 ### 共用功能页模板（以 Discord → QQ 为基础）
 
-四个桌面转发页统一采用“顶部运行状态（含 RSS 状态）→ 转发组 → 下方其他卡片”的顺序，机器人状态卡与 RSS 状态卡之间、顶部状态区与下方转发组或首张卡片之间的间距均为 16px，由顶部容器的 gap 与外间距分别控制，状态卡自身不再叠加下边距。下方卡片按从左到右、再从上到下排列，使用手动转发卡的两列宽度与 164px 最小高度；Discord 的离线补发排在手动转发卡下方，Bilibili 的手动转发卡位于左列。最近消息卡仅在总览显示。顶部只保留运行状态、当前 Bot、PID 与转发统计。QQ 用户白名单集中在设置页“机器人与服务”中的标准设置行，管理表格在二级弹窗中打开，供 Discord、X 和 Bilibili 链接手动转发共用。进程启停与重启仅保留在总览；备份、诊断、失败通知、Windows 启动、管理程序重启及关于作者入口统一在设置，四个功能页彻底删除运行工具 Card。
+四个桌面转发页统一采用“顶部运行状态（含 RSS 状态）→ 转发组 → 下方其他卡片”的顺序，机器人状态卡与 RSS 状态卡之间、顶部状态区与下方转发组或首张卡片之间的间距均为 16px，由顶部容器的 gap 与外间距分别控制，状态卡自身不再叠加下边距。下方卡片按从左到右、再从上到下排列，Discord 的离线补发也放入转发组下方的两列小卡片网格（单独占一格），Bilibili 不设手动转发卡。手动转发卡从 Discord/X/Bilibili 三页移除，统一收拢到「QQ → QQ」页：该页在转发组卡下方放一个统一的「手动转发」卡，内含三行来源（Discord / X / Bilibili），各带说明与该来源“已注册频道/账号/来源”按钮；右下角一个统一“消息筛选”按钮打开同一弹窗的 Discord / X / Bilibili 三个 Tab，每个 Tab 只编辑对应链路支持的消息类型。自动翻译不再在 Discord/X 页各留一张卡，统一为「QQ → QQ」页的一张共享卡片。最近消息卡仅在总览显示。顶部只保留运行状态、当前 Bot、PID 与转发统计。QQ 用户白名单不再放在设置页，而是作为「QQ → QQ」页转发组工作区的第二个分栏：与 X/Bilibili 页的「来源 / 接收群」一致，左侧深色圆角分栏为「QQ 转发群」、右侧为「QQ 授权用户」，各带自己的「＋ 新增 / 注册审核」底部操作栏，1280px 及以下转单栏；名单供 Discord、X 和 Bilibili 链接手动转发以及私聊 relay 命令共用。进程启停与重启仅保留在总览；备份、诊断、失败通知、Windows 启动、管理程序重启及关于作者入口统一在设置，四个功能页彻底删除运行工具 Card。
 
 Discord 离线补发与 QQ 定时消息卡片的标题统一从卡片内容区顶部起排，标题行保留相同的控件高度和帮助图标垂直居中；卡片其余内容继续使用各自布局。
 
-转发组沿用现有 Tab 与组级操作栏、固定布局表格、ID 截断/复制、危险图标按钮、拖动排序及空状态。配置向导位于设置页“应用”卡片末行；“外观与窗口”中“界面动画”排在“界面主题”上方；设置行右侧文字按钮与跳转链接共用页面字体、14px 字号和 20px 行高。两栏底部同一紧凑 footer 左侧放新增/注册，右侧使用公共 `.linkbtn` 外部入口和配置按钮。窄窗口继续沿用单栏断点。白名单新增/审核集中在设置页设置行，通过二级弹窗管理，功能页不再重复显示；手动转发与翻译使用分隔线设置区。补发、翻译和日志自动滚动复用 `.settings-switch-track`，提供 `role="switch"` 与实时 `aria-checked`，原保存流程不变。
+转发组卡下方的小卡片统一尺寸规则（长期有效，适用于四个功能页）：转发组卡下方的每张卡片都是同一两列网格 `.func-cards` 中的一格（`grid-template-columns: repeat(2, minmax(0, 1fr))`，间距 16px，1280px 及以下退化为单列），卡片从左至右、从上至下依次填充；每格同宽，最小高度 164px、内边距 `12px 18px`、标题从内容区顶部起排，基准即「定时消息 / 手动转发」两卡。`discord-page.js` 在进入「Discord → QQ」页时把「离线补发」卡（`#backfillCard`）移入 `#pageDiscord > .func-cards`，在进入「QQ → QQ」页时把「定时消息」卡、统一「手动转发」卡（`#unifiedRelayCard`）与共享「自动翻译」卡（`#autoTranslationCard`）一起移入 `#pageQQ > .func-cards`，离开页面按原位置还原；「Bilibili」页的「自动解析」卡（`#bilibiliAutoResolveCard`）在 `#pageBilibili` 中自带同名网格。新增同类卡片只要放进 `.func-cards` 就自动继承这些尺寸，不得再让某张卡独占整行。
 
-四个功能页不显示全局日志。统一入口为“设置 → 启动与维护 → 运行日志”，使用标准 ModalShell：最高 320px 的深色等宽控制台内部滚动，正文下方放级别/消息追踪/自动滚动 Toggle，底部右侧放复制/清空。根 HTML 预留稳定滚动条空间，切页与折叠不改变可用宽度。
+卡片内部起排与按钮位置（长期有效）：卡片为 `display: flex; flex-direction: column; gap: 0`，标题在最上，可选的一句话说明紧随其后（`margin-top: 8px`），动作栏以 `margin-top: auto` 贴底并占满内容宽度；动作按钮一律从卡片左下角起排，只有成对的图标动作（如「手动转发」卡右下角的「消息筛选」漏斗）才用 `justify-content: space-between` 把第二个按钮顶到右下角，窄屏下按钮自动换行且不产生横向溢出。胶囊开关默认也贴左下角；若动作栏左侧已有按钮，胶囊改贴右下角；若右下角另有按钮，胶囊紧贴该按钮左侧（动作栏按「左按钮 → 胶囊 → 右按钮」排列，非首位的胶囊加 `margin-left: auto`，其后的按钮不再自带左外边距）。卡片中央不再放成段的解释文字：详细说明、前置条件与降级行为只写进标题旁问号（`.hintbtn`）的提示气泡，气泡内容必须是简单易懂、面向用户的操作说明，不写实现细节；批量或次要设置也不铺在卡内，改为卡底一个入口按钮打开二级窗口（如「翻译链路」）。
+
+共享「自动翻译」卡同样只占网格中的一格，排在「手动转发」卡之后：卡内只有首选/次选服务两个下拉（窄格内自动换行）和左下角的「翻译链路」入口按钮。四条链路（Discord、X、Bilibili、手动转发）的批量开关收进 `#translationChainsModal` 二级窗口（ModalShell `small`、无自定义页脚故自动生成「关闭」，与「已注册来源」同级），窗口内是一句话说明加四个上下排列的整行开关（链路名在左、轨道在右，外围无描边或常态底色），点击仍走 `saveAndReload()` 保存并留在窗口内刷新状态；单个 Discord 频道或 X 账号仍通过来源表格中的翻译图标打开二级设置，Bilibili 来源由链路开关统一控制。
+
+二级窗口统一规则（长期有效，适用于全部卡片二级窗口）：
+1. **内容网格式对齐**——`ui-components.js` 的 ModalShell 规格表用 `grid: true` 声明哪些窗口启用统一正文（当前为编辑定时消息、已注册频道、翻译链路、安全备份与恢复、运行日志、翻译设置、QQ/Discord 配置），`modalShell()` 据此给正文加 `.modal-grid`：单列起排、`justify-items: stretch`、行间距 14px，标题下每一行的左缘都与正文内边距对齐（基准是「已注册频道」的行式列表）。需要并排的容器加 `.modal-split`（等宽两列，内部 label 纵向起排），需要跨整行的元素加 `.modal-span-all`。旧窗口自带的内联底色/边框/内边距由 `body .modal-shell > .modal-body > div[style]` 统一失效，外观只由 `.modal-shell` 提供；「翻译服务配置」保留自己的两列正文。
+2. **底栏左右分区**——`.modal-footer > button:first-child` 贴左下、`:last-child` 贴右下：主要动作（保存 / 确定 / 恢复配置 / 清空日志）一律右下角，取消、复制、上下文入口左下角；正文内的按钮行用 `.modal-actions` + `.modal-actions-start` 复用同一分区规则（如「立即备份」左、「恢复所选备份」右）。只有一个按钮时（自动生成的「关闭」）保持贴右。
+3. **开关一律胶囊式**——开/关按钮统一 `.pill-switch`：按钮外围不画边框、不铺常态底色（与「启用补发」一致），文字在左、`.settings-switch-track` 轨道在右，轨道尺寸沿用功能页「启用补发」的 32×18（圆点 14、位移 14，因功能页 `[role="switch"]` 规则权重更高，共享样式直接取同值而不是覆盖）；悬停时只铺一层浅色圆角底，开启态只点亮轨道，不再画 ✓/× 图标；键盘焦点框缩到轨道上，避免窗口自动聚焦首个开关时在按钮外围又出现圆环；`role="switch"` + `aria-checked` 由渲染函数维护。二级窗口内胶囊保留整行占位（文字在左、轨道在右）；卡片上的 `#btnBackfillToggle`、`#btnScheduledMessageToggle`、`#btnBilibiliAutoResolveToggle` 为内容宽度、`justify-content: flex-start`，文字与轨道只留 8px 间隔，不再用固定 180px 宽度把轨道推到卡片另一侧。设置页没有文字标签的独立开关（`#btnAutoUpdateCheck`、`#btnStatusSheenToggle`、`#btnFailureNotificationToggle`、`#btnSettingsAutostart`）同样去掉 44×26 的外围按钮框，只保留 32×18 轨道，键盘焦点也落在轨道上。已套用：翻译链路四个批量开关、翻译设置三个来源级开关、自动备份开关、日志自动滚动、卡片上的「启用补发」「启用定时发送」「启用自动解析」。
+4. **编辑定时消息**沿用同一套规则：窗口正文单列，工具行「消息列表」标题贴左、三个按钮贴右，每条消息卡内部两列（正文与附件在左列、发送目标在右列、发送方式与基准/间隔跨行、图片大小说明殿后），删除按钮仍在右下角。
+
+转发组沿用现有 Tab 与组级操作栏、固定布局表格、ID 截断/复制、危险图标按钮、拖动排序及空状态。配置向导位于设置页“应用”卡片末行；“外观与窗口”中“界面动画”排在“界面主题”上方；设置行右侧文字按钮与跳转链接共用页面字体、14px 字号和 20px 行高。两栏底部同一紧凑 footer 左侧放新增/注册，右侧使用公共 `.linkbtn` 外部入口和配置按钮。窄窗口继续沿用单栏断点。白名单新增/审核与转发群一致，直接在「QQ → QQ」页指定分栏底部操作栏完成，不再有独立的设置行与二级弹窗；手动转发与共享翻译卡使用分隔线设置区。补发和日志自动滚动复用 `.settings-switch-track`，提供 `role="switch"` 与实时 `aria-checked`，原保存流程不变。
+
+四个功能页不显示全局日志。统一入口为“设置 → 启动与维护 → 运行日志”，使用标准 ModalShell：最高 320px 的深色等宽控制台内部滚动，正文下方用 `.modal-split` 放级别下拉与「消息追踪」入口，自动滚动为整行胶囊开关，底栏左下「复制日志」、右下「清空日志」。根 HTML 预留稳定滚动条空间，切页与折叠不改变可用宽度。
 
 机器人状态卡与 X/Bilibili RSS 状态卡在正常运行时显示低对比度渐变扫光，适用于总览及各转发页的深浅主题。设置 → 外观与窗口提供“界面动画”开关，默认开启；偏好保存在本机 localStorage，并立即作用于所有页面。扫光采用低饱和蓝灰色（深色主题 #9fbfd6、浅色主题 #7e9fb9），柔和的斜向光带从左向右扫过卡片，每 8 秒循环一次，扫过后短暂停留在卡片外；不再显示波浪与气泡。机器人动效要求进程运行、当前 QQ Bot 已连接；Discord 与总览还要求 Discord 已连接。RSS 动效沿用现有绿色“运行中”判定；停止、等待连接和请求/解析失败时不显示。装饰层位于内容后方，不拦截点击，也不改变卡片尺寸和间距；系统启用“减少动态效果”时隐藏扫光。
 
-`panel/web/discord-page.js` 保留原文件名，现为四个功能页共用的展示适配层：按页面配置选择工作区；移动现有控件而非复制控件，跨页切换先还原再安置。QQ 用户白名单由设置页入口打开独立弹窗，不随当前链路搬移。样式复用 Discord 的同一组规则，总览和设置页不采用紧凑功能页模板。表格行、复制、拖动、保存和配置弹窗仍沿用原处理函数。
+`panel/web/discord-page.js` 保留原文件名，现为四个功能页共用的展示适配层：按页面配置选择工作区；移动现有控件而非复制控件，跨页切换先还原再安置。QQ 用户白名单表格（`#userList` / `#userBody`）与「＋ 新增」「注册审核」按钮直接写在 QQ → QQ 页转发组的第二个分栏中，沿用原元素 ID 与事件绑定，不再弹窗搬移。样式复用 Discord 的同一组规则，总览和设置页不采用紧凑功能页模板。表格行、复制、拖动、保存和配置弹窗仍沿用原处理函数。
 
-X 和 Bilibili 使用相同的 RSS 状态区：标题独占首行，徽标与来源/轮询/投递统计同行，地址与间隔位于下一行。状态、来源、上次轮询、发现、发送、地址及间隔保留，Bilibili 另保留积压与保护设置。异常时保留统计信息，错误原因和普通统计分别着色。工作区采用与 Discord 相同的双栏、底部新增/注册与外链左右排列结构；1280px 及以下转为单栏。Bilibili 来源注册仅收集来源范围及其 UID、标签名或关键词；列表和已注册来源弹窗直接显示该值，不提供自定义备注。Bilibili 转发组来源表仅展示类型和来源名称，筛选条件通过来源行漏斗按钮及“消息筛选”二级窗口查看和编辑，不在表格中重复显示文字摘要。筛选窗口布局沿用 X：上方按关键词筛选，下方选择投稿类型；UP 主来源支持视频、专栏、动态，标签与关键词来源仅支持视频，视频本体转发开关也放在此处，并以胶囊开关呈现。来源筛选不再提供额外标签、作者或标题条件。手动转发卡从下方双列卡片区的左列开始，最小高度 164px，并保留说明和底部操作栏；说明文字采用与 X 相同的单句格式，短链接与视频发送细节放在帮助提示中；1280px 及以下铺满页面宽度。卡片提供已注册来源弹窗和独立消息类型筛选。QQ 白名单仍由总览或设置统一管理。三页 Tab 较多时仅标签条横向滚动，组操作不换行。
+X 和 Bilibili 使用相同的 RSS 状态区：标题独占首行，徽标与来源/轮询/投递统计同行，地址与间隔位于下一行。状态、来源、上次轮询、发现、发送、地址及间隔保留，Bilibili 另保留积压与保护设置。异常时保留统计信息，错误原因和普通统计分别着色。工作区采用与 Discord 相同的双栏、底部新增/注册与外链左右排列结构；1280px 及以下转为单栏。Bilibili 来源注册仅收集来源范围及其 UID、标签名或关键词；列表和已注册来源弹窗直接显示该值，不提供自定义备注。Bilibili 转发组来源表仅展示类型和来源名称，筛选条件通过来源行漏斗按钮及“消息筛选”二级窗口查看和编辑，不在表格中重复显示文字摘要。筛选窗口布局沿用 X：上方按关键词筛选，下方选择投稿类型；UP 主来源支持视频、专栏、动态，标签与关键词来源仅支持视频，视频本体转发开关也放在此处，并以胶囊开关呈现。来源筛选不再提供额外标签、作者或标题条件。Bilibili 不再在自身页面放手动转发卡：手动转发统一收拢到「QQ → QQ」页的统一「手动转发」卡，右侧「已注册来源」弹窗与「消息筛选」二级窗口的 Bilibili Tab 在此卡中提供；Bilibili Tab 只显示该链路支持的消息类型（文字、图片、链接、视频）。说明文字采用与 X 相同的单句格式，短链接与视频发送细节放在帮助提示中。QQ 白名单统一在「QQ → QQ」页转发组的「QQ 授权用户」分栏管理。三页 Tab 较多时仅标签条横向滚动，组操作不换行。
 
-QQ 定时消息改为紧凑设置区：空状态提供“+ 新增”，有任务时显示数量摘要和编辑入口；启用定时发送使用 Toggle，实际仍打开原定时任务编辑器。各功能页顶部徽标只描述进程“运行中/已停止”，Bot 下拉框独立描述连接状态，RSS 徽标保留原运行/等待/错误判定。总览与各功能页的机器人状态徽标，以及 X/Bilibili RSS 状态徽标统一采用 36px 最小高度和 4px 9px 内边距；不修改后端状态判断。
+「Bilibili」页在转发组卡片下方有一张「自动解析」卡片（`#bilibiliAutoResolveCard`，标题为「自动解析」，帮助提示标题为「Bilibili 自动解析」）：标题行右侧是帮助图标，`#hint-bilibili-auto-resolve` 只保留用户要照做的操作说明（打开后群里的 B 站视频链接会被发回本群、需要群管理员先在机器人资料页开启「接收所有消息」、拿不到视频时不回复），下载与去重等实现细节不写进气泡；卡内一句话说明在上，单个 √/× 胶囊开关 `#btnBilibiliAutoResolveToggle` 贴底靠左，点击沿用 `saveAndReload()` 保存整份配置，不新增接口。该卡片包在 `#pageBilibili > .func-cards` 网格里，因此与其他小卡片同宽同高（1500px 视口实测 584×164px），且整组仍位于 `#bilibiliFgBody` 工作区之外，不参与 `discord-page.js` 的控件移动与还原。
 
-全局 Bot 与翻译服务配置统一在设置页，直接使用 `btnDiscordConfig`、`btnQQConfig`、`btnTranslationConfig`，不再通过功能页的隐藏按钮代理；原功能页重复配置按钮已删除，链路翻译启用、路由与来源级配置仍保留。
+QQ 定时消息改为紧凑设置区：空状态提供“+ 新增”，有任务时显示数量摘要和编辑入口；启用定时发送使用 Toggle，实际仍打开原定时任务编辑器。编辑器内的每条消息是独立卡片：左上角为「消息 N」，右上角为复用转发组折叠按钮样式的 `.foldbtn`（折叠态 `.folded` 旋转 chevron），正文区可折叠；卡片底部动作栏右对齐，删除按钮复用转发组表格的 `.danger.rowicon` 垃圾桶样式，点击仍走原确认流程；列表标题行右侧提供「全部折叠」「全部展开」「＋ 添加消息」。卡内「发送目标」一行（指定群 / 转发组 / 全部群 下拉 + 目标摘要 + 管理）；「发送方式」与「基准日期时间」（日历模式下为日历周期与发送时间）左右并排，620px 及以下转为上下排列。编辑器不再有顶部「发送目标群」栏，`scheduled_message.target_groups` 仍作为未单独设置目标的消息的默认值保留在后端配置中。各功能页顶部徽标只描述进程“运行中/已停止”，Bot 下拉框独立描述连接状态，RSS 徽标保留原运行/等待/错误判定。总览与各功能页的机器人状态徽标，以及 X/Bilibili RSS 状态徽标统一采用 36px 最小高度和 4px 9px 内边距；不修改后端状态判断。
+
+全局 Bot 与翻译服务配置统一在设置页，直接使用 `btnDiscordConfig`、`btnQQConfig`、`btnTranslationConfig`，不再通过功能页的隐藏按钮代理；原功能页重复配置按钮已删除；翻译服务路由放在「QQ → QQ」页的共享「自动翻译」卡，四条链路开关收在该卡「翻译链路」二级窗口内，Discord/X 来源级配置仍保留。
 
 三页验证使用隔离示例数据，所有写请求被测试预览拦截：1366×768、1920×1080、2560×1440 及各自 125%/150% 等效内容视口，共 27 组布局检查无页面横向溢出或表格按钮裁切；双栏等高、窄窗口单栏。配置弹窗、定时任务空/非空入口、日志折叠和运行工具、断连及 RSS 错误展示已检查。未触发真实机器人启停、转发、补发、保存或删除；等效视口验证不代表完成系统 DPI 切换测试。
 
@@ -169,7 +183,7 @@ X、Bilibili 和 QQ 页面现有 RSS 状态、白名单、手动转发、自动�
 
 本轮仅调整四个桌面功能页的离线补发、运行日志/工具和顶部状态栏。转发组、设置页、API、数据库和转发逻辑不变。展示适配层移动原控件并记录还原位置，离开功能页后恢复总览与浏览器原位置；不复制按钮或改事件处理。
 
-Discord 离线补发左侧按标题/Help、启用 Toggle、单次上限、待补发数量顺序排列，右侧 Action Group 依次为立即补发、刷新、清空，8px 间距、垂直居中。禁用立即补发只改变状态，不改变位置；不足宽度时操作组整体换行并保持右对齐，参数自身保留语义分组。
+Discord 离线补发在桌面端进入 Discord 页时由展示适配层移入转发组下方的 `.func-cards` 网格，与其它小卡片同宽（1500px 视口实测 576×164px）；卡内标题在上，单次补发上限与待补发数量居中一行，胶囊开关与「立即补发」贴底左，刷新/清空贴底右。禁用「立即补发」只改变状态，不改变位置；视口收窄到 1280px 及以下时网格退化为单列，动作按钮自动换行且不产生横向溢出。
 
 日志 Card 仅包含日志功能：标题与收起入口、220px 内滚动等宽控制台、单行 Toolbar。Toolbar 左侧级别/消息追踪/自动滚动 Toggle，右侧复制/弱 Danger 清空，两组分离；滚动条使用当前深色主题变量。启动、停止、重启、失败通知、Windows 启动及其它维护入口移至日志之后独立的“运行工具”Card，默认折叠，展开后显示原控件。折叠运行日志不会隐藏运行工具卡片。
 
@@ -209,7 +223,9 @@ Discord 离线补发左侧按标题/Help、启用 Toggle、单次上限、待补
 
 ExternalLinkButton 统一左侧 16px 外链图标、8px 间距、36px 高、14px 水平 padding，文字均为“打开”。覆盖发布页面、问题反馈入口，以及 Discord 开发者门户、X、Bilibili、四处 QQ 平台入口。目标名保留在提示与可访问标签；更新检查重置按钮文本后会恢复统一图标。
 
-12 个网页弹窗共用 ModalShell / Header / Body / Footer：Discord Bot、QQ Bot、翻译服务、备份恢复、连接诊断、消息追踪、通用确认/动态表单、过滤、Bilibili 来源注册、翻译来源、转发频道、定时消息。定时消息编辑器每条计划包含正文、可选图片附件与发送计划控件；图片支持选择、更换和移除，纯图片消息允许正文留空。小/中/大宽度 520/640/880px，Bilibili 来源注册窗口宽 560px；来源筛选复用 X 的“消息筛选”窗口。弹窗上限 85vh；Header 与 Footer 不滚动，仅 Body 内滚动，采用主题滚动条。Header padding 16px 20px、标题 18px/600、关闭按钮 32px/图标 18px；Body padding 20px；Footer padding 12px 20px、右对齐、8px 按钮间距。输入框和普通按钮高 36px，沿用 Card/控件圆角与当前主题色。普通配置允许点击遮罩关闭，确认与恢复弹窗不启用遮罩关闭。
+12 个网页弹窗共用 ModalShell / Header / Body / Footer：Discord Bot、QQ Bot、翻译服务、备份恢复、连接诊断、消息追踪、通用确认/动态表单、过滤、Bilibili 来源注册、翻译来源、转发频道、定时消息。定时消息编辑器每条计划包含正文、可选图片附件、发送目标（指定群 / 转发组 / 全部群）与发送计划控件；发送方式与基准日期时间左右并排，卡片右上角折叠、右下角删除；图片支持选择、更换和移除，纯图片消息允许正文留空。小/中/大宽度 520/640/880px，Bilibili 来源注册窗口宽 560px；来源筛选复用 X 的“消息筛选”窗口。弹窗上限 85vh；Header 与 Footer 不滚动，仅 Body 内滚动，采用主题滚动条。Header padding 16px 20px、标题 18px/600、关闭按钮 32px/图标 18px；Body padding 20px；Footer padding 12px 20px、右对齐、8px 按钮间距。输入框和普通按钮高 36px，沿用 Card/控件圆角与当前主题色。普通配置允许点击遮罩关闭，确认与恢复弹窗不启用遮罩关闭。
+
+消息筛选窗口的“消息类型”只渲染当前链路实际支持的集合：Discord 六类齐备，X 为文字、图片、视频，Bilibili 为文字、图片、链接、视频。不支持的类型不渲染，用户看不到也点不到。“视频”是 X/Bilibili 的规范类型名（Discord 的通用附件仍叫“文件”）；旧配置里的“文件”在读取时迁移为“视频”。来源筛选（X/Bilibili）的消息类型行与关键词、推文/投稿类型并列；同时设置时取交集。X 推文类型与 Bilibili 投稿类型仍采用置灰模式（该来源不支持的类型可见但禁用），并至少保留一种类型（取消最后一项无效）。
 
 翻译弹窗使用大尺寸，工作模型、AI API、腾讯 TMT 分区清晰；检测按钮等宽，检测记录统一边框，保存/取消固定于底部。QQ Bot 使用成组的 AppID/AppSecret 与弱化删除按钮；备份说明/勾选/警告位于 Body，ZIP 操作位于 Footer；诊断使用统一状态行，“无”为中性色。SettingsRow 保留既有组件，补充共用 FormField、StatusRow、HelpText、DangerText 样式，不引入新 UI 框架。Windows 文件选择器及关闭/退出确认框仍为原生系统样式。
 
@@ -221,7 +237,7 @@ ExternalLinkButton 统一左侧 16px 外链图标、8px 间距、36px 高、14px
 
 浏览器实测 `document.scrollingElement` 为 HTML。公共样式直接对 html 设置 `scrollbar-gutter: stable`，不支持该属性时使用 `overflow-y: scroll`。不对页面分别计算宽度，不改子容器来补偿根滚动条。
 
-X/Bilibili RSS 标题独占首行，下一行徽标与统计保持同行、8px 间距，指标之间使用弱化圆点分隔；RSSHub/轮询配置仍在后一行。QQ 用户白名单由设置页标准设置行统一打开二级弹窗管理，不在链路页的来源或接收群表格后重复显示。定时消息摘要居左，新增与 Toggle 同行居右，新增按钮至少 88×36px、正常字号、不换行。各折叠区复用 foldbtn 尺寸/边框/hover，统一 chevron 并更新 aria-expanded；不保留文字展开/收起按钮。
+X/Bilibili RSS 标题独占首行，下一行徽标与统计保持同行、8px 间距，指标之间使用弱化圆点分隔；RSSHub/轮询配置仍在后一行。QQ 用户白名单现在位于「QQ → QQ」页转发组的「QQ 授权用户」分栏（本段为历史记录，其后的 2026-10-20 变更已把它从设置页移出）。定时消息摘要居左，新增与 Toggle 同行居右，新增按钮至少 88×36px、正常字号、不换行。各折叠区复用 foldbtn 尺寸/边框/hover，统一 chevron 并更新 aria-expanded；不保留文字展开/收起按钮。
 
 当时的验证记录：Edge 全请求拦截的隔离预览在 960、1366、1920px 宽度下完成六页切换并回到总览，共 21 组；有/无纵向溢出时主内容宽度分别稳定为 833/1049/1603px，27 次现有折叠操作未改变宽度，无页面横向溢出或脚本异常。两处 RSS 徽标和统计同行、间距 8px；当时两处白名单 footer 位于表格下，后续已迁移到设置页二级弹窗；新增按钮实测 88×36px，scrollWidth 等于 clientWidth。日志开关/返回、追踪子窗、自动滚动开关及复制处理通过；DEBUG/INFO 切换和确认清空调用原 API，所有请求均被拦截，未写入真实服务。复查 X、QQ 与日志截图；JS 语法和 diff 空白检查通过。未验证真实 WebView2 与系统 DPI。
 
@@ -254,3 +270,25 @@ Discord、X、Bilibili 与 QQ→QQ 每页最多创建 30 个转发组；页面�
 更新交互：点击“检查更新”后按钮暂时显示“检查中…”；检查到新版本时按钮变为“立即更新”并提示版本对比，未发现更新则恢复“检查更新”。点击“立即更新”调用 `/api/app/update-install`，按钮依次显示“准备中…”“更新中 N%”（进度来自 `/api/app/update-progress`，下载 0–95%、校验 97%、启动 99%），状态行同步显示“正在下载安装包…/正在校验安装包…/正在启动安装程序…”；完成后提示按向导安装，失败则显示原因并允许重试。页面刷新后若安装仍在进行，会通过 `/api/app/update-progress` 接续显示进度。
 
 验证：Edge 无头浏览器加载真实 `index.html`，在 `desktop=1` 下切换到设置页。16 项断言通过：折叠分组、`updateDetail` 与 `btnOpenRelease` 均不存在；配置向导位于第三张卡片（机器人与服务）且为其最后一行、不在应用卡片；四行标题文案为 `WRelay 版本` / `自动检查更新` / `更新状态` / `问题反馈`；自动检查开关默认 `aria-checked=true`、点击后写入 `0`；`pendingUpdate` 存在时按钮文案为“立即更新”，清空后回到“检查更新”；`describeInstallStage` 对 downloading/verifying/launching 分别输出含 `42%`/`97%`/不含百分比的步骤文案；检查/更新按钮的实际计算宽度与高度均等于同页同类按钮（`btn_same_width`、`btn_same_height`，实测 104×38px，非硬编码）。后端另做单元验证：资产选择在 Test 包与正式包并存时选 `WRelay-Setup.exe`、无安装包或无可执行资产时返回 `None`；`_verify_installer` 对 `MZ` 头返回真、对 ZIP 头与不存在文件返回假；`_download_installer` 在联网前拒绝 `http://`、非白名单主机、`github.com.evil.com` 这类后缀伪装与 `file://`。未在真实 WebView2 与系统 DPI 下复核；未实际执行一次真实下载与安装（避免替换正在使用的程序）。
+
+### 统一手动转发卡（2026-10-18，当前规范）
+
+Discord / X / Bilibili 三页原有的三张「手动转发」卡从各自页面移除（各页的自动翻译卡保留），手动转发统一收拢到「QQ → QQ」页，在转发组卡下方放一张与「定时消息」卡同规格的小卡片（`#unifiedRelayCard`，沿用原 `relay-link-description` / `relay-link-actions` 布局）。`discord-page.js` 在进入 QQ 页时把 `#scheduledMessageCard` 与 `#unifiedRelayCard` 一起移入同一下方网格 `.func-cards`（原名 `.qq-other-cards`，2026-10-21 起共享 `#autoTranslationCard` 也移入同一网格，并把该网格规则推广到「Bilibili」页，见上文统一尺寸规则；离开页面时按原位置还原），两卡同宽、最小高度 164px、同内边距；卡内保留原结构：标题在上、来源说明居中、动作栏贴底，左下角「已注册来源」按钮（`#btnUnifiedRelaySources`）打开 `#relayChannelsModal`，该弹窗顶部加三链路 Tab（`#relayScopeTabs`，Discord / X / Bilibili），可分别查看并管理各链路的注册频道/账号/来源（原 `openRelayChannelsModal(scope)` 拆为 `openUnifiedRelaySourcesModal` / `switchRelayChannelsTab` / `renderRelayChannelsList`）；右下角保留统一的「消息筛选」按钮（`#btnUnifiedRelayFilter`，漏斗图标）。
+
+验证（2026-10-19）：本地静态服务器加载 `index.html?desktop=1`，切到 QQ → QQ 页，`#unifiedRelayCard` 与 `#scheduledMessageCard` 均位于 `.qq-other-cards`（现 `.func-cards`）网格内，实测两卡均为 527×164px（同宽同高、同一行），`#pageQQ` 与文档均无横向溢出；「已注册来源」贴卡片内容区左缘、「消息筛选」漏斗贴右缘，两者垂直居中于同一动作栏。窄屏断点通过强制单列验证，按钮自动换行，无横向溢出。
+
+验证（2026-10-21，统一尺寸规则正式化后）：无头 Chromium 以 1440px 视口加载 `index.html?desktop=1`，QQ → QQ 页的 `#scheduledMessageCard`、`#unifiedRelayCard`、`#autoTranslationCard` 实测均为 554×164px，前两卡同排（x=270 / x=840），「自动翻译」卡落在第二行左格（x=270、y=657）；「Bilibili」页 `#bilibiliAutoResolveCard` 同为 554×164px 且位于 `.func-cards` 网格左格。四卡计算内边距均为 `12px 18px`、`min-height:164px`、内容无水平裁切（`scrollWidth-clientWidth = 0`），文档无横向溢出；视口收窄到 1100px 时三卡退化为单列同宽（1095×164px）。
+
+验证（2026-10-21，按钮贴底与「翻译链路」二级窗口）：无头 Chromium 以 1500px 视口加载 `index.html?desktop=1`，`.func-cards` 四卡（`#scheduledMessageCard`、`#unifiedRelayCard`、`#autoTranslationCard`、`#bilibiliAutoResolveCard`）实测同为 584×164px、`display:flex`、`gap:0`、内边距 `12px 18px`，两列排布（x=270 / x=870，第三卡换行到第二行左格）；每张卡的动作按钮距卡片左缘 19px、距底缘 13px（即贴内容区左下角），只有「消息筛选」漏斗在右下角（距左缘 529px、右缘留 19px）。视口收窄到 1100px 时四卡退化为单列同宽（985×164px）且按钮仍贴左下。点击「翻译链路」后 `#translationChainsModal` 以 `display:flex` 打开，ModalShell 生成 `modal-shell modal-small` 外壳与自动「关闭」页脚。本轮为静态页面 + 拦截后端的布局检查，未写入真实配置。
+
+验证（2026-10-21，二级窗口统一规则）：无头 Chromium 以 1500px 视口加载 `index.html?desktop=1`（`?desktop=1` 触发 `body.desktop-host`，`localStorage.wrelay_desktop_active_page` 选页），逐个打开窗口量测：`#scheduledMessageContentModal`（880×264）、`#relayChannelsModal`（640×205）、`#translationChainsModal`（520×399）、`#backupRestoreModal`（520×633）、`#runtimeLogModal`（880×659）、`#translationSourceModal`（520×353）正文均为 `modal-body modal-grid`，首行左缘距外壳 21px（= 正文内边距）；底栏第一个按钮左缘距底栏 20px、最后一个按钮右缘距底栏 20px（编辑定时消息＝取消/确定、已注册频道＝取消/保存、翻译设置＝取消/保存、备份＝导出 ZIP+选择 ZIP/恢复配置、运行日志＝复制日志/清空日志），只有一个自动「关闭」按钮的翻译链路窗口保持贴右。胶囊开关实测轨道 32×18、距按钮右缘 13px：翻译链路四个整行开关（宽 468px）、翻译设置三个来源级开关、备份「已开启」、日志「自动滚动：开」，卡片上的「启用定时发送」「启用自动解析」同为整行胶囊（宽 546px，距卡左缘 19px、底缘 13px）。「已注册频道」的三链路 Tab 已移入窗口头部工具区（`#relayScopeTabs` 的父元素为 `.modal-header-actions`）。结构由 `scripts/test_desktop_modal_grid.py` 固化校验。
+
+验证（2026-10-22，离线补发小卡片）：无头 Chromium 以 1500px 视口加载 `index.html?desktop=1` 并切到 Discord → QQ 页，`#pageDiscord > .func-cards` 为两列网格（每列 576.2px），`#backfillCard` 实测 576×164px，标题从内容区顶部起排；单次补发上限与待补发同行，胶囊 x=289、立即补发紧随其后，刷新/清空贴内容区右缘（右缘 827px，内容区右缘 828px）。视口收窄到 1000px 时网格退化为单列（870×164px），按钮仍贴底且页面无横向溢出。切换到 QQ→QQ 页后卡片恢复原位置并隐藏，返回 Discord 页重新进入网格且只有一份；`scripts/test_desktop_modal_grid.py` 新增网格覆盖、旧横向分组移除与动作栏顺序校验。
+
+验证（2026-10-22，卡片胶囊落位）：无头 Chromium 以 1500px 视口加载 `index.html?desktop=1` 并切到 QQ → QQ 页，「定时消息」卡动作栏内容宽 539px、左缘 x=289，「编辑定时消息」贴左（x=289，宽 108px），「启用定时发送」胶囊实测 x=693、右缘 827px，与动作栏右缘（828px）对齐；视口收窄到 1000px 时胶囊右缘 932px，仍与动作栏右缘对齐。Bilibili 页只有一个胶囊的「自动解析」卡保持贴左（x=289）。`scripts/test_desktop_modal_grid.py` 新增两项结构校验：非首位胶囊的 `margin-left: auto`，以及其后续按钮清除左外边距，并校验「定时消息」动作栏中编辑按钮位于胶囊之前。
+
+验证（2026-10-22，扫描失败与胶囊外观）：诊断脚本改用 `DISCORD_PROXY` 后，以 `.venv` 直接运行 `scripts/diagnose_channels.py` 成功（55 个可见频道、29 个可读，退出码 0）；此前同一命令因使用已清除的 `HTTP_PROXY` 报 `httpx.ConnectError`。面板侧在诊断进程非零退出时会带回 stderr 或 stdout 的最后一段原因，`scripts/test_backfill_api_timeout.py` 覆盖 stdout 回退。无头 Chromium 以 1280px 视口加载 `index.html?desktop=1`：`#btnBackfillToggle` 实测 108×36、标签右缘到轨道 8px，`#btnScheduledMessageToggle` 134×36、间距 8px，`#btnBilibiliAutoResolveToggle` 134×36、间距 8px；三者与二级窗口内 `#btnTranslationDiscord`（整行 468×36）、`#btnAutoBackupToggle`（200×36）、`#btnLogAutoScroll`（407×36）的计算边框均为 `0px none`、常态背景均为透明。打开翻译链路窗口后首个胶囊被自动聚焦，焦点框只落在轨道上（按钮本身 `outline-style: none`），按钮外围不再出现圆环。结构校验 `scripts/test_desktop_modal_grid.py` 与本轮接口测试均通过。
+
+验证（2026-10-22，设置页独立开关）：无头 Chromium 以 1500px 视口加载设置页，`#btnAutoUpdateCheck`、`#btnStatusSheenToggle`、`#btnFailureNotificationToggle`、`#btnSettingsAutostart` 四个开关实测均为 32×18，计算边框 `0px none`、背景透明、`padding: 0`；轨道 32×18、圆点 14×14，开启态位移 14px。截图确认原先 44×26 的圆角外框消失，停用开关只剩灰色轨道，禁用态仍保留整体透明度。`scripts/test_desktop_modal_grid.py` 已增加对应结构校验。
+
+「消息筛选」复用同一个 `#filterModal`，用三个 Tab 分屏编辑 Discord / X / Bilibili 三套筛选（`#filterScopeTabs`，scope 为 relay / xrelay / birelay）。每个 Tab 只编辑该链路实际支持的消息类型：Discord 六类，X 为文字/图片/视频，Bilibili 为文字/图片/链接/视频；保存仍走原 `filterSave` 按 scope 写各自的 `qq_c2c_relay_filter` / `x_c2c_relay_filter` / `bilibili_c2c_relay_filter`，只落盘消息类型，不触碰后端。因为后端 `command.py` 对私聊手动转发只应用 `get_enabled_message_types`（消息类型），不应用 X 推文类型 / Bilibili 投稿类型筛选，`config._c2c_relay_filter` 也只读 `filter_message_types`，所以统一弹窗不提供推文/投稿类型选项，避免出现保存了但不生效的筛选项。统一卡漏斗高亮规则：三条链路任一有生效消息类型筛选即点亮（`renderUnifiedRelayFilter`）。原 `renderRelayLinkCard`/`renderXRelayLinkCard`/`renderBilibiliRelayLinkCard` 与 `openRelayFilterModal`/`openXRelayFilterModal`/`openBilibiliRelayFilterModal` 移除，由 `renderUnifiedRelayFilter` / `openUnifiedRelayFilterModal` / `switchRelayFilterTab` 取代。

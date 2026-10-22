@@ -12,9 +12,26 @@ from plugins.scheduled_message_media import (
     SCHEDULED_IMAGES_TOTAL_MAX_BYTES,
     decode_scheduled_image_data,
 )
+from plugins.filter import (
+    ALL_MESSAGE_TYPES,
+    DISCORD_MESSAGE_TYPES,
+    X_MESSAGE_TYPES,
+    BILIBILI_MESSAGE_TYPES,
+)
 
 AI_TIMEOUT_SECONDS_MAX = 300
 AI_OUTPUT_TOKENS_MAX = 1_000_000
+
+# 定时消息的目标模式：指定群 / QQ→QQ 转发组 / 全部已启用群。
+# 缺少 target_mode 的旧消息按「指定群」处理，并沿用顶层 target_groups。
+SCHEDULED_TARGET_GROUP = "groups"
+SCHEDULED_TARGET_FORWARD_GROUP = "forward_group"
+SCHEDULED_TARGET_ALL = "all"
+SCHEDULED_TARGET_MODES = (
+    SCHEDULED_TARGET_GROUP,
+    SCHEDULED_TARGET_FORWARD_GROUP,
+    SCHEDULED_TARGET_ALL,
+)
 
 
 def _legacy_scheduled_entry(scheduled):
@@ -184,13 +201,13 @@ class SettingsModel(dict):
             }],
             "discord_channels": channels,
             "qq_c2c_relay_filter": {
-                "filter_message_types": ["文字", "图片", "语音", "文件", "链接", "表情"],
+                "filter_message_types": list(DISCORD_MESSAGE_TYPES),
             },
             "x_c2c_relay_filter": {
-                "filter_message_types": ["文字", "图片", "语音", "文件", "链接", "表情"],
+                "filter_message_types": list(X_MESSAGE_TYPES),
             },
             "bilibili_c2c_relay_filter": {
-                "filter_message_types": ["文字", "图片", "语音", "文件", "链接", "表情"],
+                "filter_message_types": list(BILIBILI_MESSAGE_TYPES),
             },
             "backfill_enabled": True,
             "backfill_limit": 10,
@@ -220,6 +237,7 @@ class SettingsModel(dict):
                 "overflow_policy": "latest",
             },
             "bilibili_forwarding_groups": [],
+            "bilibili_auto_resolve": {"enabled": False},
             "scheduled_message": {
                 "enabled": False,
                 "content": "",
@@ -416,6 +434,15 @@ def _validate_x_sources(data):
                 for post_type in post_types
             ):
                 return "x_rss_sources.filter_post_types 包含不支持的类型"
+        if "filter_message_types" in item:
+            values = item["filter_message_types"]
+            allowed = set(X_MESSAGE_TYPES) | set(ALL_MESSAGE_TYPES)
+            if not isinstance(values, list) or any(
+                not isinstance(value, str) or value not in allowed
+                for value in values
+            ):
+                return "x_rss_sources.filter_message_types 包含不支持的类型"
+            # 接受旧六类型配置，读取层将「文件」迁移为「视频」。
 
     if "x_protection" in data:
         protection = data.get("x_protection")
@@ -451,8 +478,6 @@ def _validate_bilibili_sources_and_protection(data):
                 return "bilibili_sources.%s 必须是字符串" % key
         if "enabled" in item and not isinstance(item["enabled"], bool):
             return "bilibili_sources.enabled 必须是布尔值"
-        if "forward_video" in item and not isinstance(item["forward_video"], bool):
-            return "bilibili_sources.forward_video 必须是布尔值"
         if "filter_bilibili_post_types" in item:
             post_types = item["filter_bilibili_post_types"]
             allowed_post_types = {"视频", "专栏", "动态"}
@@ -463,6 +488,15 @@ def _validate_bilibili_sources_and_protection(data):
                 return "bilibili_sources.filter_bilibili_post_types 必须是非空的视频、专栏或动态类型列表"
             if kind != "up" and any(post_type != "视频" for post_type in post_types):
                 return "标签与关键词来源只支持视频投稿类型"
+        if "filter_message_types" in item:
+            values = item["filter_message_types"]
+            allowed = set(BILIBILI_MESSAGE_TYPES) | set(ALL_MESSAGE_TYPES)
+            if not isinstance(values, list) or any(
+                not isinstance(value, str) or value not in allowed
+                for value in values
+            ):
+                return "bilibili_sources.filter_message_types 包含不支持的类型"
+            # 与投稿类型筛选取交集后，若没有任何可用内容组件，该条不投递。
         for key in (
             "filter_tags",
             "filter_keywords",
@@ -500,35 +534,42 @@ def _validate_bilibili_sources_and_protection(data):
         if protection.get("overflow_policy") not in {"latest", "oldest"}:
             return "bilibili_protection.overflow_policy 只支持 latest 或 oldest"
 
+    auto_resolve = data.get("bilibili_auto_resolve")
+    if auto_resolve is not None:
+        if not isinstance(auto_resolve, dict):
+            return "bilibili_auto_resolve 必须是对象"
+        if not isinstance(auto_resolve.get("enabled", False), bool):
+            return "bilibili_auto_resolve.enabled 必须是布尔值"
+
 
 def _validate_qq_c2c_filters(data):
-    relay_filter = data.get("qq_c2c_relay_filter")
-    if not isinstance(relay_filter, dict):
-        return "qq_c2c_relay_filter 必须是对象"
-    values = relay_filter.get("filter_message_types")
-    if not isinstance(values, list):
-        return "qq_c2c_relay_filter.filter_message_types 必须是列表"
-    allowed_types = {"文字", "图片", "语音", "文件", "链接", "表情"}
-    if any(not isinstance(value, str) or value not in allowed_types for value in values):
-        return "qq_c2c_relay_filter.filter_message_types 包含不支持的类型"
+    """校验三条手动转发的类型筛选，各自使用该链路支持的类型集。
 
-    x_relay_filter = data.get("x_c2c_relay_filter")
-    if not isinstance(x_relay_filter, dict):
-        return "x_c2c_relay_filter 必须是对象"
-    x_values = x_relay_filter.get("filter_message_types")
-    if not isinstance(x_values, list):
-        return "x_c2c_relay_filter.filter_message_types 必须是列表"
-    if any(not isinstance(value, str) or value not in allowed_types for value in x_values):
-        return "x_c2c_relay_filter.filter_message_types 包含不支持的类型"
+    面板只写该链路支持的类型；这里按同一集合校验，避免手改配置写入
+    永远不会被渲染的类型。
 
-    bilibili_relay_filter = data.get("bilibili_c2c_relay_filter")
-    if not isinstance(bilibili_relay_filter, dict):
-        return "bilibili_c2c_relay_filter 必须是对象"
-    bilibili_values = bilibili_relay_filter.get("filter_message_types")
-    if not isinstance(bilibili_values, list):
-        return "bilibili_c2c_relay_filter.filter_message_types 必须是列表"
-    if any(not isinstance(value, str) or value not in allowed_types for value in bilibili_values):
-        return "bilibili_c2c_relay_filter.filter_message_types 包含不支持的类型"
+    兼容性：老版本三条链路共用六类型集合，存量配置里可能存着本链路不支持
+    的类型（例如 X 的「表情」）。这些值在校验层必须继续接受——否则会被判为
+    "配置损坏"，触发内存降级到默认值并丢掉用户全部配置。读取层
+    （config._c2c_relay_filter）会按链路支持集归一化，面板保存时也会写回
+    规范值，因此老配置会在下一次保存时自然收敛。
+    """
+    legacy_types = set(ALL_MESSAGE_TYPES)
+    for key, supported, label in (
+        ("qq_c2c_relay_filter", DISCORD_MESSAGE_TYPES, "qq_c2c_relay_filter"),
+        ("x_c2c_relay_filter", X_MESSAGE_TYPES, "x_c2c_relay_filter"),
+        ("bilibili_c2c_relay_filter", BILIBILI_MESSAGE_TYPES, "bilibili_c2c_relay_filter"),
+    ):
+        relay_filter = data.get(key)
+        if not isinstance(relay_filter, dict):
+            return "%s 必须是对象" % label
+        values = relay_filter.get("filter_message_types")
+        if not isinstance(values, list):
+            return "%s.filter_message_types 必须是列表" % label
+        # 接受该链路支持的类型与老版本的六类型集合（后者由读取层归一化）。
+        allowed_types = set(supported) | legacy_types
+        if any(not isinstance(value, str) or value not in allowed_types for value in values):
+            return "%s.filter_message_types 包含不支持的类型" % label
 
 
 def _validate_backfill_and_failure_notifications(data):
@@ -657,6 +698,20 @@ def _validate_scheduled_messages(data):
             return prefix + ".image_name 不能在没有图片时填写"
         if not content.strip() and not image_data:
             return prefix + ".content 不能为空（仅图片消息除外）"
+        target_mode = message.get("target_mode", SCHEDULED_TARGET_GROUP)
+        if target_mode not in SCHEDULED_TARGET_MODES:
+            return prefix + ".target_mode 必须是 groups、forward_group 或 all"
+        for key in ("target_groups", "forward_groups"):
+            values = message.get(key, [])
+            if not isinstance(values, list):
+                return prefix + "." + key + " 必须是列表"
+            for value in values:
+                if not isinstance(value, str) or not value.strip():
+                    return prefix + "." + key + " 的每一项必须是非空字符串"
+        if target_mode == SCHEDULED_TARGET_FORWARD_GROUP and not message.get("forward_groups"):
+            return prefix + ".forward_groups 在转发组模式下不能为空"
+        # 指定群模式允许空列表：表示沿用顶层 scheduled_message.target_groups 默认目标，
+        # 是「未单独设置目标」的合法状态，不能在保存时判为配置损坏。
         schedule_type = message.get("schedule_type")
         if schedule_type not in ("interval", "calendar"):
             return prefix + ".schedule_type 必须是 interval 或 calendar"

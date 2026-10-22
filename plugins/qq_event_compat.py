@@ -6,7 +6,9 @@ from nonebot.adapters.qq import Adapter as QQAdapter
 _installed = False
 
 
-def _normalize_reply_element(item, default_message_type=0):
+def _normalize_reply_element(
+    item, default_message_type=0, fallback_content=""
+):
     if not isinstance(item, dict):
         return item, False
     normalized = dict(item)
@@ -17,7 +19,41 @@ def _normalize_reply_element(item, default_message_type=0):
     if not isinstance(normalized.get("msg_idx"), str):
         normalized["msg_idx"] = ""
         changed = True
+    content = normalized.get("content")
+    if not isinstance(content, str):
+        normalized["content"] = fallback_content
+        changed = True
+    elif not content.strip() and fallback_content:
+        normalized["content"] = fallback_content
+        changed = True
     return normalized, changed
+
+
+def _parallel_message_content(data):
+    """取 QQ 新引用载荷的引用内容；缺失该字段时返回空字符串。"""
+    parallel = data.get("parallel_message")
+    nodes = parallel.get("msg_nodes") if isinstance(parallel, dict) else None
+    if not isinstance(nodes, list):
+        return ""
+    return "\n".join(
+        node["content"]
+        for node in nodes
+        if isinstance(node, dict)
+        and isinstance(node.get("content"), str)
+        and node["content"].strip()
+    )
+
+
+def _reply_ref_index(data):
+    scene = data.get("message_scene")
+    ext = scene.get("ext") if isinstance(scene, dict) else None
+    if not isinstance(ext, list):
+        return ""
+    prefix = "ref_msg_idx="
+    for value in ext:
+        if isinstance(value, str) and value.startswith(prefix):
+            return value[len(prefix):]
+    return ""
 
 
 def normalize_qq_dispatch_payload(payload):
@@ -32,12 +68,39 @@ def normalize_qq_dispatch_payload(payload):
     normalized_data = dict(data)
     changed = False
 
+    parallel_content = _parallel_message_content(data)
+    ref_idx = _reply_ref_index(data)
     elements = data.get("msg_elements")
     if isinstance(elements, list):
+        missing_content = [
+            index
+            for index, item in enumerate(elements)
+            if isinstance(item, dict)
+            and not (
+                isinstance(item.get("content"), str)
+                and item["content"].strip()
+            )
+        ]
+        quote_index = None
+        if parallel_content:
+            if ref_idx:
+                quote_index = next(
+                    (
+                        index
+                        for index in missing_content
+                        if elements[index].get("msg_idx") == ref_idx
+                    ),
+                    None,
+                )
+            if quote_index is None and len(missing_content) == 1:
+                quote_index = missing_content[0]
+
         normalized_elements = []
-        for item in elements:
+        for index, item in enumerate(elements):
             normalized_item, item_changed = _normalize_reply_element(
-                item, default_message_type
+                item,
+                default_message_type,
+                parallel_content if index == quote_index else "",
             )
             normalized_elements.append(normalized_item)
             changed = changed or item_changed
@@ -46,7 +109,7 @@ def normalize_qq_dispatch_payload(payload):
 
     reply = data.get("reply")
     normalized_reply, reply_changed = _normalize_reply_element(
-        reply, default_message_type
+        reply, default_message_type, parallel_content
     )
     if reply_changed:
         normalized_data["reply"] = normalized_reply

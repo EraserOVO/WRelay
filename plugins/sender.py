@@ -526,7 +526,136 @@ async def send_media_items(qq_bot, groups, media_items, channel_id="", message_i
     return ok_map
 
 
-async def send_relay_message(text_parts, media_items, groups=None, channel_id="", message_id=""):
+async def _send_source_tagged_content(
+    qq_bot, groups, text_parts, media_items, source_label,
+    channel_id="", message_id="",
+):
+    """QQ→QQ 群手动转发：图片消息先发送来源/正文，再单独发送图片。"""
+    source_line = "转发于「{}」：".format(
+        str(source_label or "未知群").replace("\r", " ").replace("\n", " ").strip()
+    )
+    body_parts = [
+        part.copy() if hasattr(part, "copy") else part
+        for part in text_parts
+    ]
+    body_text = "".join(
+        (getattr(part, "data", None) or {}).get("text", "")
+        for part in body_parts
+        if getattr(part, "type", "") == "text"
+    ).strip()
+    heading = make_text(source_line + ("\n\n" if body_text else ""))
+    full_text_parts = [heading] + body_parts
+    ok_map = {group: True for group in groups}
+
+    inline_images = [
+        part for part in body_parts
+        if getattr(part, "type", "") in ("image", "file_image")
+    ]
+    body_without_images = [
+        part for part in body_parts
+        if getattr(part, "type", "") not in ("image", "file_image")
+    ]
+    has_image_media = any(
+        str(item.get("kind") or "") == "图片"
+        or getattr(item.get("segment"), "type", "") in ("image", "file_image")
+        for item in media_items
+        if isinstance(item, dict)
+    )
+
+    # QQ 群富媒体接口把文本和图片分开发送，客户端固定把图片显示在文字前。
+    # 要保证来源/正文先出现，含图片时改为先发送完整文字，再逐条发图片。
+    if inline_images or has_image_media:
+        text_results = await send_text_parts(
+            qq_bot,
+            groups,
+            [heading] + body_without_images,
+            channel_id=channel_id,
+            message_id=message_id,
+        )
+        for group in groups:
+            ok_map[group] = text_results.get(group, False)
+
+        for image_part in inline_images:
+            pending_groups = [group for group in groups if ok_map[group]]
+            if not pending_groups:
+                break
+            image_results = await send_text_parts(
+                qq_bot,
+                pending_groups,
+                [image_part],
+                channel_id=channel_id,
+                message_id=message_id,
+            )
+            for group in pending_groups:
+                ok_map[group] = image_results.get(group, False)
+
+        pending_groups = [group for group in groups if ok_map[group]]
+        if pending_groups and media_items:
+            media_results = await send_media_items(
+                qq_bot,
+                pending_groups,
+                media_items,
+                channel_id=channel_id,
+                message_id=message_id,
+            )
+            for group in pending_groups:
+                ok_map[group] = media_results.get(group, False)
+        return ok_map
+
+    if not media_items:
+        return await send_text_parts(
+            qq_bot,
+            groups,
+            full_text_parts,
+            channel_id=channel_id,
+            message_id=message_id,
+        )
+
+    for index, item in enumerate(media_items):
+        pending_groups = [group for group in groups if ok_map[group]]
+        if not pending_groups:
+            break
+
+        # 一条 QQ 富媒体消息只能携带一个媒体。首个附件和完整正文同泡，
+        # 后续附件各自带来源行，避免脱离来源群上下文。
+        caption_parts = full_text_parts if index == 0 else [make_text(source_line)]
+        message = QQMessage([
+            part.copy() if hasattr(part, "copy") else part
+            for part in caption_parts
+        ] + [item["segment"]])
+        results = await _send_to_groups(
+            qq_bot,
+            pending_groups,
+            message,
+            channel_id=channel_id,
+            message_id=message_id,
+        )
+
+        for group in pending_groups:
+            if results.get(group):
+                continue
+            if not item.get("url"):
+                ok_map[group] = False
+                continue
+
+            fallback_parts = caption_parts + [make_media_link(item["kind"], item["url"])]
+            fallback = await send_text_parts(
+                qq_bot,
+                [group],
+                fallback_parts,
+                channel_id=channel_id,
+                message_id=message_id,
+            )
+            if not fallback.get(group):
+                ok_map[group] = False
+
+    return ok_map
+
+
+async def send_relay_message(
+    text_parts, media_items, groups=None, channel_id="", message_id="",
+    source_label=None,
+):
     """发送文字 + 媒体到指定群（默认全部启用群）；
     返回 {group_openid: 是否全部送达}；QQ Bot 未连接返回空 dict"""
     bot_ids = None
@@ -582,14 +711,27 @@ async def send_relay_message(text_parts, media_items, groups=None, channel_id=""
     async def send_for_bot(bot, target_groups):
         result = {group: True for group in target_groups}
         try:
-            if text_parts:
+            if source_label is not None:
+                tagged_ok = await _send_source_tagged_content(
+                    bot,
+                    target_groups,
+                    text_parts,
+                    media_items,
+                    source_label,
+                    channel_id=channel_id,
+                    message_id=message_id,
+                )
+                for group, ok in tagged_ok.items():
+                    result[group] = result[group] and ok
+            elif text_parts:
                 text_ok = await send_text_parts(bot, target_groups, text_parts, channel_id=channel_id, message_id=message_id)
                 for group, ok in text_ok.items():
                     result[group] = result[group] and ok
-            media_groups = [group for group in target_groups if result[group]]
-            media_ok = await send_media_items(bot, media_groups, media_items, channel_id=channel_id, message_id=message_id)
-            for group, ok in media_ok.items():
-                result[group] = result[group] and ok
+            if source_label is None:
+                media_groups = [group for group in target_groups if result[group]]
+                media_ok = await send_media_items(bot, media_groups, media_items, channel_id=channel_id, message_id=message_id)
+                for group, ok in media_ok.items():
+                    result[group] = result[group] and ok
         except asyncio.CancelledError:
             raise
         except Exception:

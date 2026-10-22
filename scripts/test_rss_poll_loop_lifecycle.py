@@ -553,8 +553,8 @@ async def verify_bilibili_manual_post_request_shutdown():
     try:
         with mock.patch.object(
             bilibili_mod,
-            "parse_video_url",
-            return_value={"bvid": "BV1test", "avid": "", "short_url": None, "page": 1},
+            "parse_manual_post_url",
+            return_value={"kind": "视频", "video_ref": {"bvid": "BV1test", "avid": "", "short_url": None, "page": 1}},
         ):
             caller = asyncio.create_task(
                 bilibili_mod.fetch_bilibili_manual_post(
