@@ -139,10 +139,10 @@ body .modal-shell :is(.diagnostic-row, .status-row) { display: flex; align-items
 /* The document (HTML) is the page scroller; reserve its gutter on every route. */
 html { scrollbar-gutter: stable; }
 @supports not (scrollbar-gutter: stable) { html { overflow-y: scroll; } }
-body :is(#xrssCard, #bilibiliCard) .rss-status-line { display: flex; align-items: center; flex-wrap: nowrap; gap: 8px; min-width: 0; overflow-x: auto; }
-body.desktop-host :is(#xrssCard, #bilibiliCard) > :is(h2, .rss-status-line) { grid-column: 1 / -1; }
-body :is(#xrssCard, #bilibiliCard) .rss-status-line > .badge { flex: none; }
-body :is(#xrssCard, #bilibiliCard) .rss-status-line > .xrss-summary { flex: 0 0 auto; max-width: none; flex-wrap: nowrap; white-space: nowrap; }
+body :is(#xrssCard, #bilibiliCard, #youtubeCard) .rss-status-line { display: flex; align-items: center; flex-wrap: nowrap; gap: 8px; min-width: 0; overflow-x: auto; }
+body.desktop-host :is(#xrssCard, #bilibiliCard, #youtubeCard) > :is(h2, .rss-status-line) { grid-column: 1 / -1; }
+body :is(#xrssCard, #bilibiliCard, #youtubeCard) .rss-status-line > .badge { flex: none; }
+body :is(#xrssCard, #bilibiliCard, #youtubeCard) .rss-status-line > .xrss-summary { flex: 0 0 auto; max-width: none; flex-wrap: nowrap; white-space: nowrap; }
 .rss-status-line .xrss-summary > * + *::before { content: "·"; color: var(--muted); margin-right: 8px; }
 body.desktop-host .discord-whitelist h2 > .foldbtn { margin-left: auto; }
 body.desktop-host .discord-whitelist .addrow { display: flex; justify-content: flex-start; align-items: center; gap: 8px; padding: 11px 0; margin: 0; min-height: 0; }

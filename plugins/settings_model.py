@@ -17,6 +17,7 @@ from plugins.filter import (
     DISCORD_MESSAGE_TYPES,
     X_MESSAGE_TYPES,
     BILIBILI_MESSAGE_TYPES,
+    YOUTUBE_MESSAGE_TYPES,
 )
 
 AI_TIMEOUT_SECONDS_MAX = 300
@@ -238,6 +239,15 @@ class SettingsModel(dict):
             },
             "bilibili_forwarding_groups": [],
             "bilibili_auto_resolve": {"enabled": False},
+            "youtube_sources": [],
+            "youtube_poll_interval": 300,
+            "youtube_protection": {
+                "min_send_interval": 60,
+                "hourly_limit": 10,
+                "backlog_limit": 10,
+                "overflow_policy": "latest",
+            },
+            "youtube_forwarding_groups": [],
             "scheduled_message": {
                 "enabled": False,
                 "content": "",
@@ -335,6 +345,7 @@ class SettingsModel(dict):
             ("discord_channels", "translation"),
             ("x_rss_sources", "translation"),
             ("bilibili_sources", "translation"),
+            ("youtube_sources", "translation"),
         ):
             items = result.get(item_key)
             if not isinstance(items, list):
@@ -540,6 +551,63 @@ def _validate_bilibili_sources_and_protection(data):
             return "bilibili_auto_resolve 必须是对象"
         if not isinstance(auto_resolve.get("enabled", False), bool):
             return "bilibili_auto_resolve.enabled 必须是布尔值"
+
+
+def _validate_youtube_sources_and_protection(data):
+    # 缺省按空列表处理：接入 YouTube 之前的 settings.json 和老备份没有该字段，
+    # 而维护检查与备份校验读的是未归一化的原始文件，要求字段存在会把
+    # 正常老配置判成"损坏"，并让每小时自动备份一直失败。
+    youtube_sources = data.get("youtube_sources", [])
+    if not isinstance(youtube_sources, list):
+        return "youtube_sources 必须是列表"
+    for item in youtube_sources:
+        if not isinstance(item, dict):
+            return "youtube_sources 的每一项必须是对象"
+        if "kind" in item and item["kind"] != "channel":
+            return "youtube_sources.kind 只支持 channel"
+        for key in ("id", "value", "channel", "name"):
+            if key in item and not isinstance(item[key], str):
+                return "youtube_sources.%s 必须是字符串" % key
+        if "enabled" in item and not isinstance(item["enabled"], bool):
+            return "youtube_sources.enabled 必须是布尔值"
+        if "filter_keywords" in item:
+            keywords = item["filter_keywords"]
+            if not isinstance(keywords, list) or any(
+                not isinstance(keyword, str) for keyword in keywords
+            ):
+                return "youtube_sources.filter_keywords 必须是字符串列表"
+        if "filter_message_types" in item:
+            values = item["filter_message_types"]
+            allowed = set(YOUTUBE_MESSAGE_TYPES) | set(ALL_MESSAGE_TYPES)
+            if not isinstance(values, list) or any(
+                not isinstance(value, str) or value not in allowed
+                for value in values
+            ):
+                return "youtube_sources.filter_message_types 包含不支持的类型"
+        for translation_key in (
+            "translation_enabled",
+            "translation_append_original",
+            "translation_show_datetime",
+        ):
+            if translation_key in item and not isinstance(item[translation_key], bool):
+                return "youtube_sources.%s 必须是布尔值" % translation_key
+
+    if "youtube_protection" in data:
+        protection = data.get("youtube_protection")
+        if not isinstance(protection, dict):
+            return "youtube_protection 必须是对象"
+        for key in ("min_send_interval", "hourly_limit", "backlog_limit"):
+            value = protection.get(key)
+            if not isinstance(value, int) or isinstance(value, bool):
+                return "youtube_protection.%s 必须是整数" % key
+        if not 0 <= protection["min_send_interval"] <= 86400:
+            return "youtube_protection.min_send_interval 范围必须是 0-86400"
+        if not 1 <= protection["hourly_limit"] <= 10000:
+            return "youtube_protection.hourly_limit 范围必须是 1-10000"
+        if not 1 <= protection["backlog_limit"] <= 1000:
+            return "youtube_protection.backlog_limit 范围必须是 1-1000"
+        if protection.get("overflow_policy") not in {"latest", "oldest"}:
+            return "youtube_protection.overflow_policy 只支持 latest 或 oldest"
 
 
 def _validate_qq_c2c_filters(data):
@@ -808,6 +876,7 @@ def _validate_forwarding_groups(
         ("forwarding_groups", ("channels", "groups")),
         ("x_forwarding_groups", ("sources", "groups")),
         ("bilibili_forwarding_groups", ("sources", "groups")),
+        ("youtube_forwarding_groups", ("sources", "groups")),
         ("qq_forwarding_groups", ("groups",)),
     ):
         if not validate_forwarding_groups:
@@ -855,6 +924,7 @@ def validate_settings(
         _validate_account_entries,
         _validate_x_sources,
         _validate_bilibili_sources_and_protection,
+        _validate_youtube_sources_and_protection,
         _validate_qq_c2c_filters,
         _validate_backfill_and_failure_notifications,
         _validate_scheduled_messages,

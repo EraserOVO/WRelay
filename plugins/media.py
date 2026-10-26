@@ -224,7 +224,7 @@ def make_media_link(kind, url):
 
 
 def _get_proxy(url):
-    """Discord/X media CDNs use DISCORD_PROXY; domestic media stays on system routing."""
+    """Discord/X/YouTube media CDNs use DISCORD_PROXY; domestic media stays on system routing."""
     try:
         host = (urlsplit(str(url)).hostname or "").lower()
     except (TypeError, ValueError):
@@ -234,6 +234,15 @@ def _get_proxy(url):
         or host.endswith((".discord.com", ".discordapp.com", ".discordapp.net"))
         or host == "twimg.com"
         or host.endswith(".twimg.com")
+        or host == "youtube.com"
+        or host.endswith(".youtube.com")
+        or host == "youtu.be"
+        or host == "ytimg.com"
+        or host.endswith(".ytimg.com")
+        or host == "ggpht.com"
+        or host.endswith(".ggpht.com")
+        or host == "googleusercontent.com"
+        or host.endswith(".googleusercontent.com")
     ):
         return None
     try:
@@ -262,20 +271,28 @@ DEFAULT_MEDIA_CONCURRENCY = 4
 DEFAULT_MAX_DOWNLOAD_BYTES = 30 * 1024 * 1024
 _media_client = None
 _discord_media_client = None
+_discord_media_proxy = None
 _media_download_tasks = set()
 _media_stopping = False
 
 
 def _get_media_client(proxy=None):
-    global _media_client, _discord_media_client
+    global _media_client, _discord_media_client, _discord_media_proxy
     if proxy:
-        if _discord_media_client is None:
+        if _discord_media_client is None or proxy != _discord_media_proxy:
+            stale = _discord_media_client
             _discord_media_client = httpx.AsyncClient(
                 proxy=proxy,
                 timeout=_get_timeout(),
                 follow_redirects=True,
                 headers={"User-Agent": "Mozilla/5.0"},
             )
+            _discord_media_proxy = proxy
+            if stale is not None:
+                try:
+                    asyncio.get_running_loop().create_task(stale.aclose())
+                except RuntimeError:
+                    pass
         return _discord_media_client
     if _media_client is None:
         # 非代理媒体走系统路由，不读取环境/系统代理。
@@ -293,7 +310,7 @@ def _get_media_client(proxy=None):
 
 @get_driver().on_shutdown
 async def _close_media_client():
-    global _media_client, _discord_media_client, _media_stopping
+    global _media_client, _discord_media_client, _discord_media_proxy, _media_stopping
     _media_stopping = True
     current_task = asyncio.current_task()
     download_tasks = [
@@ -311,6 +328,7 @@ async def _close_media_client():
     if _discord_media_client is not None:
         await _discord_media_client.aclose()
         _discord_media_client = None
+    _discord_media_proxy = None
 
 _semaphore = None
 _semaphore_lock = threading.Lock()

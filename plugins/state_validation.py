@@ -15,7 +15,7 @@ def validate_runtime(name, data):
             values = value.values() if isinstance(value, dict) else [value]
             if any(v not in (None, '') and not _cursor(v) for v in values):
                 raise ValueError(name + '：游标无效')
-    elif name in ('x_protection.json', 'bilibili_protection.json'):
+    elif name in ('x_protection.json', 'bilibili_protection.json', 'youtube_protection.json'):
         if type(data.get('version', 1)) is not int or data.get('version', 1) != 1:
             raise ValueError(name + '：队列版本不支持')
         if not isinstance(data.get('queues', {}), dict):
@@ -49,6 +49,6 @@ def validate_runtime(name, data):
             stamp = item.get('next_try_at')
             if type(item.get('attempts', 0)) is not int or item.get('attempts', 0) < 0 or type(stamp) not in (int, float) or not math.isfinite(stamp):
                 raise ValueError(name + '：重试时间或次数无效')
-    elif name in ('x_rss.json', 'bilibili.json'):
+    elif name in ('x_rss.json', 'bilibili.json', 'youtube.json'):
         if not isinstance(data.get('sources', {}), dict):
             raise ValueError(name + '：来源状态无效')

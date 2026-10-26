@@ -74,11 +74,17 @@ from plugins.filter import (
     DISCORD_MESSAGE_TYPES,
     X_MESSAGE_TYPES,
     BILIBILI_MESSAGE_TYPES,
+    YOUTUBE_MESSAGE_TYPES,
     normalize_message_types,
 )
 from plugins.paths import data_path
 from plugins.bilibili_rate_limit import normalize_protection_config, normalize_string_list
 from plugins.x_rate_limit import normalize_x_protection_config
+from plugins.youtube_parser import (
+    channel_feed_url,
+    normalize_channel_value,
+    youtube_source_id,
+)
 
 SETTINGS_FILE = data_path("settings.json")
 
@@ -134,6 +140,10 @@ def _translation_config_for_item_data(
                 str(item.get("kind") or "up").strip().lower(),
                 str(item.get("value") or item.get("uid") or "").strip(),
             )
+        if items_name == "youtube_sources" and not candidate:
+            candidate = youtube_source_id(
+                item.get("value") or item.get("channel") or ""
+            )
         candidate_id = _x_source_key(str(candidate or "")) if items_name == "x_rss_sources" else str(candidate or "")
         if candidate_id == str(item_id):
             config["enabled"] = (
@@ -173,6 +183,12 @@ def get_x_source_translation_config(source_key, manual=False):
 def get_bilibili_source_translation_config(source_id, manual=False):
     return _translation_config_for_item(
         "translation", "bilibili_sources", source_id, manual
+    )
+
+
+def get_youtube_source_translation_config(source_id, manual=False):
+    return _translation_config_for_item(
+        "translation", "youtube_sources", source_id, manual
     )
 
 
@@ -1810,4 +1826,234 @@ def get_bilibili_status_snapshot():
         "sources": _get_bilibili_sources(data),
         "protection": normalize_protection_config(data.get("bilibili_protection")),
         "forwarding_groups": _ensure_bilibili_forwarding_groups(data),
+    }
+
+
+# =====================================================
+# YouTube 频道路由（独立于 Discord/X/Bilibili）
+#
+# 来源只支持频道：value 为 UC 频道 ID 或 @handle；@handle 由运行时
+# 解析为频道 ID 后读取 YouTube 官方 feeds/videos.xml。
+# =====================================================
+
+YOUTUBE_FORWARDING_GROUP_DEFAULT_ID = "youtube_default"
+YOUTUBE_FORWARDING_GROUP_DEFAULT_NAME = "转发组1"
+
+
+def _youtube_source_id(value):
+    return youtube_source_id(value)
+
+
+def get_youtube_poll_interval():
+    """YouTube 轮询间隔，最短 30 秒。"""
+    data = _load_settings()
+    try:
+        value = int(data.get("youtube_poll_interval") or 300)
+    except (OverflowError, TypeError, ValueError):
+        return 300
+    return value if value >= 30 else 300
+
+
+def _get_youtube_sources(data):
+    items = data.get("youtube_sources")
+    sources = []
+    if not isinstance(items, list):
+        return sources
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        value = normalize_channel_value(
+            item.get("value") or item.get("channel") or ""
+        )
+        if not value:
+            continue
+        source_id = str(item.get("id") or youtube_source_id(value)).strip()
+        if not source_id:
+            continue
+        sources.append({
+            "id": source_id,
+            "kind": "channel",
+            "value": value,
+            "name": str(item.get("name") or value).strip() or value,
+            "enabled": item.get("enabled") is True,
+            "url": channel_feed_url(value) if value.startswith("UC") else "",
+            "filter_message_types": normalize_message_types(
+                item.get("filter_message_types"), YOUTUBE_MESSAGE_TYPES
+            ),
+        })
+    return sources
+
+
+def get_youtube_sources():
+    """返回归一化 YouTube 来源列表。"""
+    return _get_youtube_sources(_load_settings())
+
+
+def _youtube_source_ids(data, only_enabled=False):
+    ids = set()
+    for item in data.get("youtube_sources") or []:
+        if not isinstance(item, dict):
+            continue
+        value = normalize_channel_value(
+            item.get("value") or item.get("channel") or ""
+        )
+        if not value:
+            continue
+        if only_enabled and item.get("enabled") is not True:
+            continue
+        ids.add(str(item.get("id") or youtube_source_id(value)).strip())
+    return ids
+
+
+def _ensure_youtube_forwarding_groups(data):
+    """YouTube 转发组内存归一化，不在读取时写盘。"""
+    raw_groups = data.get("youtube_forwarding_groups")
+    groups = raw_groups if isinstance(raw_groups, list) else []
+    valid_sources = _youtube_source_ids(data)
+    valid_groups = {
+        str(item["openid"])
+        for item in data.get("qq_group_openids", [])
+        if isinstance(item, dict) and item.get("openid")
+    }
+    normalized = []
+    seen_ids = set()
+    for item in groups:
+        if not isinstance(item, dict):
+            continue
+        group_id = str(item.get("id") or "").strip()
+        if not group_id or group_id in seen_ids:
+            continue
+        seen_ids.add(group_id)
+        sources = []
+        raw_sources = item.get("sources")
+        if not isinstance(raw_sources, list):
+            raw_sources = []
+        for source_id in raw_sources:
+            source_id = str(source_id).strip()
+            if source_id and source_id in valid_sources and source_id not in sources:
+                sources.append(source_id)
+        target_groups = []
+        raw_group_openids = item.get("groups")
+        if not isinstance(raw_group_openids, list):
+            raw_group_openids = []
+        for openid in raw_group_openids:
+            openid = str(openid).strip()
+            if openid and openid in valid_groups and openid not in target_groups:
+                target_groups.append(openid)
+        normalized.append({
+            "id": group_id,
+            "name": str(item.get("name") or "").strip() or group_id,
+            "enabled": item.get("enabled", True) is not False,
+            "sources": sources,
+            "groups": target_groups,
+        })
+
+    if not normalized:
+        normalized = [{
+            "id": YOUTUBE_FORWARDING_GROUP_DEFAULT_ID,
+            "name": YOUTUBE_FORWARDING_GROUP_DEFAULT_NAME,
+            "enabled": True,
+            "sources": sorted(_youtube_source_ids(data, only_enabled=True)),
+            "groups": _enabled_group_openids(data),
+        }]
+    data["youtube_forwarding_groups"] = normalized
+    return normalized
+
+
+def get_youtube_forwarding_groups():
+    return _ensure_youtube_forwarding_groups(_load_settings())
+
+
+def _get_youtube_groups_by_source(data):
+    enabled_sources = _youtube_source_ids(data, only_enabled=True)
+    enabled_groups = _enabled_group_openids(data)
+    if not enabled_sources or not enabled_groups:
+        return {}
+    targets_by_source = {source_id: set() for source_id in enabled_sources}
+    for forwarding_group in _ensure_youtube_forwarding_groups(data):
+        if forwarding_group.get("enabled", True) is False:
+            continue
+        for source_id in forwarding_group["sources"]:
+            if source_id in targets_by_source:
+                targets_by_source[source_id].update(forwarding_group["groups"])
+    return {
+        source_id: [group for group in enabled_groups if group in targets]
+        for source_id, targets in targets_by_source.items()
+    }
+
+
+def get_youtube_groups_for_source(source_id):
+    """YouTube 来源 → QQ 目标群的唯一实时路由入口。"""
+    data = _load_settings()
+    source_id = str(source_id or "").strip()
+    if not source_id or source_id not in _youtube_source_ids(data, only_enabled=True):
+        return []
+    enabled_groups = _enabled_group_openids(data)
+    if not enabled_groups:
+        return []
+    targets = set()
+    for forwarding_group in _ensure_youtube_forwarding_groups(data):
+        if forwarding_group.get("enabled", True) is not False and source_id in forwarding_group["sources"]:
+            targets.update(forwarding_group["groups"])
+    return [group for group in enabled_groups if group in targets]
+
+
+def _youtube_source_filter(data, source_id):
+    for item in data.get("youtube_sources") or []:
+        if not isinstance(item, dict):
+            continue
+        value = normalize_channel_value(
+            item.get("value") or item.get("channel") or ""
+        )
+        candidate_id = str(item.get("id") or youtube_source_id(value)).strip()
+        if not candidate_id or candidate_id != str(source_id):
+            continue
+        return {
+            "filter_keywords": [
+                str(keyword).strip()
+                for keyword in (item.get("filter_keywords") or [])
+                if str(keyword).strip()
+            ],
+            "filter_message_types": _source_message_types(item, YOUTUBE_MESSAGE_TYPES),
+        }
+    return {
+        "filter_keywords": [],
+        "filter_message_types": list(YOUTUBE_MESSAGE_TYPES),
+    }
+
+
+def get_youtube_source_filter(source_id):
+    """返回指定 YouTube 来源的关键词与消息类型筛选。"""
+    return _youtube_source_filter(_load_settings(), source_id)
+
+
+def get_youtube_source_delivery_config(source_id):
+    """用同一 settings 快照生成 YouTube 来源筛选与翻译配置。"""
+    data = _load_settings()
+    return {
+        "filter": _youtube_source_filter(data, source_id),
+        "translation": _translation_config_for_item_data(
+            data, "translation", "youtube_sources", source_id
+        ),
+    }
+
+
+def get_youtube_protection():
+    """返回 YouTube → QQ 全局限速与积压保护配置。"""
+    return normalize_protection_config(_load_settings().get("youtube_protection"))
+
+
+def get_youtube_polling_snapshot():
+    """用同一份 settings 快照生成一轮 YouTube 来源及目标群路由。"""
+    data = _load_settings()
+    return _get_youtube_sources(data), _get_youtube_groups_by_source(data)
+
+
+def get_youtube_status_snapshot():
+    """用同一份 settings 快照生成 YouTube 状态接口所需配置。"""
+    data = _load_settings()
+    return {
+        "sources": _get_youtube_sources(data),
+        "protection": normalize_protection_config(data.get("youtube_protection")),
+        "forwarding_groups": _ensure_youtube_forwarding_groups(data),
     }

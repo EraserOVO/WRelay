@@ -114,17 +114,17 @@
     padding: 16px 18px; margin-bottom: 16px;
   }
   /* Healthy status cards: decorative layers stay behind controls and inside the card. */
-  :is(.overview-status-card, #xrssCard, #bilibiliCard) {
+  :is(.overview-status-card, #xrssCard, #bilibiliCard, #youtubeCard) {
     position: relative;
     isolation: isolate;
     --status-ambient-color: #9fbfd6;
     --status-sheen-color: color-mix(in srgb, var(--status-ambient-color) 14%, transparent);
   }
-  body.theme-light :is(.overview-status-card, #xrssCard, #bilibiliCard) {
+  body.theme-light :is(.overview-status-card, #xrssCard, #bilibiliCard, #youtubeCard) {
     --status-ambient-color: #7e9fb9;
     --status-sheen-color: color-mix(in srgb, var(--status-ambient-color) 10%, transparent);
   }
-  :is(.overview-status-card, #xrssCard, #bilibiliCard).status-ambient-active::before {
+  :is(.overview-status-card, #xrssCard, #bilibiliCard, #youtubeCard).status-ambient-active::before {
     content: "";
     position: absolute;
     inset: 0;
@@ -132,7 +132,7 @@
     border-radius: inherit;
     pointer-events: none;
   }
-  :is(.overview-status-card, #xrssCard, #bilibiliCard).status-ambient-active::before {
+  :is(.overview-status-card, #xrssCard, #bilibiliCard, #youtubeCard).status-ambient-active::before {
     background-image: linear-gradient(110deg,
       transparent 40%, var(--status-sheen-color) 50%, transparent 60%);
     background-size: 300% 100%;
@@ -143,12 +143,12 @@
     0% { background-position: 100% 0; }
     65%, 100% { background-position: 0% 0; }
   }
-  body.status-sheen-disabled :is(.overview-status-card, #xrssCard, #bilibiliCard).status-ambient-active::before {
+  body.status-sheen-disabled :is(.overview-status-card, #xrssCard, #bilibiliCard, #youtubeCard).status-ambient-active::before {
     content: none;
     animation: none;
   }
   @media (prefers-reduced-motion: reduce) {
-    :is(.overview-status-card, #xrssCard, #bilibiliCard).status-ambient-active::before { content: none; animation: none; }
+    :is(.overview-status-card, #xrssCard, #bilibiliCard, #youtubeCard).status-ambient-active::before { content: none; animation: none; }
   }
   .card h2 { font-size: 15px; margin: 0 0 12px; color: #818DF9; }
   body.theme-light .card h2 { color: #5E6CD8; }
@@ -635,9 +635,9 @@
   }
   /* 各页转发组/白名单表统一首两列宽度，避免表格宽度差异造成左侧控件错位。 */
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) th:first-child,
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) th:first-child,
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) td.drag-handle {
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) td.drag-handle {
     width: 52px !important;
   }
   #chanList th:nth-child(2), #chanList td:nth-child(2),
@@ -925,6 +925,7 @@
   .cardrow .card:nth-child(2) { flex: 5 1 0; min-width: 0; }
   .cardrow .card#xrssCard { flex: 5 1 0; min-width: 0; }
   .cardrow .card#bilibiliCard { flex: 5 1 0; min-width: 0; }
+  .cardrow .card#youtubeCard { flex: 5 1 0; min-width: 0; }
   .cardrow .card#scheduledMessageCard { flex: 5 1 0; min-width: 0; }
   /* 机器人状态卡控制按钮行：间距收紧以在一行容纳四按钮 */
   .cardrow .card:nth-child(1) .row { gap: 6px; }
@@ -1241,7 +1242,7 @@
     .cardrow { flex-direction: column; }
     .cardrow .card:nth-child(1),
     .cardrow .card:nth-child(2),
-    .cardrow .card#xrssCard, .cardrow .card#bilibiliCard { min-width: 0; }
+    .cardrow .card#xrssCard, .cardrow .card#bilibiliCard, .cardrow .card#youtubeCard { min-width: 0; }
     .cardrow .card#scheduledMessageCard { min-width: 0; }
   }
 
@@ -1318,6 +1319,7 @@
   .overview-route-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 13px; background: #39486b; color: #dce4ff; font-size: 22px; font-weight: 700; }
   .x-icon { background: #303b4e; }
   .bili-icon { background: #4a365e; color: #e9d7ff; }
+  .youtube-icon { background: #5a3034; color: #ffd9dd; }
   .qq-icon { background: #304b61; color: #d1f0ff; }
   .overview-route-copy { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
   .overview-route-copy strong { color: var(--fg); font-size: 16px; }
@@ -1329,6 +1331,7 @@
   body.theme-light .overview-route-icon { background: #e9edff; color: #4f5fb5; }
   body.theme-light .overview-route-icon.x-icon { background: #e9edf3; color: #263244; }
   body.theme-light .overview-route-icon.bili-icon { background: #f4e9fb; color: #9146b0; }
+  body.theme-light .overview-route-icon.youtube-icon { background: #fde9ea; color: #c4303b; }
   body.theme-light .overview-route-icon.qq-icon { background: #e4f2fb; color: #26769f; }
   .recent-message-row { display: flex; align-items: center; gap: 18px; min-height: 44px; }
   #recentMessageText { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
@@ -1457,61 +1460,61 @@
   /* Table sizing is shared across all route pages. IDs get their own clipped cell. */
   .fgsection .tablewrap { min-width: 0; width: 100%; overflow-x: hidden; }
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) {
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) {
     width: 100%; min-width: 0 !important; table-layout: fixed; font-size: 13px;
   }
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) th,
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) th,
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) td {
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) td {
     overflow: hidden; padding: 7px 6px; vertical-align: middle;
   }
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) th { height: 36px; font-size: 12px; }
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) th { height: 36px; font-size: 12px; }
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) tr:not(.fgempty-row) { height: 44px; }
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) tr:not(.fgempty-row) { height: 44px; }
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) tbody tr:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) tbody tr:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) th:first-child,
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) th:first-child,
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) td.drag-handle { width: 34px !important; }
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) td.drag-handle { width: 34px !important; }
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) th:nth-child(2),
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) th:nth-child(2),
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) td:nth-child(2) { width: 38px !important; }
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) td:nth-child(2) { width: 38px !important; }
   /* Keep drag and enable controls at the X source table's shared column positions. */
   :is(#chanList, #groupList, #xSourceList, #xGroupList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) > thead > tr > th:first-child,
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) > thead > tr > th:first-child,
   :is(#chanList, #groupList, #xSourceList, #xGroupList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) > tbody > tr:not(.fgempty-row) > td.drag-handle {
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) > tbody > tr:not(.fgempty-row) > td.drag-handle {
     box-sizing: border-box;
     width: 34px !important; min-width: 34px !important; max-width: 34px !important;
     padding-left: 6px !important; padding-right: 6px !important;
   }
   :is(#chanList, #groupList, #xSourceList, #xGroupList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) > thead > tr > th:nth-child(2),
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) > thead > tr > th:nth-child(2),
   :is(#chanList, #groupList, #xSourceList, #xGroupList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) > tbody > tr:not(.fgempty-row) > td:nth-child(2) {
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) > tbody > tr:not(.fgempty-row) > td:nth-child(2) {
     box-sizing: border-box;
     width: 38px !important; min-width: 38px !important; max-width: 38px !important;
     padding-left: 6px !important; padding-right: 6px !important;
   }
   :is(#chanList, #groupList, #xSourceList, #xGroupList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) > colgroup > col.fg-drag-col {
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) > colgroup > col.fg-drag-col {
     width: 34px !important;
   }
   :is(#chanList, #groupList, #xSourceList, #xGroupList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) > colgroup > col.fg-enable-col {
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) > colgroup > col.fg-enable-col {
     width: 38px !important;
   }
   #chanList th:nth-child(3) { width: 25% !important; }
   #chanList th:nth-child(4) { width: 34% !important; }
   #chanList th:nth-child(5) { width: 112px !important; }
-  :is(#groupList, #xGroupList, #bilibiliGroupList, #qqFgGroupList) th:nth-child(3) { width: 20% !important; }
-  :is(#groupList, #xGroupList, #bilibiliGroupList, #qqFgGroupList) th:nth-child(4) { width: 16% !important; }
-  :is(#groupList, #xGroupList, #bilibiliGroupList, #qqFgGroupList) th:nth-child(5) { width: 34% !important; }
-  :is(#groupList, #xGroupList, #bilibiliGroupList, #qqFgGroupList) th:nth-child(6) { width: 48px !important; }
+  :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList) th:nth-child(3) { width: 20% !important; }
+  :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList) th:nth-child(4) { width: 16% !important; }
+  :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList) th:nth-child(5) { width: 34% !important; }
+  :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList) th:nth-child(6) { width: 48px !important; }
   :is(#userList, #xUserList) th:nth-child(3) { width: 22% !important; }
   :is(#userList, #xUserList) th:nth-child(4) { width: 18% !important; }
   :is(#userList, #xUserList) th:nth-child(5) { width: auto !important; }
@@ -1522,6 +1525,9 @@
   #bilibiliSourceList th:nth-child(3) { width: 14% !important; }
   #bilibiliSourceList th:nth-child(4) { width: auto !important; }
   #bilibiliSourceList th:nth-child(5) { width: 80px !important; }
+  #youtubeSourceList th:nth-child(3) { width: 28% !important; }
+  #youtubeSourceList th:nth-child(4) { width: auto !important; }
+  #youtubeSourceList th:nth-child(5) { width: 112px !important; }
   .mono { min-width: 0; }
   td .mono { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .id-cell { display: flex; align-items: center; gap: 4px; min-width: 0; }
@@ -1568,7 +1574,7 @@
   .xrss-summary { min-width: 0; max-width: 100%; line-height: 1.45; overflow-wrap: anywhere; }
   .xrss-summary.err { color: var(--muted); font-weight: normal; }
   .xrss-summary.err strong { color: var(--error); font-weight: 600; }
-  .cardrow :is(#xrssCard, #bilibiliCard) .xrss-summary { flex: 1 1 100%; }
+  .cardrow :is(#xrssCard, #bilibiliCard, #youtubeCard) .xrss-summary { flex: 1 1 100%; }
 
   /* Desktop settings use aligned setting rows rather than oversized action tiles. */
   .desktop-settings-grid { align-items: stretch; gap: 14px; }
@@ -1624,8 +1630,8 @@
     .page-header-actions { gap: 4px; }
     .page-header-actions .iconbtn { width: 34px; height: 34px; min-width: 34px; }
     .settings-actions { grid-template-columns: 1fr; }
-    :is(#groupList, #xGroupList, #bilibiliGroupList, #qqFgGroupList) th:nth-child(4),
-    :is(#groupList, #xGroupList, #bilibiliGroupList, #qqFgGroupList) td:nth-child(4) { display: none; }
+    :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList) th:nth-child(4),
+    :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList) td:nth-child(4) { display: none; }
     .overview-grid { grid-template-columns: 1fr; }
     .recent-message-row { flex-wrap: wrap; }
     #recentMessageResult { flex-basis: auto; max-width: 100%; }
@@ -1636,6 +1642,7 @@
     .cardrow .card,
     .cardrow .card:nth-child(1), .cardrow .card:nth-child(2),
     .cardrow .card#xrssCard, .cardrow .card#bilibiliCard,
+    .cardrow .card#youtubeCard,
     .cardrow .card#scheduledMessageCard {
       flex: 0 0 auto; width: 100%; min-height: 150px;
     }
@@ -1780,7 +1787,7 @@
 
   /* Tables keep a quiet baseline; action color increases on hover/focus. */
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #qqFgGroupList) th { color: color-mix(in srgb, var(--muted) 88%, var(--fg)); }
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) th { color: color-mix(in srgb, var(--muted) 88%, var(--fg)); }
   td.drag-handle { color: color-mix(in srgb, var(--muted) 68%, transparent); }
   td.drag-handle:hover { color: var(--fg); }
   input[type="checkbox"] { opacity: .88; }
@@ -2318,20 +2325,20 @@
   }
 /* Shared desktop workspace template: opt in on the four forwarding pages. */
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) .page-header > .page-header-actions { display: none; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) > .cardrow { display: flex; flex-direction: column; gap: 16px; margin-bottom: 16px; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) .overview-status-card {
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) > .cardrow { display: flex; flex-direction: column; gap: 16px; margin-bottom: 16px; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .overview-status-card {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
   gap: 8px 16px; padding: 12px 18px; min-height: 0; flex: none; margin-bottom: 8px;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) .overview-status-card > h2 { display: none !important; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) .robot-status-summary {
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .overview-status-card > h2 { display: none !important; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .robot-status-summary {
   width: min(100%, 1000px); grid-template-columns: minmax(88px, max-content) minmax(180px, 240px) repeat(4, minmax(58px, 1fr));
   gap: 12px; min-width: 0;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) .robot-status-summary > .badge { justify-self: start; max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) #qqBotWorkspace { width: 100%; padding-right: 30px; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) .robot-status-actions { margin: 0; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) .robot-stat strong { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .robot-status-summary > .badge { justify-self: start; max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) #qqBotWorkspace { width: 100%; padding-right: 30px; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .robot-status-actions { margin: 0; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .robot-stat strong { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 /* 离线补发卡内容：上限/待补发在上，胶囊与操作按钮贴底。 */
 body.desktop-host[data-active-page="discord"] #pageDiscord .func-cards > #backfillCard #backfillContent {
   display: flex; flex-direction: column; flex: 1; min-width: 0;
@@ -2400,11 +2407,11 @@ body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data
 @media (max-width: 1100px) {
   body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#autoTranslationCard, #xAutoTranslationCard) { grid-template-columns: 1fr auto; }
   body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#autoTranslationCard, #xAutoTranslationCard) h2 { grid-column: 1 / -1; }
-  body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) .robot-status-summary { grid-template-columns: minmax(88px, max-content) minmax(170px,1fr) repeat(4,minmax(50px,1fr)); gap: 8px; }
+  body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .robot-status-summary { grid-template-columns: minmax(88px, max-content) minmax(170px,1fr) repeat(4,minmax(50px,1fr)); gap: 8px; }
 }
 @media (max-width: 760px) {
-  body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) .robot-status-summary { grid-template-columns: repeat(4,minmax(0,1fr)); }
-  body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) .robot-status-summary > :is(.badge, .qq-bot-workspace-field) { grid-column: span 2; }
+  body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .robot-status-summary { grid-template-columns: repeat(4,minmax(0,1fr)); }
+  body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .robot-status-summary > :is(.badge, .qq-bot-workspace-field) { grid-column: span 2; }
   body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(:is(#relayLinkCard, #xRelayLinkCard), :is(#autoTranslationCard, #xAutoTranslationCard)) { display: flex; flex-wrap: wrap; }
 }
 /* Module-specific additions use the shared Discord workspace above. */
@@ -2439,12 +2446,12 @@ body.desktop-host:is([data-active-page="x"], [data-active-page="bilibili"], [dat
   min-height: 0; flex: none;
 }
 body.desktop-host :is(#xrssCard, #bilibiliCard, #scheduledMessageCard) > h2 { margin: 0; }
-body.desktop-host :is(#xrssCard, #bilibiliCard) > .rss-config-row:has(input) {
+body.desktop-host :is(#xrssCard, #bilibiliCard, #youtubeCard) > .rss-config-row:has(input) {
   grid-column: 1 / -1; margin-top: 0 !important; flex-wrap: wrap;
 }
-body.desktop-host :is(#xrssCard, #bilibiliCard) .xrss-summary { min-width: 0; overflow-wrap: anywhere; }
+body.desktop-host :is(#xrssCard, #bilibiliCard, #youtubeCard) .xrss-summary { min-width: 0; overflow-wrap: anywhere; }
 body.desktop-host .rss-secondary-metrics { color: var(--muted); }
-body.desktop-host :is(#xrssCard, #bilibiliCard) .badge { max-width: 100%; white-space: normal; }
+body.desktop-host :is(#xrssCard, #bilibiliCard, #youtubeCard) .badge { max-width: 100%; white-space: normal; }
 body.desktop-host #scheduledMessageCard { grid-template-columns: max-content minmax(0,1fr) auto; }
 body.desktop-host #scheduledMessageSummary { margin: 0; min-height: 0; padding: 0; }
 body.desktop-host #scheduledMessageSummary small { display: none; }
@@ -2460,7 +2467,7 @@ body.desktop-host:is([data-active-page="x"], [data-active-page="bilibili"], [dat
 }
 @media (max-width: 760px) {
   body.desktop-host[data-active-page="qq"] #scheduledMessageCard { grid-template-columns: 1fr; }
-  body.desktop-host :is(#xrssCard, #bilibiliCard) { grid-template-columns: 1fr; }
+  body.desktop-host :is(#xrssCard, #bilibiliCard, #youtubeCard) { grid-template-columns: 1fr; }
 }
 
 /* Shared interaction polish; preserve the existing workspace geometry. */
@@ -2476,8 +2483,8 @@ button.hintbtn:is(:hover, :focus-visible) { color: var(--fg); background: var(--
 button.danger:not(#confirmOk), #btnClearLog, .scheduled-message-remove { background: transparent; border-color: transparent; color: var(--danger-icon); }
 button.danger:not(#confirmOk):is(:hover, :focus-visible):not(:disabled), #btnClearLog:is(:hover, :focus-visible), .scheduled-message-remove:is(:hover, :focus-visible) { background: var(--badge-off-bg); border-color: var(--danger-icon); color: var(--badge-off-fg); }
 body.desktop-host :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) > .fgsection { background: color-mix(in srgb, var(--field-bg) 45%, var(--card-bg)); border-color: var(--panel-border); }
-body.desktop-host :is(#backfillCard, #xrssCard, #bilibiliCard, #scheduledMessageCard) { column-gap: 16px; padding-block: 12px; border-bottom-color: var(--panel-border); }
-body.desktop-host :is(#backfillCard, #xrssCard, #bilibiliCard, #scheduledMessageCard) input { min-height: var(--control-height); }
+body.desktop-host :is(#backfillCard, #xrssCard, #bilibiliCard, #youtubeCard, #scheduledMessageCard) { column-gap: 16px; padding-block: 12px; border-bottom-color: var(--panel-border); }
+body.desktop-host :is(#backfillCard, #xrssCard, #bilibiliCard, #youtubeCard, #scheduledMessageCard) input { min-height: var(--control-height); }
 body.desktop-host[data-active-page="qq"] #scheduledMessageCard { grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; }
 body.desktop-host #scheduledMessageSummary { grid-column: 1; color: var(--muted); }
 body.desktop-host #scheduledMessageCard .scheduled-message-actions { grid-column: 2; grid-row: 1 / 3; align-self: center; flex-wrap: wrap; }
@@ -2491,9 +2498,9 @@ body.desktop-host .discord-log-heading > button { flex-shrink: 0; }
 
 /* Final desktop density: constrain settings content, not route workspaces. */
 body.desktop-host :is(.discord-whitelist, #relayLinkCard, #xRelayLinkCard, #bilibiliRelayLinkCard, #autoTranslationCard, #xAutoTranslationCard) { max-width: 1200px; width: 100%; box-sizing: border-box; }
-body.desktop-host :is(#backfillCard, #xrssCard, #bilibiliCard, #scheduledMessageCard) { row-gap: 8px; }
-body.desktop-host :is(#xrssCard, #bilibiliCard) > .rss-config-row:has(input) { align-items: center; gap: 12px; max-width: 1200px; padding-top: 4px; }
-body.desktop-host :is(#xrssCard, #bilibiliCard) .rss-config-row label { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+body.desktop-host :is(#backfillCard, #xrssCard, #bilibiliCard, #youtubeCard, #scheduledMessageCard) { row-gap: 8px; }
+body.desktop-host :is(#xrssCard, #bilibiliCard, #youtubeCard) > .rss-config-row:has(input) { align-items: center; gap: 12px; max-width: 1200px; padding-top: 4px; }
+body.desktop-host :is(#xrssCard, #bilibiliCard, #youtubeCard) .rss-config-row label { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 body.desktop-host #scheduledMessageSummary.is-empty strong { color: var(--muted); font-weight: 400; }
 body :is(button, a, input, select, textarea, summary, [tabindex]):focus-visible { outline: 2px solid var(--primary-border); outline-offset: 2px; }
 body :is(button, a, summary, [role="button"]):focus:not(:focus-visible) { outline: none; }
@@ -2651,9 +2658,10 @@ body.desktop-host:is([data-active-page="x"], [data-active-page="bilibili"], [dat
   body.desktop-host[data-active-page="bilibili"] #bilibiliRelayLinkCard { grid-column: 1; width: 100%; justify-self: stretch; }
 }
 
-/* Final shared card metrics for all four desktop forwarding pages. */
+/* Final shared card metrics for all four desktop forwarding pages.
+   机器人状态卡的面由文末「状态卡统一」一节提供，这里不再列出。 */
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
-  :is(.overview-status-card, #backfillCard, #xrssCard, #bilibiliCard, #scheduledMessageCard,
+  :is(#backfillCard, #xrssCard, #bilibiliCard, #scheduledMessageCard,
       .discord-whitelist, #relayLinkCard, #xRelayLinkCard, #autoTranslationCard, #xAutoTranslationCard, #bilibiliAutoResolveCard,
       #recentMessageCard, #logCard, #pageDiscord > .card, #pageX > .card, #pageBilibili > .card, #pageQQ > .card) {
   background: var(--card-bg);
@@ -2688,7 +2696,7 @@ body.desktop-host[data-active-page="qq"] #scheduledMessageCard > h2 {
 }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
   :is(#backfillCard, #xrssCard, #bilibiliCard, #scheduledMessageCard) { margin-bottom: 0; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"])
   .overview-status-card { margin-bottom: 0; }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
   .discord-whitelist { margin: 0 0 16px; }
@@ -2748,10 +2756,10 @@ body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data
   margin: 0 !important;
   padding: 11px 0;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
-  :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) .pane-main-actions,
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
-  :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) .discord-external-actions {
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"])
+  :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #qqFgBody) .pane-main-actions,
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"])
+  :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #qqFgBody) .discord-external-actions {
   display: flex;
   align-items: center;
   align-content: center;
@@ -2760,20 +2768,20 @@ body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data
   min-width: 0;
   box-sizing: border-box;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
-  :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) .pane-main-actions { justify-content: flex-start; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
-  :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) .discord-external-actions {
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"])
+  :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #qqFgBody) .pane-main-actions { justify-content: flex-start; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"])
+  :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #qqFgBody) .discord-external-actions {
   justify-content: flex-end;
   margin-left: 0;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
-  :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) :is(.pane-main-actions > button, .discord-external-actions > button) {
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"])
+  :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #qqFgBody) :is(.pane-main-actions > button, .discord-external-actions > button) {
   flex: 0 0 auto;
   white-space: nowrap;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
-  :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) .discord-external-actions .linkbtn { margin-left: 0 !important; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"])
+  :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #qqFgBody) .discord-external-actions .linkbtn { margin-left: 0 !important; }
 
 /* Expanded logs retain the shared Card surface and use a distinct console inset. */
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
@@ -2846,10 +2854,10 @@ body.desktop-host #log { color-scheme: dark; scrollbar-color: var(--field-border
 body.desktop-host #log::-webkit-scrollbar { width: 8px; height: 8px; }
 body.desktop-host #log::-webkit-scrollbar-track { background: var(--log-bg); }
 body.desktop-host #log::-webkit-scrollbar-thumb { background: var(--field-border); border-radius: 8px; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) .overview-status-card .robot-status-summary {
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .overview-status-card .robot-status-summary {
   display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: 24px; width: min(100%, 1000px);
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) .robot-status-actions { display: none; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .robot-status-actions { display: none; }
 .desktop-connection-group { display: grid; grid-template-columns: max-content 240px; align-items: center; gap: 12px; min-width: 0; }
 .desktop-connection-group .qq-bot-workspace-field { max-width: 240px; }
 .desktop-statistics-group { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: center; gap: 12px; min-width: 0; }
@@ -2984,10 +2992,127 @@ body.desktop-host[data-active-page="qq"] #pageQQ .func-cards > #autoTranslationC
 body.desktop-host[data-active-page="qq"] #pageQQ .func-cards > #autoTranslationCard .auto-translation-field { min-width: 0; flex: 1 1 150px; }
 
 /* Keep process and RSS run-state pills at the same size across every page. */
-#badge, #xrssBadge, #bilibiliBadge {
+#badge, #xrssBadge, #bilibiliBadge, #youtubeBadge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: 36px;
   padding: 4px 9px;
 }
+
+/* ---------- YouTube → QQ 页面 ---------- */
+/* 顶部运行状态、RSS 状态与卡片表面沿用五个功能页共用的模板（见上方共享规则），
+   这里只保留 YouTube 专属的工作区与转发组样式。 */
+body.desktop-host[data-active-page="youtube"] #youtubeCard {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center;
+  gap: 8px 16px; padding: 12px 18px; margin: 0;
+  background: var(--card-bg); border: 1px solid var(--panel-border);
+  border-radius: var(--radius-card); min-height: 0; flex: none; box-sizing: border-box;
+}
+body.desktop-host[data-active-page="youtube"] #youtubeCard > h2 {
+  display: flex; align-items: center; min-height: var(--control-height); margin: 0;
+}
+body.desktop-host[data-active-page="youtube"] #youtubeCard > .rss-config-row:has(input) {
+  grid-column: 1 / -1; margin-top: 0 !important; flex-wrap: wrap;
+  align-items: center; gap: 12px; max-width: 1200px; padding-top: 4px;
+}
+body.desktop-host[data-active-page="youtube"] #youtubeCard .xrss-summary { min-width: 0; overflow-wrap: anywhere; }
+body.desktop-host[data-active-page="youtube"] #youtubeCard input { min-height: var(--control-height); }
+
+/* 转发组工作区：左侧 YouTube 频道、右侧 QQ 接收群。 */
+body.desktop-host[data-active-page="youtube"] #pageYoutube > .card {
+  background: var(--card-bg); border: 1px solid var(--panel-border);
+  border-radius: var(--radius-card); padding: 12px 18px; box-sizing: border-box;
+}
+body.desktop-host[data-active-page="youtube"] #pageYoutube > .card > h2 {
+  display: flex; align-items: center; min-height: var(--control-height); margin: 0 0 12px;
+}
+body.desktop-host[data-active-page="youtube"] #pageYoutube > .card > h2 .hintbtn { align-self: center; margin: 0; }
+body.desktop-host[data-active-page="youtube"] #youtubeFgBody {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px;
+}
+body.desktop-host[data-active-page="youtube"] #youtubeFgBody > :is(.fgtabs, .hint) { grid-column: 1 / -1; }
+body.desktop-host[data-active-page="youtube"] #youtubeFgBody .fgtabs { flex-wrap: nowrap; }
+body.desktop-host[data-active-page="youtube"] #youtubeFgBody .fgtab-list {
+  flex-wrap: nowrap; overflow-x: auto; flex-basis: auto;
+}
+body.desktop-host[data-active-page="youtube"] #youtubeFgBody .fgtab-list > button { flex-shrink: 0; }
+body.desktop-host[data-active-page="youtube"] #youtubeFgBody > .fgsection {
+  display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  padding: 0 14px 10px; margin: 0; border: 0; border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--field-bg) 45%, var(--card-bg));
+}
+body.desktop-host[data-active-page="youtube"] #youtubeFgBody .fgh3 {
+  display: flex; align-items: center; margin: 0; padding: 16px 0 13px;
+  color: var(--fg); font-size: 15px; font-weight: 700;
+}
+body.desktop-host[data-active-page="youtube"] #youtubeFgBody > .fgsection > div[id$="Content"] {
+  display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; min-height: 0;
+}
+body.desktop-host[data-active-page="youtube"] #youtubeFgBody .tablewrap {
+  overflow: visible; flex: 1 1 auto; min-width: 0; min-height: 0;
+}
+body.desktop-host[data-active-page="youtube"] #youtubeFgBody .addrow {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center;
+  gap: 8px; flex: 0 0 calc(var(--control-height) + 22px);
+  height: calc(var(--control-height) + 22px);
+  min-height: 0; min-width: 0; box-sizing: border-box; margin: 0 !important; padding: 11px 0;
+}
+body.desktop-host[data-active-page="youtube"] #youtubeFgBody .pane-main-actions {
+  display: flex; align-items: center; align-content: center; flex-wrap: nowrap;
+  justify-content: flex-start; gap: 4px 8px; min-width: 0; box-sizing: border-box;
+}
+body.desktop-host[data-active-page="youtube"] #youtubeFgBody .pane-main-actions > button {
+  flex: 0 0 auto; white-space: nowrap;
+}
+body.desktop-host[data-active-page="youtube"] #youtubeFgBody .addrow > .linkbtn {
+  margin-left: auto !important; white-space: nowrap;
+}
+body.desktop-host[data-active-page="youtube"] #pageYoutube th { color: var(--muted); }
+body.desktop-host[data-active-page="youtube"] #pageYoutube :is(td .rowicon, .iconbtn) {
+  color: var(--muted); background: transparent; border-color: transparent; opacity: .88;
+}
+body.desktop-host[data-active-page="youtube"] #pageYoutube td .rowicon:is(.translation-active, .filter-active) {
+  color: var(--fg); background: var(--sec-bg); border-color: var(--field-border); opacity: .9;
+}
+body.desktop-host[data-active-page="youtube"] #pageYoutube :is(td .rowicon, .iconbtn, .chan-name-edit):is(:hover, :focus-visible, :active):not(:disabled) {
+  color: var(--fg); background: var(--sec-bg); border-color: var(--field-border); opacity: 1;
+}
+body.desktop-host[data-active-page="youtube"] #pageYoutube td .rowicon.danger {
+  color: var(--danger-icon); opacity: .68;
+}
+body.desktop-host[data-active-page="youtube"] #pageYoutube td .rowicon.danger:is(:hover, :focus-visible, :active):not(:disabled) {
+  color: var(--badge-off-fg); background: var(--badge-off-bg); border-color: var(--danger-icon); opacity: 1;
+}
+@media (max-width: 1280px) {
+  body.desktop-host[data-active-page="youtube"] #youtubeFgBody { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  body.desktop-host[data-active-page="youtube"] #youtubeCard { grid-template-columns: 1fr; }
+}
+
+/* ---------- 状态卡统一：机器人状态卡与各页 RSS 状态卡 ---------- */
+/* 所有功能页与总览页的机器人状态卡共用同一张卡片表面（描边、圆角、内边距）。 */
+body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+    [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"])
+  .cardrow > .overview-status-card {
+  background: var(--card-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-card);
+  padding: 12px 18px;
+  box-sizing: border-box;
+}
+
+/* ---------- 维护告警浮层：沿用卡片外观，动作贴左下角 ---------- */
+.maintenance-banner {
+  position: fixed; bottom: 16px; right: 24px; z-index: 900;
+  display: flex; flex-direction: column; gap: 8px;
+  min-width: 300px; max-width: 440px;
+  background: var(--card-bg); border: 1px solid var(--panel-border);
+  border-radius: var(--radius-card); padding: 12px 16px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .35);
+}
+.maintenance-banner > h2 { margin: 0; font-size: 15px; color: var(--card-heading); }
+.maintenance-banner-text { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.maintenance-banner .maintenance-banner-actions { display: flex; justify-content: flex-start; }
+body.theme-light .maintenance-banner { box-shadow: 0 10px 28px rgba(15, 23, 42, .18); }

@@ -12,6 +12,7 @@ from nonebot import logger
 from plugins.paths import PROJECT_ROOT, data_path
 from plugins.startup_config import needs_discord
 from plugins.json_io import load_json
+from plugins.proxy_guard import align_discord_proxy
 
 from nonebot.adapters.qq import Adapter as QQAdapter
 from nonebot.adapters.discord import Adapter as DiscordAdapter
@@ -229,6 +230,10 @@ def _system_no_proxy():
 # HTTP 客户端会绕过虚拟网卡并强制连接本地代理端口，端口未监听时会断网。
 _use_tun_network_routing()
 
+# 代理软件重启后混合端口可能变化，DISCORD_PROXY 不会自动跟随；在 NoneBot
+# 读取配置前对齐到系统代理当前端口，避免 Discord 启动即离线且不再重试。
+_PROXY_SWITCH = align_discord_proxy()
+
 # 机器人 HTTP API 仅供本机管理面板调用。Windows 当前保留 8082 所在范围，
 # 因此在 NoneBot 读取配置前固定为未保留的 18082；不修改 .env.prod。
 os.environ["HOST"] = "127.0.0.1"
@@ -331,6 +336,13 @@ _setup_log_sink(
     _resolve_log_level()
 )
 
+if _PROXY_SWITCH:
+    logger.warning(
+        "Discord 专用代理端口 {} 不可用，已跟随系统代理改为 {}",
+        _PROXY_SWITCH[0],
+        _PROXY_SWITCH[1],
+    )
+
 
 driver = get_driver()
 
@@ -379,6 +391,7 @@ BOT_PLUGIN_MODULES = (
     "plugins.backfill",
     "plugins.backfill_api",
     "plugins.command",
+    "plugins.discord_reconnect",
     "plugins.health_api",
     "plugins.manage",
     "plugins.qq_fwd",
@@ -388,6 +401,7 @@ BOT_PLUGIN_MODULES = (
     "plugins.bilibili",
     "plugins.bilibili_auto_resolve",
     "plugins.x_rss",
+    "plugins.youtube",
 )
 from plugins.compiled_plugins import install as install_compiled_plugin_loader
 install_compiled_plugin_loader()

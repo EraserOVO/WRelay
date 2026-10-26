@@ -177,6 +177,8 @@ try:
         _bilibili_source_id,
         get_x_forwarding_groups,
         _x_source_key,
+        get_youtube_forwarding_groups,
+        _youtube_source_id,
     )
 except Exception:
     def get_bilibili_forwarding_groups():
@@ -190,6 +192,12 @@ except Exception:
 
     def _x_source_key(raw):
         return str(raw or "").lstrip("@")
+
+    def get_youtube_forwarding_groups():
+        return []
+
+    def _youtube_source_id(value):
+        return "channel:%s" % str(value or "").strip()
 
 
 def _log(msg):
@@ -548,6 +556,49 @@ def _normalize_bilibili_forwarding_groups(data):
     data["bilibili_forwarding_groups"] = clean
 
 
+def _normalize_youtube_forwarding_groups(data):
+    """写盘前归一化 YouTube 转发组，清理已删除来源/群的引用。"""
+    groups = data.get("youtube_forwarding_groups")
+    if not isinstance(groups, list):
+        return
+    known_sources = set()
+    for source in data.get("youtube_sources", []):
+        if not isinstance(source, dict):
+            continue
+        value = str(source.get("value") or source.get("channel") or "").strip()
+        source_id = str(source.get("id") or _youtube_source_id(value)).strip()
+        if source_id:
+            known_sources.add(source_id)
+    known_groups = {
+        str(group.get("openid"))
+        for group in data.get("qq_group_openids", [])
+        if isinstance(group, dict) and group.get("openid")
+    }
+    clean = []
+    seen_ids = set()
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        group_id = str(group.get("id") or "").strip()
+        if not group_id or group_id in seen_ids:
+            continue
+        seen_ids.add(group_id)
+        clean.append({
+            "id": group_id,
+            "name": str(group.get("name") or "").strip() or group_id,
+            "enabled": group.get("enabled", True) is not False,
+            "sources": [
+                value for value in dict.fromkeys(str(item) for item in group.get("sources") or [])
+                if value and value in known_sources
+            ],
+            "groups": [
+                value for value in dict.fromkeys(str(item) for item in group.get("groups") or [])
+                if value and value in known_groups
+            ],
+        })
+    data["youtube_forwarding_groups"] = clean
+
+
 def _normalize_qq_forwarding_groups(data):
     """写盘前归一化 QQ→QQ 独立转发组，剔除已删除的 QQ 群。"""
     qfgs = data.get("qq_forwarding_groups")
@@ -598,6 +649,7 @@ def save_settings(data, expected_revision=None):
     _normalize_forwarding_groups(data)
     _normalize_x_forwarding_groups(data)
     _normalize_bilibili_forwarding_groups(data)
+    _normalize_youtube_forwarding_groups(data)
     _normalize_qq_forwarding_groups(data)
     with json_file_lock(SETTINGS_FILE):
         if (
@@ -1527,6 +1579,10 @@ def _settings_payload():
         pass
     try:
         data["bilibili_forwarding_groups"] = get_bilibili_forwarding_groups()
+    except Exception:
+        pass
+    try:
+        data["youtube_forwarding_groups"] = get_youtube_forwarding_groups()
     except Exception:
         pass
     data["_revision"] = revision
@@ -3251,6 +3307,18 @@ def api_bilibili_status():
     if not bot_status()["running"]:
         return {"ok": False, "bot_running": False}
     data = bot_api_get("/api/bilibili/status")
+    if data is None:
+        return {"ok": False, "bot_running": True, "msg": "bot 接口不可用"}
+    data["bot_running"] = True
+    return data
+
+
+@app.get("/api/youtube/status")
+def api_youtube_status():
+    """代理 bot 的 YouTube RSS 运行状态。"""
+    if not bot_status()["running"]:
+        return {"ok": False, "bot_running": False}
+    data = bot_api_get("/api/youtube/status")
     if data is None:
         return {"ok": False, "bot_running": True, "msg": "bot 接口不可用"}
     data["bot_running"] = True

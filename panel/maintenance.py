@@ -134,7 +134,12 @@ class MaintenanceService:
     def check_once(self):
         alerts = {}
         self._check_files(alerts)
-        for label, endpoint in [('X', '/api/x-rss/status'), ('Bilibili', '/api/bilibili/status')]:
+        for label, endpoint, source_hint in (
+            ('X', '/api/x-rss/status', '请检查来源与 RSSHub。'),
+            ('Bilibili', '/api/bilibili/status', '请检查来源与 RSSHub。'),
+            # YouTube 用官方频道 RSS，不经 RSSHub，提示不能引导用户去查 RSSHub
+            ('YouTube', '/api/youtube/status', '请检查频道与网络/代理。'),
+        ):
             status = self.bot_get(endpoint, timeout=5)
             if not isinstance(status, dict):
                 continue
@@ -143,7 +148,7 @@ class MaintenanceService:
             for item in status.get('source_health', []):
                 if item.get('consecutive_failures', 0) >= 3:
                     key = 'rss:' + label + ':' + str(item.get('id', ''))
-                    alerts[key] = label + ' 来源“' + str(item.get('name', ''))[:60] + '”连续三轮轮询失败，请检查来源与 RSSHub。'
+                    alerts[key] = label + ' 来源“' + str(item.get('name', ''))[:60] + '”连续三轮轮询失败，' + source_hint
         try:
             enabled = self.enabled()
             if enabled and time.time() - self._last_backup >= 3600:

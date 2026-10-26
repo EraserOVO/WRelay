@@ -981,7 +981,7 @@ async def handle(
         return
 
     # 群聊 /菜单 直接显示转发目标列表；转发 / 注册群由各自处理器处理。
-    # @机器人的未知消息提示由下方 group_at_hint 处理。
+    # 单独 @机器人 的目标列表提示由下方 group_at_hint 处理。
     if isinstance(
         event,
         GroupMessageCreateEvent
@@ -1178,11 +1178,40 @@ async def handle(
 
 
 # =====================================================
-# 群内 @ 机器人与未知命令转发到目标列表
+# 群内 @ 机器人显示转发目标列表
 #
 # 优先使用 QQ 事件的 to-me 判定，同时兼容不同适配器版本的提及消息段。
-# 未知斜杠命令和 @机器人消息引导到转发列表；普通待转发内容仍由 relay 消费。
+# 只有「单独 @ 机器人、不附带任何内容」才回应；普通聊天、@其他成员、
+# @机器人后带文字/附件/引用以及未知命令都不回复。
 # =====================================================
+
+_MENTION_SEGMENT_TYPES = ("mention_user", "at", "mention", "at_user", "to_me")
+
+
+def _is_mention_segment(segment):
+    return str(getattr(segment, "type", None) or "").lower() in _MENTION_SEGMENT_TYPES
+
+
+def _has_mention_content(event, segs, message):
+    """@机器人 的消息里，除提及段和空白文字外是否还有别的内容。"""
+    if message:
+        return True
+    if getattr(event, "reply", None) is not None:
+        return True
+    if getattr(event, "attachments", None) or []:
+        return True
+    for segment in segs:
+        segment_type = str(getattr(segment, "type", None) or "").lower()
+        if segment_type in _MENTION_SEGMENT_TYPES:
+            continue
+        if segment_type != "text":
+            return True
+        data = getattr(segment, "data", None)
+        text = str(data.get("text", "")) if isinstance(data, dict) else str(segment)
+        if text.strip():
+            return True
+    return False
+
 
 group_at_hint = on_message(
     priority=10,
@@ -1257,14 +1286,10 @@ async def handle_group_at_hint(
             if mention_id == bot_id:
                 mentions_bot = True
                 break
-    is_command = message.startswith("/")
-    if not mentions_bot and not is_command:
+
+    if not mentions_bot:
         # 事件类型可能覆盖普通成员提及；必须确认提及目标确实是机器人。
-        if any(
-            str(getattr(segment, "type", None) or "").lower()
-            in ("mention_user", "at", "mention", "at_user", "to_me")
-            for segment in segs
-        ):
+        if any(_is_mention_segment(segment) for segment in segs):
             logger.debug(
                 "忽略未确认目标的群聊提及: is_tome={} segment_types={}",
                 adapter_mentions_bot,
@@ -1272,46 +1297,33 @@ async def handle_group_at_hint(
             )
         return
 
-    if mentions_bot:
-        logger.info(
-            "收到群聊 @机器人消息: plain_length={} mention_segments={}",
+    # 群聊只对「单独 @ 机器人」作出回应，避免打断正常聊天。
+    if _has_mention_content(event, segs, message):
+        logger.debug(
+            "忽略附带内容的群聊 @机器人消息: plain_length={} mention_segments={}",
             len(message),
-            sum(
-                1 for segment in segs
-                if str(getattr(segment, "type", None) or "").lower()
-                in ("mention_user", "at", "mention", "at_user", "to_me")
-            ),
+            sum(1 for segment in segs if _is_mention_segment(segment)),
         )
-
-    # /菜单 由 manage_command 统一返回转发群列表，避免重复回复。
-    if message == "/菜单":
         return
 
-    # 已知转发/注册命令继续由原处理器响应。
-    if qq_fwd.parse_relay(message)[0] is not None:
-        return
-    if (
-        message == "/注册"
-        or message.startswith("/注册 ")
-        or message == "/注册群"
-        or message.startswith("/注册群 ")
-    ):
-        return
+    logger.info(
+        "收到群聊单独 @机器人消息: mention_segments={}",
+        sum(1 for segment in segs if _is_mention_segment(segment)),
+    )
 
-    if mentions_bot or is_command:
-        # 群未登记：@ 机器人或未知命令属于「功能请求」，提示先登记群，
-        # 不展示转发目标列表；普通群消息/@其他成员已在上方排除，不提示。
-        registered = await asyncio.to_thread(
-            is_group_registered, event.group_openid, _qq_bot_id(bot)
+    # 群未登记：单独 @ 机器人属于「功能请求」，提示先登记群，
+    # 不展示转发目标列表；普通群消息、@其他成员和 @机器人后带内容已在上方排除。
+    registered = await asyncio.to_thread(
+        is_group_registered, event.group_openid, _qq_bot_id(bot)
+    )
+    if not registered:
+        await send_titled_reply(
+            bot,
+            event,
+            "群准入提示",
+            GROUP_NOT_REGISTERED_TEXT,
         )
-        if not registered:
-            await send_titled_reply(
-                bot,
-                event,
-                "群准入提示",
-                GROUP_NOT_REGISTERED_TEXT,
-            )
-            _stop_group_hint_propagation()
-            return
-        await qq_fwd.send_relay_list(bot, event)
         _stop_group_hint_propagation()
+        return
+    await qq_fwd.send_relay_list(bot, event)
+    _stop_group_hint_propagation()

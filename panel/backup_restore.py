@@ -25,6 +25,8 @@ BACKUP_RUNTIME_NAMES = (
     "bilibili_protection.json",
     "bilibili.json",
     "x_rss.json",
+    "youtube_protection.json",
+    "youtube.json",
     BACKUP_DELIVERY_DEDUP_NAME,
 )
 BACKUP_MANIFEST_NAME = "manifest.json"
@@ -82,6 +84,8 @@ class BackupRestoreService:
             "bilibili_protection.json": os.path.join(os.path.dirname(self.settings_file), "bilibili_protection.json"),
             "bilibili.json": os.path.join(os.path.dirname(self.settings_file), "bilibili.json"),
             "x_rss.json": os.path.join(os.path.dirname(self.settings_file), "x_rss.json"),
+            "youtube_protection.json": os.path.join(os.path.dirname(self.settings_file), "youtube_protection.json"),
+            "youtube.json": os.path.join(os.path.dirname(self.settings_file), "youtube.json"),
             BACKUP_DELIVERY_DEDUP_NAME: self.delivery_dedup_file,
         }
 

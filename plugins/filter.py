@@ -66,6 +66,13 @@ BILIBILI_MESSAGE_TYPES = (
     MESSAGE_TYPE_VIDEO,
 )
 
+# YouTube 第一期只转发标题（文字）、封面（图片）与视频链接，不含视频本体。
+YOUTUBE_MESSAGE_TYPES = (
+    MESSAGE_TYPE_TEXT,
+    MESSAGE_TYPE_IMAGE,
+    MESSAGE_TYPE_LINK,
+)
+
 # 手动转发全局筛选字段 → 该链路支持的类型集。
 MANUAL_RELAY_FILTER_TYPES = {
     "qq_c2c_relay_filter": DISCORD_MESSAGE_TYPES,
@@ -257,3 +264,24 @@ def check_bilibili_video_filter(filter_config: dict, post: dict) -> bool:
             return False
 
     return True
+
+
+def check_youtube_video_filter(filter_config: dict, post: dict) -> bool:
+    """判断 YouTube 视频是否通过来源关键词筛选（标题/简介/频道名）。"""
+    filter_config = filter_config or {}
+    post = post or {}
+    keywords = [
+        str(keyword).strip().lower()
+        for keyword in (filter_config.get("filter_keywords") or [])
+        if str(keyword).strip()
+    ]
+    if not keywords:
+        return True
+    search_text = " ".join(
+        [
+            str(post.get("title") or ""),
+            str(post.get("description") or ""),
+            str(post.get("author") or ""),
+        ]
+    ).lower()
+    return any(keyword in search_text for keyword in keywords)

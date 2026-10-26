@@ -6,6 +6,10 @@
   2) 底栏左右分区：.modal-footer 第一个按钮贴左下、最后一个贴右下（主要动作在右下）；
   3) 开关一律胶囊式：窗口内与卡片上的开/关按钮统一为 .pill-switch（文字 + .settings-switch-track 轨道），
      渲染函数只写标签与轨道，不再画 ✓/× 图标。
+
+另校验「状态卡统一」（见 docs/DESIGN.md「共用功能页模板」）：各页机器人状态卡与 X 页 RSS 状态卡
+采用同一套卡片表面，X / Bilibili / YouTube 的 RSS 状态卡与 X 同规格；
+总览页机器人状态卡保留启动、停止、重启按钮。
 用法：.venv/Scripts/python.exe scripts/test_desktop_modal_grid.py
 """
 import re
@@ -146,6 +150,33 @@ check("定时消息条目 DOM 顺序：正文 → 附件 → 发送目标 → �
       < APP_JS.find("scheduled-message-timing-row") < APP_JS.find("scheduled-message-image-hint"))
 check("已注册频道 tab 收进窗口头部工具区",
       'relayChannelsModal: {size: "medium", footer: "relayChannelsSave", grid: true, tools: ["relayScopeTabs"]' in spec_block)
+
+# 「状态卡统一」的长期规则（见 docs/DESIGN.md「共用功能页模板」）。
+status_surface = re.search(
+    r"\.cardrow > \.overview-status-card \{\s*background: var\(--card-bg\);\s*"
+    r"border: 1px solid var\(--panel-border\);\s*border-radius: var\(--radius-card\);\s*padding: 12px 18px;",
+    STYLE_CSS,
+)
+check("机器人状态卡在各页使用同一套卡片表面", status_surface is not None)
+youtube_card_surface = re.search(
+    r'body\.desktop-host\[data-active-page="youtube"\] #youtubeCard \{[^}]*'
+    r"background: var\(--card-bg\); border: 1px solid var\(--panel-border\);",
+    STYLE_CSS,
+    re.S,
+)
+check("YouTube 状态卡改用描边卡片，不再是扁平状态带", youtube_card_surface is not None)
+check("YouTube RSS 状态区与 X / Bilibili 同规格（标题与徽标各占一行）",
+      "body.desktop-host :is(#xrssCard, #bilibiliCard, #youtubeCard) > :is(h2, .rss-status-line) { grid-column: 1 / -1; }" in UI_CSS)
+check("启停按钮只在总览显示，总览卡仍保留三个按钮",
+      'body:not([data-active-page="overview"]) .robot-status-actions { display: none; }' in STYLE_CSS
+      and all(button in HTML for button in ('id="btnStart"', 'id="btnStop"', 'id="btnRestart"')))
+check("YouTube 页机器人状态卡复用共享分组（与 X / Bilibili 一致）",
+      'youtube: {workspace: "youtubeFgBody"}' in DISCORD_JS
+      and not re.search(r'body\.desktop-host\[data-active-page="youtube"\] \.(?:overview-status-card|robot-status-summary)', STYLE_CSS))
+check("侧栏与总览链路卡把 YouTube 排在 Bilibili 上方",
+      HTML.find('data-page="youtube" title="YouTube → QQ"') < HTML.find('data-page="bilibili" title="Bilibili → QQ"')
+      and HTML.find('class="overview-route" data-kind="pageTab" data-page="youtube"')
+      < HTML.find('class="overview-route" data-kind="pageTab" data-page="bilibili"'))
 
 print("PASS - 卡片二级窗口统一规则（网格对齐 / 底栏左右分区 / 胶囊开关）" if not failures
       else "FAIL - " + "; ".join(failures))

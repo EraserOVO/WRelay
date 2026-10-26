@@ -74,8 +74,9 @@ def main():
         assert not maintenance.status()['alerts']
         rss['source_health'][0]['consecutive_failures']=3
         maintenance.check_once();maintenance.check_once()
-        assert len(notifications)==2 # X and Bilibili, once each despite repeated checks.
-        assert len(maintenance.status()['alerts'])==2
+        assert len(notifications)==3 # X、Bilibili、YouTube 各一次，重复检查不重复通知。
+        assert len(maintenance.status()['alerts'])==3
+        assert any(a['id']=='rss:YouTube:s' and 'RSSHub' not in a['message'] for a in maintenance.status()['alerts'])
         queue.write_bytes(b'\0'*32)
         maintenance.check_once()
         assert any(a['id']=='file:bilibili_protection.json' for a in maintenance.status()['alerts'])

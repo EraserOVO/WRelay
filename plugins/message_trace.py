@@ -31,6 +31,8 @@ def _source_info(channel_id):
         return "x_rss", value.removeprefix("x_rss:")
     if value.startswith("bilibili:"):
         return "bilibili", value.removeprefix("bilibili:")
+    if value.startswith("youtube:"):
+        return "youtube", value.removeprefix("youtube:")
     if value:
         return "discord", value
     return "other", ""

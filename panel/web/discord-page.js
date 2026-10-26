@@ -11,6 +11,7 @@
     discord: {workspace: "fgBody"},
     x: {workspace: "xFgBody"},
     bilibili: {workspace: "bilibiliFgBody"},
+    youtube: {workspace: "youtubeFgBody"},
     qq: {workspace: "qqFgBody"},
   };
   let active = "";

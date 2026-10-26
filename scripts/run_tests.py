@@ -52,6 +52,9 @@ TESTS = (
     "test_x_rss_syndication_fallback.py",
     "test_x_rss_empty_item_skip.py",
     "test_bilibili_parser.py",
+    "test_youtube_parser.py",
+    "test_youtube_config.py",
+    "test_youtube_delivery.py",
     "test_bilibili_manual_opus.py",
     "test_relay_filter_supported_types.py",
     "test_bilibili_view_error_text.py",
@@ -115,6 +118,7 @@ TESTS = (
     "test_sender_config_nonblocking.py",
     "test_scheduled_message_dates.py",
     "test_tun_network_routing.py",
+    "test_discord_proxy_recovery.py",
 )
 MANUAL_TESTS = {
     "test_compiled_installer.py": "requires the built installer and performs an install/uninstall smoke test",

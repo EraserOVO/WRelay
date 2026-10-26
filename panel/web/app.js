@@ -97,6 +97,17 @@ const FG_BILIBILI = {
   addBtnId: "btnAddBilibiliFg",
   activeId: null,
 };
+const FG_YOUTUBE = {
+  key: "youtube",
+  field: "youtube_forwarding_groups",
+  memberField: {youtubeSource: "sources", source: "sources", group: "groups"},
+  emptyMembers: ["sources", "groups"],
+  storageKey: "wrelay_active_youtube_fg",
+  idPrefix: "youtube_fg_",
+  tabsId: "youtubeFgTabs",
+  addBtnId: "btnAddYoutubeFg",
+  activeId: null,
+};
 const FG_QQ = {
   key: "qq",
   field: "qq_forwarding_groups",
@@ -108,10 +119,11 @@ const FG_QQ = {
   addBtnId: "btnAddQQFg",
   activeId: null,
 };
-const FG_CTX = {discord: FG_DISCORD, x: FG_X, bilibili: FG_BILIBILI, qq: FG_QQ};
+const FG_CTX = {discord: FG_DISCORD, x: FG_X, bilibili: FG_BILIBILI, youtube: FG_YOUTUBE, qq: FG_QQ};
 try { FG_DISCORD.activeId = localStorage.getItem(FG_DISCORD.storageKey); } catch (e) { FG_DISCORD.activeId = null; }
 try { FG_X.activeId = localStorage.getItem(FG_X.storageKey); } catch (e) { FG_X.activeId = null; }
 try { FG_BILIBILI.activeId = localStorage.getItem(FG_BILIBILI.storageKey); } catch (e) { FG_BILIBILI.activeId = null; }
+try { FG_YOUTUBE.activeId = localStorage.getItem(FG_YOUTUBE.storageKey); } catch (e) { FG_YOUTUBE.activeId = null; }
 try { FG_QQ.activeId = localStorage.getItem(FG_QQ.storageKey); } catch (e) { FG_QQ.activeId = null; }
 // X source 字符串 → 去重状态 key（与 bot 侧 config._x_source_key 同规则）：
 // screen_name 去 @；完整 URL 时提取 /twitter/user/{handle}，提取不到用整个 URL
@@ -227,7 +239,7 @@ const PAGE_STORAGE_KEY = IS_DESKTOP_HOST ? "wrelay_desktop_active_page" : "wrela
 let activePage = IS_DESKTOP_HOST ? "overview" : "discord";
 try {
   const savedPage = localStorage.getItem(PAGE_STORAGE_KEY);
-  if (["overview", "discord", "x", "bilibili", "qq", "settings"].includes(savedPage)) activePage = savedPage;
+  if (["overview", "discord", "x", "bilibili", "youtube", "qq", "settings"].includes(savedPage)) activePage = savedPage;
 } catch (e) {}
 
 function setActivePage(page) {
@@ -236,6 +248,7 @@ function setActivePage(page) {
     discord: ["Discord → QQ", "管理频道、接收群与转发组"],
     x: ["X → QQ", "管理 X 来源、接收群与转发组"],
     bilibili: ["Bilibili → QQ", "管理 Bilibili 来源、接收群与转发组"],
+    youtube: ["YouTube → QQ", "管理 YouTube 频道、接收群与转发组"],
     qq: ["QQ → QQ", "管理授权用户的手动转发目标"],
     settings: ["设置", "应用偏好、连接与维护"],
   };
@@ -248,6 +261,7 @@ function setActivePage(page) {
   document.getElementById("pageDiscord").style.display = activePage === "discord" ? "" : "none";
   document.getElementById("pageX").style.display = activePage === "x" ? "" : "none";
   document.getElementById("pageBilibili").style.display = activePage === "bilibili" ? "" : "none";
+  document.getElementById("pageYoutube").style.display = activePage === "youtube" ? "" : "none";
   document.getElementById("pageQQ").style.display = activePage === "qq" ? "" : "none";
   document.getElementById("pageSettings").style.display = activePage === "settings" ? "" : "none";
   const runtimeCards = document.querySelector(".cardrow");
@@ -261,6 +275,8 @@ function setActivePage(page) {
   if (xrssCard) xrssCard.style.display = activePage === "x" ? "" : "none";
   const bilibiliCard = document.getElementById("bilibiliCard");
   if (bilibiliCard) bilibiliCard.style.display = activePage === "bilibili" ? "" : "none";
+  const youtubeCard = document.getElementById("youtubeCard");
+  if (youtubeCard) youtubeCard.style.display = activePage === "youtube" ? "" : "none";
   const scheduledCard = document.getElementById("scheduledMessageCard");
   if (scheduledCard) scheduledCard.style.display = activePage === "qq" ? "" : "none";
   document.querySelectorAll('#pageTabs [data-kind="pageTab"]').forEach(function (btn) {
@@ -287,6 +303,7 @@ function renderOverviewCounts() {
     ["overviewDiscordMeta", enabledTotal("discord_channels"), "频道"],
     ["overviewXMeta", enabledTotal("x_rss_sources"), "来源"],
     ["overviewBilibiliMeta", enabledTotal("bilibili_sources"), "来源"],
+    ["overviewYoutubeMeta", enabledTotal("youtube_sources"), "来源"],
   ];
   routes.forEach(function (route) {
     const el = document.getElementById(route[0]);
@@ -510,7 +527,7 @@ async function refreshMaintenance() {
     toggle.setAttribute("aria-checked", String(st.enabled));
     document.getElementById("maintenanceDetail").textContent = alerts.length ? alerts.map(function (a) { return a.message; }).join("\n") : "维护检查正常。最近备份：" + last;
     const banner = document.getElementById("maintenanceBanner");
-    banner.style.display = alerts.length ? "block" : "none";
+    banner.style.display = alerts.length ? "" : "none";
     document.getElementById("maintenanceBannerText").textContent = alerts.length ? alerts[0].message : "";
   } catch (error) { /* Retry on the next refresh. */ }
 }
@@ -673,7 +690,7 @@ function renderStatus(st) {
   b.title = b.textContent;
   // The compact RSS/QQ pages separate process state from the Bot selector's
   // connection state. Keep all backend-derived decisions and controls unchanged.
-  if (document.body.classList.contains("desktop-host") && ["discord", "x", "bilibili", "qq"].includes(activePage)) {
+  if (document.body.classList.contains("desktop-host") && ["discord", "x", "bilibili", "youtube", "qq"].includes(activePage)) {
     b.textContent = st.running ? "运行中" : "已停止";
     b.className = st.running ? "badge on" : "badge neutral";
     b.title = "进程" + b.textContent + "；QQ 连接状态见当前 Bot";
@@ -1553,6 +1570,17 @@ function fgCandidate(kind) {
       },
     };
   }
+  if (kind === "youtubeSource") {
+    return {
+      all: settings.youtube_sources || [],
+      idOf: function (source) {
+        return String(source.id || youtubeSourceId(source.value));
+      },
+      labelOf: function (source) {
+        return ((source.name || source.value || "") + (source.name && source.value ? " · " + source.value : "")).trim();
+      },
+    };
+  }
   // source（X 转发账号）：组内以 key（去 @ handle）为标识
   return {
     all: settings.x_rss_sources,
@@ -1577,7 +1605,7 @@ function openFgAddPicker(ctx, kind) {
   if (!candidates.length) {
     showAlert(
       "从已注册项新增",
-      "当前转发组已包含全部已注册的" + (kind === "group" ? "群" : kind === "chan" ? "频道" : kind === "biliSource" ? "Bilibili 来源" : "来源") + "，没有可添加的条目"
+      "当前转发组已包含全部已注册的" + (kind === "group" ? "群" : kind === "chan" ? "频道" : kind === "biliSource" ? "Bilibili 来源" : kind === "youtubeSource" ? "YouTube 频道" : "来源") + "，没有可添加的条目"
     );
     return;
   }
@@ -1593,9 +1621,11 @@ function openFgAddPicker(ctx, kind) {
     },
     {
       defaultChecked: false,
-      labelLinkFn: kind === "source" ? function (item) {
-        return xSourceProfileUrl(item.source);
-      } : null,
+      labelLinkFn: kind === "source"
+        ? function (item) { return xSourceProfileUrl(item.source); }
+        : kind === "youtubeSource"
+          ? function (item) { return youtubeChannelUrl(item.value); }
+          : null,
       onRowDelete: function (item) {
         deleteRegisteredItem(kind, item, function () { openFgAddPicker(ctx, kind); });
       },
@@ -1637,11 +1667,13 @@ function deleteRegisteredItem(kind, item, reopenPicker) {
   const isChan = kind === "chan";
   const isSource = kind === "source";
   const isBilibiliSource = kind === "biliSource";
+  const isYoutubeSource = kind === "youtubeSource";
   const id = String(
     isChan ? item.id
       : isSource ? xSourceKey(item.source)
         : isBilibiliSource ? (item.id || bilibiliSourceId(item.kind || "up", item.value || ""))
-          : item.openid
+          : isYoutubeSource ? (item.id || youtubeSourceId(item.value))
+            : item.openid
   );
   const name = isGroup
     ? (item.name || item.remark || identityName("groups", item.openid) || "")
@@ -1651,9 +1683,11 @@ function deleteRegisteredItem(kind, item, reopenPicker) {
         ? (item.name || xSourceKey(item.source) || "")
         : isBilibiliSource
           ? (item.value || "")
-        : (item.name || item.remark || identityName("users", item.openid) || "");
+          : isYoutubeSource
+            ? (item.name || item.value || "")
+            : (item.name || item.remark || identityName("users", item.openid) || "");
   const label = ((name || "") + " " + id).trim();
-  const kindName = isGroup ? "群" : isChan ? "频道" : isSource || isBilibiliSource ? "来源" : "用户";
+  const kindName = isGroup ? "群" : isChan ? "频道" : isSource || isBilibiliSource || isYoutubeSource ? "来源" : "用户";
   hideConfirm();
   showConfirmDlg("删除注册记录",
     "确定删除「" + label + "」的注册记录？\n删除后将从已注册列表移除，并从所属转发组中移出；如需使用请重新注册。",
@@ -1672,6 +1706,11 @@ function deleteRegisteredItem(kind, item, reopenPicker) {
           return String(o.id || bilibiliSourceId(o.kind || "up", o.value || "")) === id;
         });
         if (idx >= 0) settings.bilibili_sources.splice(idx, 1);
+      } else if (isYoutubeSource) {
+        const idx = (settings.youtube_sources || []).findIndex(function (o) {
+          return String(o.id || youtubeSourceId(o.value)) === id;
+        });
+        if (idx >= 0) settings.youtube_sources.splice(idx, 1);
       } else {
         const idx = settings.qq_user_openids.findIndex(function (o) { return String(o.openid) === id; });
         if (idx >= 0) settings.qq_user_openids.splice(idx, 1);
@@ -2040,6 +2079,7 @@ function renderSettings() {
   // X / Bilibili / QQ → QQ 页面与 Discord 页共用同一份 settings，跟随保存刷新
   renderXPage();
   renderBilibiliPage();
+  renderYoutubePage();
   renderQQPage();
 }
 
@@ -2058,6 +2098,7 @@ function renderAIControls() {
   renderTranslationToggleFor("btnTranslationDiscord", allEnabled(settings.discord_channels), "Discord → QQ 翻译");
   renderTranslationToggleFor("btnTranslationX", allEnabled(settings.x_rss_sources), "X → QQ 翻译");
   renderTranslationToggleFor("btnTranslationBilibili", allEnabled(settings.bilibili_sources), "Bilibili → QQ 翻译");
+  renderTranslationToggleFor("btnTranslationYoutube", allEnabled(settings.youtube_sources), "YouTube → QQ 翻译");
   renderTranslationToggleFor("btnTranslationManual", translation.enabled === true, "QQ → QQ 手动转发翻译");
 }
 
@@ -2408,6 +2449,129 @@ function renderBilibiliAutoResolveToggle(on) {
   btn.innerHTML = pillSwitchMarkup("启用自动解析", on);
 }
 
+// ---------------- YouTube → QQ 页面 ----------------
+// 来源只有频道：UC 频道 ID 或 @handle。第一期只转发标题、封面和链接，
+// 因此筛选类型固定为文字/图片/链接，没有投稿类型维度。
+function normalizeYoutubeChannelValue(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return "";
+  if (/^UC[0-9A-Za-z_-]{22}$/.test(text)) return text;
+  const handlePattern = /^[0-9A-Za-z._-]{3,100}$/;
+  if (text.charAt(0) === "@") {
+    const handle = text.slice(1).trim();
+    return handlePattern.test(handle) ? "@" + handle : "";
+  }
+  if (/^https?:\/\//i.test(text)) {
+    let url;
+    try { url = new URL(text); } catch (e) { return ""; }
+    if (!/^(?:www\.|m\.)?youtube\.com$/i.test(url.hostname)) return "";
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments.length >= 2 && segments[0].toLowerCase() === "channel") {
+      return /^UC[0-9A-Za-z_-]{22}$/.test(segments[1]) ? segments[1] : "";
+    }
+    if (segments.length && segments[0].charAt(0) === "@") {
+      const handle = segments[0].slice(1);
+      return handlePattern.test(handle) ? "@" + handle : "";
+    }
+    if (segments.length >= 2 && /^(?:c|user)$/i.test(segments[0])) {
+      return handlePattern.test(segments[1]) ? "@" + segments[1] : "";
+    }
+    return "";
+  }
+  return handlePattern.test(text) ? "@" + text : "";
+}
+
+function youtubeSourceId(value) {
+  const normalized = normalizeYoutubeChannelValue(value);
+  return normalized ? "channel:" + normalized : "";
+}
+
+function youtubeChannelUrl(value) {
+  const normalized = normalizeYoutubeChannelValue(value);
+  if (!normalized) return "";
+  return normalized.charAt(0) === "@"
+    ? "https://www.youtube.com/" + encodeURIComponent(normalized).replace(/%40/i, "@")
+    : "https://www.youtube.com/channel/" + encodeURIComponent(normalized);
+}
+
+function renderYoutubePage() {
+  const sourceBody = document.getElementById("youtubeSourceBody");
+  if (!sourceBody || !settings) return;
+  renderFgTabs(FG_YOUTUBE);
+  const fg = getActiveFg(FG_YOUTUBE);
+  const allSources = Array.isArray(settings.youtube_sources) ? settings.youtube_sources : [];
+  const memberSources = {};
+  if (fg) (fg.sources || []).forEach(function (id) { memberSources[String(id)] = true; });
+  const sourceRows = allSources.filter(function (source) {
+    return memberSources[youtubeSourceId(source.value)];
+  });
+  sourceBody.innerHTML = "";
+  if (!sourceRows.length) {
+    sourceBody.innerHTML = '<tr class="fgempty-row"><td colspan="5" class="fgempty-msg">还未新增频道，请先「注册频道」，再加入当前转发组。</td></tr>';
+  }
+  sourceRows.forEach(function (source) {
+    const index = allSources.indexOf(source);
+    const sourceId = youtubeSourceId(source.value);
+    const channelUrl = youtubeChannelUrl(source.value);
+    const tr = document.createElement("tr");
+    tr.setAttribute("data-id", sourceId);
+    tr.innerHTML =
+      '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
+      '<td style="text-align:center"><input type="checkbox" data-kind="youtubeSource" data-i="' + index + '"' + (source.enabled ? " checked" : "") + '></td>' +
+      '<td><span class="chan-name" data-kind="youtubeSourceNameDisplay" data-i="' + index + '">' +
+        '<span class="chan-name-text">' + escapeHtml(source.name || source.value || "") + '</span>' +
+        '<span class="chan-name-edit" role="button" tabindex="0" data-kind="youtubeSourceNameEdit" data-i="' + index + '" title="编辑频道显示名称">' + SVG_PEN + '</span>' +
+      '</span></td>' +
+      '<td class="mono">' + (channelUrl
+        ? '<a class="x-account-link" href="' + escapeHtml(channelUrl) + '" target="_blank" rel="noopener noreferrer" title="打开 YouTube 频道">' + escapeHtml(source.value || "") + '</a>'
+        : escapeHtml(source.value || "")) + '</td>' +
+      '<td style="text-align:right"><div class="table-actions">' +
+        '<button class="sec rowicon translation-toggle-icon' + (source.translation_enabled ? ' translation-active' : '') + '" title="设置此来源的翻译方式" aria-label="设置此来源的翻译方式" data-kind="youtubeSourceTranslation" data-i="' + index + '">' + SVG_TRANSLATE + '</button>' +
+        '<button class="sec rowicon' + (youtubeSourceFilterActive(source) ? ' filter-active' : '') + '" title="设置此来源的消息筛选规则" aria-label="设置此来源的消息筛选规则" data-kind="youtubeSourceFilterEdit" data-i="' + index + '">' + SVG_FUNNEL + '</button>' +
+        '<button class="danger rowicon" data-kind="youtubeFgSourceRemove" data-id="' + escapeHtml(sourceId) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
+    sourceBody.appendChild(tr);
+  });
+  syncHeaderAll("youtubeSourceAllEnabled", sourceRows, "enabled");
+
+  const groupBody = document.getElementById("youtubeGroupBody");
+  const allGroups = settings.qq_group_openids || [];
+  const memberGroups = {};
+  if (fg) (fg.groups || []).forEach(function (id) { memberGroups[String(id)] = true; });
+  const groupRows = allGroups.filter(function (group) {
+    return memberGroups[String(group.openid)] && groupInActiveQQBotWorkspace(group);
+  });
+  groupBody.innerHTML = "";
+  if (!groupRows.length) {
+    groupBody.innerHTML = '<tr class="fgempty-row"><td colspan="6" class="fgempty-msg">还未新增群，请加入一个 QQ 接收群。</td></tr>';
+  }
+  groupRows.forEach(function (group) {
+    const index = allGroups.indexOf(group);
+    const name = group.name || identityName("groups", group.openid) || "";
+    const account = group.qq_id || "";
+    const tr = document.createElement("tr");
+    tr.setAttribute("data-id", String(group.openid));
+    tr.innerHTML =
+      '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
+      '<td style="text-align:center"><input type="checkbox" data-kind="group" data-i="' + index + '"' + (group.enabled ? " checked" : "") + '></td>' +
+      '<td>' + (name ? '<div style="color:var(--fg);font-size:12px;word-break:break-all;">' + escapeHtml(name) + '</div>' : '') + '</td>' +
+      '<td style="font-size:12px;">' + escapeHtml(account) + '</td>' +
+      '<td>' + renderIdCell(group.openid) + '</td>' +
+      '<td style="text-align:right"><button class="danger rowicon" data-kind="youtubeFgGroupRemove" data-id="' + escapeHtml(String(group.openid)) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></td>';
+    groupBody.appendChild(tr);
+  });
+  syncHeaderAll("youtubeGroupAllEnabled", groupRows, "enabled");
+
+  const intervalInput = document.getElementById("youtubePollInterval");
+  if (intervalInput && document.activeElement !== intervalInput) {
+    const value = Number(settings.youtube_poll_interval);
+    intervalInput.value = value > 0 ? value : 300;
+  }
+}
+
+function youtubeSourceFilterActive(source) {
+  return sourceFilterActive(source, "youtubeSource", true);
+}
+
 // ---------------- X RSS 状态卡片（真实运行状态，轻量轮询） ----------------
 // 数据来自面板 /api/xrss/status（代理 bot 的 /api/x-rss/status 运行时状态）。
 // 只更新本卡片的 textContent，不重建任何表格/输入框：转发组重命名输入框
@@ -2631,6 +2795,92 @@ async function refreshBilibiliStatus() {
   } catch (err) { /* 面板瞬断：保留当前显示，下一轮覆盖 */ }
 }
 
+function renderYoutubeStatus(st) {
+  const badge = document.getElementById("youtubeBadge");
+  if (!badge || !st) return;
+  const botUp = st.bot_running === true;
+  const pollTs = Number(st.last_poll_ts) || 0;
+  const pollText = pollTs ? xrssFmtTime(pollTs) : "—";
+  let srcText = "—";
+  if (st.sources_total !== undefined) {
+    srcText = st.sources_enabled + " / " + st.sources_total;
+  } else if (settings && Array.isArray(settings.youtube_sources)) {
+    const all = settings.youtube_sources;
+    srcText = all.filter(function (s) { return s.enabled; }).length + " / " + all.length;
+  }
+
+  let badgeText, badgeCls, failed = false;
+  if (!botUp) {
+    badgeText = "未运行";
+    badgeCls = "badge neutral";
+  } else if (st.ok === false) {
+    badgeText = localizeUserError(st.msg, "检测中…");
+    badgeCls = "badge warn";
+  } else if (!st.running) {
+    badgeText = "等待轮询启动";
+    badgeCls = "badge warn";
+  } else if (st.protection_error || st.last_result === "protection_failed") {
+    badgeText = "投递保护异常";
+    badgeCls = "badge off";
+    failed = true;
+  } else if (!st.qq_connected) {
+    if (!pollTs) badgeText = "等待 QQ 连接";
+    else if (st.last_result === "ok") badgeText = "YouTube 正常 · QQ 未连接";
+    else badgeText = "YouTube 请求失败 · QQ 未连接";
+    badgeCls = "badge warn";
+  } else if (st.last_result === "fetch_failed") {
+    badgeText = "YouTube 请求失败";
+    badgeCls = "badge off";
+    failed = true;
+  } else if (st.last_result === "parse_failed") {
+    badgeText = "RSS 解析失败";
+    badgeCls = "badge off";
+    failed = true;
+  } else {
+    badgeText = "运行中";
+    badgeCls = "badge on";
+  }
+  badge.textContent = badgeText;
+  badge.className = badgeCls;
+  badge.title = st.protection_error || st.last_error || st.msg || badgeText;
+  setStatusCardAmbient(badge, badgeCls === "badge on");
+  const overviewYoutube = document.getElementById("overviewYoutube");
+  setOverviewRouteStatus(overviewYoutube, badgeText, "YouTube RSS",
+    badgeCls.includes("neutral") ? "neutral" : badgeCls.includes("on") ? "on" : badgeCls.includes("off") ? "off" : "warn");
+
+  const summary = document.getElementById("youtubeSummary");
+  if (summary) {
+    const sendFailed = Number(st.last_failed_count) || 0;
+    summary.classList.toggle("err", failed || sendFailed > 0 || st.ok === false);
+    summary.title = failed ? localizeUserError(st.protection_error || st.last_error, "请求失败") : "";
+    if (!botUp) {
+      summary.textContent = "—";
+    } else if (failed) {
+      const protectionFailed = !!st.protection_error || st.last_result === "protection_failed";
+      const errorLabel = protectionFailed ? "投递保护异常" : (st.last_result === "parse_failed" ? "解析异常" : "请求异常");
+      const advice = protectionFailed ? "请恢复积压队列文件" : "请稍后重试";
+      summary.innerHTML = '<strong>' + errorLabel + '</strong><span>' + advice + '</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
+    } else if (st.ok === false) {
+      summary.title = localizeUserError(st.msg, "请求异常");
+      summary.innerHTML = '<strong>请求异常</strong><span>请稍后重试</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
+    } else {
+      summary.innerHTML = '<span>来源 ' + escapeHtml(srcText) + '</span>'
+        + '<small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>'
+        + '<span>发现 ' + (Number(st.last_new_count) || 0) + ' 条</span>'
+        + '<span>发送 ' + (Number(st.last_sent_count) || 0) + ' 条</span>'
+        + '<span>积压 ' + (Number(st.protection_queue_pending) || 0) + ' 条</span>'
+        + (sendFailed > 0 ? '<span class="rss-send-fail">发送失败 ' + sendFailed + ' 条</span>' : '');
+    }
+    if (failed || st.ok === false) appendRssCounters(summary, st, srcText, "来源", true);
+  }
+}
+
+async function refreshYoutubeStatus() {
+  try {
+    renderYoutubeStatus(await jget("/api/youtube/status"));
+  } catch (err) { /* 面板瞬断：保留当前显示，下一轮覆盖 */ }
+}
+
 // ---------------- 消息追踪（近期投递结果，只读） ----------------
 function messageTraceTime(ts) {
   const d = new Date(Number(ts || 0) * 1000);
@@ -2655,6 +2905,12 @@ function messageTraceSource(entry) {
       return String(item.id || (String(item.kind || "up") + ":" + String(item.value || ""))) === id;
     });
     return {name: "Bilibili", id: (source && source.value) || id || "未知来源"};
+  }
+  if (kind === "youtube") {
+    const source = ((settings && settings.youtube_sources) || []).find(function (item) {
+      return youtubeSourceId(item.value) === id;
+    });
+    return {name: "YouTube", id: (source && (source.name || source.value)) || id || "未知频道"};
   }
   if (kind === "discord") {
     return {name: "Discord", id: channelNames[id] || id || "未知频道"};
@@ -2917,6 +3173,89 @@ function closeBilibiliSourceModal() {
   document.getElementById("bilibiliSourceModal").style.display = "none";
 }
 
+function openYoutubeSourceRegister() {
+  const body = document.getElementById("youtubeSourceModalBody");
+  body.innerHTML = "";
+  const form = document.createElement("div");
+  form.className = "bilibili-source-form-grid";
+
+  const valueWrap = document.createElement("div");
+  valueWrap.className = "bilibili-source-field";
+  const valueLabel = document.createElement("div");
+  valueLabel.className = "bilibili-source-field-label";
+  valueLabel.textContent = "频道 ID 或 @handle";
+  const valueInput = document.createElement("input");
+  valueInput.type = "text";
+  valueInput.autocomplete = "off";
+  valueInput.placeholder = "UC... 或 @handle";
+  valueWrap.appendChild(valueLabel);
+  valueWrap.appendChild(valueInput);
+  form.appendChild(valueWrap);
+
+  const nameWrap = document.createElement("div");
+  nameWrap.className = "bilibili-source-field";
+  const nameLabel = document.createElement("div");
+  nameLabel.className = "bilibili-source-field-label";
+  nameLabel.textContent = "显示名称（可选）";
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.autocomplete = "off";
+  nameInput.placeholder = "留空则使用频道地址";
+  nameWrap.appendChild(nameLabel);
+  nameWrap.appendChild(nameInput);
+  form.appendChild(nameWrap);
+
+  const hint = document.createElement("div");
+  hint.className = "bilibili-source-field bilibili-source-field-wide";
+  hint.style.cssText = "font-size:12px;color:var(--muted);line-height:1.5;";
+  hint.textContent = "使用 YouTube 官方频道 RSS（feeds/videos.xml），无需 RSSHub。支持频道 ID（UC 开头）或 @handle；第一期只转发视频标题、封面和链接。";
+  form.appendChild(hint);
+  body.appendChild(form);
+
+  [valueInput, nameInput].forEach(function (input) {
+    input.addEventListener("keydown", function (event) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        document.getElementById("youtubeSourceSave").click();
+      }
+    });
+  });
+  async function saveSource() {
+    const value = normalizeYoutubeChannelValue(valueInput.value);
+    if (!value) {
+      showAlert("注册 YouTube 频道", "请填写有效的频道 ID（UC 开头）或 @handle，也可以粘贴频道主页地址");
+      return;
+    }
+    if (!Array.isArray(settings.youtube_sources)) settings.youtube_sources = [];
+    const sourceId = youtubeSourceId(value);
+    const duplicate = settings.youtube_sources.some(function (source) {
+      return String(source.id || youtubeSourceId(source.value)) === sourceId;
+    });
+    if (duplicate) { showAlert("注册 YouTube 频道", "该频道已经在列表中"); return; }
+    settings.youtube_sources.push({
+      id: sourceId,
+      kind: "channel",
+      value: value,
+      name: nameInput.value.trim() || value,
+      enabled: true,
+      translation_enabled: false,
+      translation_append_original: true,
+      translation_show_datetime: false,
+    });
+    closeYoutubeSourceModal();
+    await saveAndReload();
+  }
+  document.getElementById("youtubeSourceModalTitle").textContent = "注册 YouTube 频道";
+  document.getElementById("youtubeSourceModalContext").textContent = "填写频道 ID（UC 开头）或 @handle";
+  document.getElementById("youtubeSourceSave").onclick = saveSource;
+  document.getElementById("youtubeSourceModal").style.display = "flex";
+  valueInput.focus();
+}
+
+function closeYoutubeSourceModal() {
+  document.getElementById("youtubeSourceModal").style.display = "none";
+}
+
 function syncHeaderAll(id, items, field) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -3072,6 +3411,34 @@ function applyDndOrder(bodyId, newIds) {
     }
     return true;
   }
+  if (bodyId === "youtubeSourceBody" || bodyId === "youtubeGroupBody") {
+    // YouTube 转发组成员排序：直接重排当前组的 sources/groups（不动全局注册实体）
+    const yfg = getActiveFg(FG_YOUTUBE);
+    if (!yfg) return false;
+    const field = bodyId === "youtubeSourceBody" ? "sources" : "groups";
+    const members = (yfg[field] || []).map(String);
+    const visibleMembers = bodyId === "youtubeGroupBody"
+      ? members.filter(function (id) {
+        const group = (settings.qq_group_openids || []).find(function (item) {
+          return String(item.openid) === id;
+        });
+        return groupInActiveQQBotWorkspace(group);
+      })
+      : members;
+    if (visibleMembers.length !== newIds.length) return false;
+    const mset = {};
+    visibleMembers.forEach(function (id) { mset[id] = true; });
+    if (!newIds.every(function (id) { return mset[String(id)]; })) return false;
+    if (bodyId === "youtubeGroupBody") {
+      let index = 0;
+      yfg[field] = members.map(function (id) {
+        return mset[id] ? String(newIds[index++]) : id;
+      });
+    } else {
+      yfg[field] = newIds.map(String);
+    }
+    return true;
+  }
   if (bodyId === "chanBody") {
     arr = settings.discord_channels;
     memberSet = memberIdSet(getActiveFg(FG_DISCORD) && getActiveFg(FG_DISCORD).channels);
@@ -3128,6 +3495,7 @@ let fgDnd = null;   // {wrap, btn, startX, startY} —— 正在拖拽的源转�
 function fgCtxByWrap(wrap) {
   if (wrap && wrap.id === "xFgTabs") return FG_X;
   if (wrap && wrap.id === "bilibiliFgTabs") return FG_BILIBILI;
+  if (wrap && wrap.id === "youtubeFgTabs") return FG_YOUTUBE;
   if (wrap && wrap.id === "qqFgTabs") return FG_QQ;
   return FG_DISCORD;
 }
@@ -3196,9 +3564,7 @@ document.addEventListener("mouseup", function (e) {
   const ordered = [];
   ids.forEach(function (id) { if (byId[id]) ordered.push(byId[id]); });
   if (ordered.length !== list.length) return;
-  if (ctx.field === "x_forwarding_groups") settings.x_forwarding_groups = ordered;
-  else if (ctx.field === "qq_forwarding_groups") settings.qq_forwarding_groups = ordered;
-  else settings.forwarding_groups = ordered;
+  settings[ctx.field] = ordered;
   saveAndReload();                                         // 现有保存：POST settings + 重渲染
 });
 
@@ -3498,6 +3864,102 @@ function openBilibiliProtectionModal() {
   document.getElementById("confirmModal").style.display = "flex";
 }
 
+function openYoutubeProtectionModal() {
+  const protection = Object.assign({
+    min_send_interval: 60,
+    hourly_limit: 10,
+    backlog_limit: 10,
+    overflow_policy: "latest",
+  }, (settings && settings.youtube_protection) || {});
+  const body = document.getElementById("confirmBody");
+  if (!body) return;
+
+  body.innerHTML = "";
+  const form = document.createElement("div");
+  form.className = "bilibili-protection-modal-form";
+
+  function addNumberField(row, id, label, value, unit, min, max) {
+    const wrapper = document.createElement("label");
+    wrapper.className = "bilibili-protection-modal-field";
+    const labelText = document.createElement("span");
+    labelText.textContent = label;
+    const control = document.createElement("span");
+    const input = document.createElement("input");
+    input.id = id;
+    input.type = "number";
+    input.min = String(min);
+    input.max = String(max);
+    input.step = "1";
+    input.value = String(value);
+    const unitText = document.createElement("span");
+    unitText.textContent = unit;
+    control.appendChild(input);
+    control.appendChild(unitText);
+    wrapper.appendChild(labelText);
+    wrapper.appendChild(control);
+    row.appendChild(wrapper);
+  }
+
+  const firstRow = document.createElement("div");
+  firstRow.className = "bilibili-protection-modal-row";
+  addNumberField(firstRow, "youtubeProtectionMinSendInterval", "最短发送间隔", Number(protection.min_send_interval) >= 0 ? Number(protection.min_send_interval) : 60, "秒", 0, 86400);
+  addNumberField(firstRow, "youtubeProtectionHourlyLimit", "每小时最多", Number(protection.hourly_limit) > 0 ? Number(protection.hourly_limit) : 10, "条", 1, 10000);
+  form.appendChild(firstRow);
+
+  const secondRow = document.createElement("div");
+  secondRow.className = "bilibili-protection-modal-row";
+  addNumberField(secondRow, "youtubeProtectionBacklogLimit", "每个来源积压上限", Number(protection.backlog_limit) > 0 ? Number(protection.backlog_limit) : 10, "条", 1, 1000);
+  form.appendChild(secondRow);
+
+  const policy = document.createElement("label");
+  policy.className = "bilibili-protection-modal-policy";
+  const policyText = document.createElement("span");
+  policyText.textContent = "超出时";
+  const select = document.createElement("select");
+  select.id = "youtubeProtectionOverflowPolicy";
+  [
+    ["latest", "保留最新、跳过旧视频"],
+    ["oldest", "保留最旧、跳过新视频"],
+  ].forEach(function (item) {
+    const option = document.createElement("option");
+    option.value = item[0];
+    option.textContent = item[1];
+    select.appendChild(option);
+  });
+  select.value = protection.overflow_policy === "oldest" ? "oldest" : "latest";
+  policy.appendChild(policyText);
+  policy.appendChild(select);
+  form.appendChild(policy);
+
+  const hint = document.createElement("div");
+  hint.style.cssText = "font-size:12px;color:var(--muted);line-height:1.5;";
+  hint.textContent = "保护参数按全部 YouTube 来源合计生效；积压上限按每个来源计算。";
+  form.appendChild(hint);
+  body.appendChild(form);
+
+  document.getElementById("confirmTitle").textContent = "YouTube 转发保护";
+  setConfirmButtons("保存", true);
+  confirmAction = async function () {
+    let minInterval = parseInt(document.getElementById("youtubeProtectionMinSendInterval").value, 10);
+    let hourlyLimit = parseInt(document.getElementById("youtubeProtectionHourlyLimit").value, 10);
+    let backlogLimit = parseInt(document.getElementById("youtubeProtectionBacklogLimit").value, 10);
+    if (!(minInterval >= 0)) minInterval = 60;
+    if (minInterval > 86400) minInterval = 86400;
+    if (!(hourlyLimit > 0)) hourlyLimit = 10;
+    if (hourlyLimit > 10000) hourlyLimit = 10000;
+    if (!(backlogLimit > 0)) backlogLimit = 10;
+    if (backlogLimit > 1000) backlogLimit = 1000;
+    settings.youtube_protection = {
+      min_send_interval: minInterval,
+      hourly_limit: hourlyLimit,
+      backlog_limit: backlogLimit,
+      overflow_policy: document.getElementById("youtubeProtectionOverflowPolicy").value === "oldest" ? "oldest" : "latest",
+    };
+    await saveAndReload();
+  };
+  document.getElementById("confirmModal").style.display = "flex";
+}
+
 function openXProtectionModal() {
   const protection = Object.assign({
     min_send_interval: 5,
@@ -3738,6 +4200,7 @@ const FILTER_SUPPORTED_MESSAGE_TYPES = {
   relay: FILTER_MESSAGE_TYPES,
   xsource: ["文字", "图片", "视频"],
   bsource: ["文字", "图片", "链接", "视频"],
+  youtubeSource: ["文字", "图片", "链接"],
   xrelay: ["文字", "图片", "视频"],
   birelay: ["文字", "图片", "链接", "视频"],
 };
@@ -4191,8 +4654,8 @@ async function saveRelayChannels() {
 function prepareFilterModal(config, label) {
   const c = config || {};
   document.getElementById("filterChanName").textContent = label;
-  // 受众筛选（用户名/关键词）只在 Discord 频道与 X/Bilibili 来源弹窗出现。
-  const showAudienceFields = ["channel", "xsource", "bsource"].includes(filterEditScope);
+  // 受众筛选（用户名/关键词）只在 Discord 频道与 X/Bilibili/YouTube 来源弹窗出现。
+  const showAudienceFields = ["channel", "xsource", "bsource", "youtubeSource"].includes(filterEditScope);
   const audienceFields = document.getElementById("filterAudienceFields");
   if (audienceFields) audienceFields.style.display = showAudienceFields ? "flex" : "none";
   const usernameField = document.getElementById("filterUsernameField");
@@ -4318,6 +4781,14 @@ function openBilibiliSourceFilterModal(index) {
   prepareFilterModal(source, String(source.value || ""));
 }
 
+function openYoutubeSourceFilterModal(index) {
+  const source = (settings.youtube_sources || [])[index];
+  if (!source) return;
+  filterEditScope = "youtubeSource";
+  filterEditIndex = index;
+  prepareFilterModal(source, source.name || source.value || "");
+}
+
 const MANUAL_RELAY_SCOPE_META = {
   relay:   { key: "qq_c2c_relay_filter",       label: "Discord 手动转发", tab: "Discord" },
   xrelay:  { key: "x_c2c_relay_filter",        label: "X 手动转发",       tab: "X" },
@@ -4358,15 +4829,20 @@ function closeFilterModal() {
 
 function openTranslationSourceModal(scope, index) {
   const isX = scope === "xsource";
+  const isYoutube = scope === "youtubeSource";
   const item = isX
     ? (settings.x_rss_sources || [])[index]
-    : (settings.discord_channels || [])[index];
+    : isYoutube
+      ? (settings.youtube_sources || [])[index]
+      : (settings.discord_channels || [])[index];
   if (!item) return;
-  translationSourceEditScope = isX ? "xsource" : "channel";
+  translationSourceEditScope = isX ? "xsource" : isYoutube ? "youtubeSource" : "channel";
   translationSourceEditIndex = index;
   const label = isX
     ? "@" + xSourceKey(item.source)
-    : "# " + (item.name || item.id);
+    : isYoutube
+      ? (item.name || item.value || "")
+      : "# " + (item.name || item.id);
   document.getElementById("translationSourceName").textContent = label;
   renderTranslationSettingButton("translationSourceEnabled", item.translation_enabled === true, "启用翻译");
   renderTranslationSettingButton("translationSourceAppendOriginal", item.translation_append_original !== false, "保留原文");
@@ -4399,7 +4875,9 @@ function closeTranslationSourceModal() {
 async function saveTranslationSourceModal() {
   const item = translationSourceEditScope === "xsource"
     ? (settings.x_rss_sources || [])[translationSourceEditIndex]
-    : (settings.discord_channels || [])[translationSourceEditIndex];
+    : translationSourceEditScope === "youtubeSource"
+      ? (settings.youtube_sources || [])[translationSourceEditIndex]
+      : (settings.discord_channels || [])[translationSourceEditIndex];
   if (!item) return;
   item.translation_enabled = document.getElementById("translationSourceEnabled").dataset.on === "1";
   item.translation_append_original = document.getElementById("translationSourceAppendOriginal").dataset.on === "1";
@@ -4439,7 +4917,9 @@ document.getElementById("filterSave").addEventListener("click", async function (
       ? settings.x_rss_sources[filterEditIndex]
       : filterEditScope === "bsource"
         ? settings.bilibili_sources[filterEditIndex]
-        : settings.discord_channels[filterEditIndex];
+        : filterEditScope === "youtubeSource"
+          ? (settings.youtube_sources || [])[filterEditIndex]
+          : settings.discord_channels[filterEditIndex];
     if (!c) return;
     if (filterEditScope === "xsource") {
       c.filter_keywords = filterKeywords.slice();
@@ -4457,6 +4937,9 @@ document.getElementById("filterSave").addEventListener("click", async function (
       delete c.filter_title_keywords;
       delete c.filter_exclude_keywords;
       delete c.filter_authors;
+    } else if (filterEditScope === "youtubeSource") {
+      c.filter_keywords = filterKeywords.slice();
+      saveSourceMessageTypes(c, "youtubeSource");
     } else {
       c.filter_usernames = filterUsernames.slice();
       c.filter_keywords = filterKeywords.slice();
@@ -5031,6 +5514,7 @@ document.addEventListener("click", async function (e) {
       runtimeLogModal: function () { document.getElementById("runtimeLogModal").style.display = "none"; },
       confirmModal: hideConfirm,
       bilibiliSourceModal: closeBilibiliSourceModal,
+      youtubeSourceModal: closeYoutubeSourceModal,
       filterModal: closeFilterModal,
       translationSourceModal: closeTranslationSourceModal,
       relayChannelsModal: closeRelayChannelsModal,
@@ -5059,6 +5543,10 @@ document.addEventListener("click", async function (e) {
   }
   if (btn.id === "btnBilibiliProtection") {
     openBilibiliProtectionModal();
+    return;
+  }
+  if (btn.id === "btnYoutubeProtection") {
+    openYoutubeProtectionModal();
     return;
   }
   if (btn.id === "btnXProtection") {
@@ -5258,7 +5746,7 @@ document.addEventListener("click", async function (e) {
     if (forwardingGroupIsEmpty(ctx, fg)) {
       await removeGroup();
     } else {
-      showConfirmDlg("删除转发组", "确定删除转发组「" + fg.name + "」？成员关系会移除，但" + (ctx.key === "x" ? "来源和群" : ctx.key === "qq" ? "群" : "频道和群") + "本身不会删除。", removeGroup, "删除");
+      showConfirmDlg("删除转发组", "确定删除转发组「" + fg.name + "」？成员关系会移除，但" + (ctx.key === "x" || ctx.key === "youtube" ? "来源和群" : ctx.key === "qq" ? "群" : "频道和群") + "本身不会删除。", removeGroup, "删除");
     }
     return;
   }
@@ -5272,6 +5760,10 @@ document.addEventListener("click", async function (e) {
   }
   if (btn.id === "btnAddBilibiliFg") {
     await addForwardingGroup(FG_BILIBILI);
+    return;
+  }
+  if (btn.id === "btnAddYoutubeFg") {
+    await addForwardingGroup(FG_YOUTUBE);
     return;
   }
   if (btn.id === "btnAddQQFg") {
@@ -5342,6 +5834,19 @@ document.addEventListener("click", async function (e) {
     openFgAddPicker(FG_BILIBILI, "group");
     return;
   }
+  if (btn.id === "btnAddYoutubeSource") {
+    // 「注册频道」：登记 YouTube 频道（UC 频道 ID 或 @handle），不自动加入转发组
+    openYoutubeSourceRegister();
+    return;
+  }
+  if (btn.id === "btnAddYoutubeFgSource") {
+    openFgAddPicker(FG_YOUTUBE, "youtubeSource");
+    return;
+  }
+  if (btn.id === "btnAddYoutubeFgGroup") {
+    openFgAddPicker(FG_YOUTUBE, "group");
+    return;
+  }
   if (btn.id === "btnAddQQFgGroup") {
     // 「＋ 新增」（QQ 转发群）：从已注册群中选择加入当前 QQ→QQ 转发组
     openFgAddPicker(FG_QQ, "group");
@@ -5353,6 +5858,10 @@ document.addEventListener("click", async function (e) {
     return;
   }
   if (btn.id === "btnSyncBilibiliGroups") {
+    await openRegistrationReview("groups");
+    return;
+  }
+  if (btn.id === "btnSyncYoutubeGroups") {
     await openRegistrationReview("groups");
     return;
   }
@@ -5368,6 +5877,10 @@ document.addEventListener("click", async function (e) {
     openExternal("https://q.qq.com/qqbot/dashboard/");
     return;
   }
+  if (btn.id === "btnQQPlatformYoutube") {
+    openExternal("https://q.qq.com/qqbot/dashboard/");
+    return;
+  }
   if (btn.id === "btnQQPlatformQQ") {
     openExternal("https://q.qq.com/qqbot/dashboard/");
     return;
@@ -5379,6 +5892,10 @@ document.addEventListener("click", async function (e) {
   }
   if (btn.id === "btnOpenBilibili") {
     openExternal("https://www.bilibili.com/");
+    return;
+  }
+  if (btn.id === "btnOpenYoutube") {
+    openExternal("https://www.youtube.com/");
     return;
   }
   if (btn.id === "btnAddXUser") {
@@ -5418,6 +5935,18 @@ document.addEventListener("click", async function (e) {
   }
   if (k === "biliSourceFilterEdit") {
     openBilibiliSourceFilterModal(Number(btn.dataset.i));
+    return;
+  }
+  if (k === "youtubeFgSourceRemove") {
+    removeFgMember(FG_YOUTUBE, btn.dataset.id, "sources");
+    return;
+  }
+  if (k === "youtubeSourceFilterEdit") {
+    openYoutubeSourceFilterModal(Number(btn.dataset.i));
+    return;
+  }
+  if (k === "youtubeFgGroupRemove") {
+    removeFgMember(FG_YOUTUBE, btn.dataset.id, "groups");
     return;
   }
   if (k === "biliFgGroupRemove") {
@@ -5461,6 +5990,8 @@ document.addEventListener("click", async function (e) {
     openTranslationSourceModal("channel", Number(btn.dataset.i));
   } else if (k === "xSourceTranslation") {
     openTranslationSourceModal("xsource", Number(btn.dataset.i));
+  } else if (k === "youtubeSourceTranslation") {
+    openTranslationSourceModal("youtubeSource", Number(btn.dataset.i));
   } else if (k === "chanFilter") {
     openFilterModal(Number(btn.dataset.i));
   } else if (k === "xSourceFilter") {
@@ -5592,6 +6123,12 @@ document.addEventListener("click", async function (e) {
       source.translation_enabled = enabled;
     });
     await saveAndReload();
+  } else if (btn.id === "btnTranslationYoutube") {
+    const enabled = btn.dataset.on !== "1";
+    (settings.youtube_sources || []).forEach(function (source) {
+      source.translation_enabled = enabled;
+    });
+    await saveAndReload();
   } else if (btn.id === "btnTranslationManual") {
     settings.translation = settings.translation || {};
     settings.translation.enabled = btn.dataset.on !== "1";
@@ -5624,6 +6161,7 @@ document.addEventListener("click", async function (e) {
 const keyboardModalClosers = {
   confirmModal: hideConfirm,
   bilibiliSourceModal: closeBilibiliSourceModal,
+  youtubeSourceModal: closeYoutubeSourceModal,
   filterModal: closeFilterModal,
   translationSourceModal: closeTranslationSourceModal,
   relayChannelsModal: closeRelayChannelsModal,
@@ -5644,6 +6182,7 @@ const keyboardModalClosers = {
 };
 const keyboardModalSaveButtons = {
   bilibiliSourceModal: "bilibiliSourceSave",
+  youtubeSourceModal: "youtubeSourceSave",
   filterModal: "filterSave",
   translationSourceModal: "translationSourceSave",
   relayChannelsModal: "relayChannelsSave",
@@ -5711,12 +6250,12 @@ document.addEventListener("keydown", async function (event) {
     return;
   }
   const active = document.activeElement;
-  if (active && ["chanName", "xSourceName"].includes(active.dataset.kind)) {
+  if (active && ["chanName", "xSourceName", "youtubeSourceName"].includes(active.dataset.kind)) {
     event.preventDefault();
     active.blur();
     return;
   }
-  if (active && ["backfillLimit", "xRsshubBase", "xPollInterval", "bilibiliRsshubBase", "bilibiliPollInterval"].includes(active.id)) {
+  if (active && ["backfillLimit", "xRsshubBase", "xPollInterval", "bilibiliRsshubBase", "bilibiliPollInterval", "youtubePollInterval"].includes(active.id)) {
     event.preventDefault();
     active.dispatchEvent(new Event("change", {bubbles: true}));
     return;
@@ -5778,6 +6317,16 @@ document.addEventListener("change", async function (e) {
     await saveAndReload();
     return;
   }
+  if (el.id === "youtubeSourceAllEnabled") {
+    const fg = getActiveFg(FG_YOUTUBE);
+    const sourceSet = memberIdSet(fg && fg.sources);
+    (settings.youtube_sources || []).forEach(function (source) {
+      const sourceId = String(source.id || youtubeSourceId(source.value));
+      if (sourceSet[sourceId]) source.enabled = el.checked;
+    });
+    await saveAndReload();
+    return;
+  }
   if (el.id === "xRsshubBase") {
     settings.x_rsshub_base = el.value.trim();
     await saveAndReload();
@@ -5803,6 +6352,15 @@ document.addEventListener("change", async function (e) {
     if (!(v > 0)) v = 300;
     if (v < 30) v = 30;
     settings.bilibili_poll_interval = v;
+    el.value = v;
+    await saveAndReload();
+    return;
+  }
+  if (el.id === "youtubePollInterval") {
+    let v = parseInt(el.value, 10);
+    if (!(v > 0)) v = 300;
+    if (v < 30) v = 30;
+    settings.youtube_poll_interval = v;
     el.value = v;
     await saveAndReload();
     return;
@@ -5844,8 +6402,8 @@ document.addEventListener("change", async function (e) {
     await saveAndReload();
     return;
   }
-  if (el.id === "groupAllEnabled" || el.id === "xGroupAllEnabled" || el.id === "bilibiliGroupAllEnabled" || el.id === "qqGroupAllEnabled") {
-    const ctx = el.id === "xGroupAllEnabled" ? FG_X : el.id === "bilibiliGroupAllEnabled" ? FG_BILIBILI : el.id === "qqGroupAllEnabled" ? FG_QQ : FG_DISCORD;
+  if (el.id === "groupAllEnabled" || el.id === "xGroupAllEnabled" || el.id === "bilibiliGroupAllEnabled" || el.id === "youtubeGroupAllEnabled" || el.id === "qqGroupAllEnabled") {
+    const ctx = el.id === "xGroupAllEnabled" ? FG_X : el.id === "bilibiliGroupAllEnabled" ? FG_BILIBILI : el.id === "youtubeGroupAllEnabled" ? FG_YOUTUBE : el.id === "qqGroupAllEnabled" ? FG_QQ : FG_DISCORD;
     const fg = getActiveFg(ctx);
     const groupSet = memberIdSet(fg && fg.groups);
     settings.qq_group_openids.forEach(function (g) {
@@ -5885,6 +6443,14 @@ document.addEventListener("change", async function (e) {
     }
     return;
   }
+  if (el.dataset.kind === "youtubeSource") {
+    const source = (settings.youtube_sources || [])[Number(el.dataset.i)];
+    if (source) {
+      source.enabled = el.checked;
+      await saveAndReload();
+    }
+    return;
+  }
   if (el.dataset.kind === "xUser") {
     const u = settings.qq_user_openids[Number(el.dataset.i)];
     if (u) {
@@ -5914,6 +6480,12 @@ document.addEventListener("blur", async function (e) {
     const source = (settings.x_rss_sources || [])[Number(el.dataset.i)];
     if (source) {
       source.name = el.value;
+      await saveAndReload();
+    }
+  } else if (el.dataset.kind === "youtubeSourceName") {
+    const source = (settings.youtube_sources || [])[Number(el.dataset.i)];
+    if (source) {
+      source.name = el.value.trim() || source.value;
       await saveAndReload();
     }
   }
@@ -5949,6 +6521,20 @@ function startXSourceNameEdit(i) {
   input.focus();
   input.select();
 }
+function startYoutubeSourceNameEdit(i) {
+  const source = (settings.youtube_sources || [])[Number(i)];
+  if (!source) return;
+  const holder = document.querySelector('.chan-name[data-kind="youtubeSourceNameDisplay"][data-i="' + i + '"]');
+  if (!holder) return;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = source.name || source.value || "";
+  input.dataset.kind = "youtubeSourceName";
+  input.dataset.i = String(i);
+  holder.replaceWith(input);
+  input.focus();
+  input.select();
+}
 document.addEventListener("click", function (e) {
   const edit = e.target.closest('[data-kind="chanNameEdit"]');
   if (edit) {
@@ -5958,6 +6544,11 @@ document.addEventListener("click", function (e) {
   const xEdit = e.target.closest('[data-kind="xSourceNameEdit"]');
   if (xEdit) {
     startXSourceNameEdit(xEdit.dataset.i);
+    return;
+  }
+  const youtubeEdit = e.target.closest('[data-kind="youtubeSourceNameEdit"]');
+  if (youtubeEdit) {
+    startYoutubeSourceNameEdit(youtubeEdit.dataset.i);
     return;
   }
 });
@@ -6086,6 +6677,9 @@ async function init() {
   // Bilibili RSS 状态卡片：与 X RSS 相同的轻量轮询
   await refreshBilibiliStatus();
   setInterval(refreshBilibiliStatus, 10000);
+  // YouTube 状态卡片：同样使用轻量轮询
+  await refreshYoutubeStatus();
+  setInterval(refreshYoutubeStatus, 10000);
   await refreshMaintenance();
   setInterval(refreshMaintenance, 10000);
   await refreshMessageTrace();

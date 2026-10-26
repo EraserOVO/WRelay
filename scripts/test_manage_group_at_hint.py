@@ -1,4 +1,4 @@
-"""验证群聊 @ / 未知命令统一显示转发目标列表。"""
+"""验证群聊只有「单独 @机器人」才显示转发目标列表。"""
 import asyncio
 import sys
 from pathlib import Path
@@ -24,9 +24,19 @@ class FakeSegment:
 
 
 class FakeGroupMessage:
-    def __init__(self, plaintext="", segments=None, author_bot=False):
+    def __init__(
+        self,
+        plaintext="",
+        segments=None,
+        author_bot=False,
+        attachments=None,
+        reply=None,
+    ):
         self.plaintext = plaintext
         self.segments = list(segments or [])
+        self.attachments = list(attachments or [])
+        if reply is not None:
+            self.reply = reply
         self.author = type("Author", (), {
             "bot": author_bot,
             "member_openid": "member-openid",
@@ -44,11 +54,11 @@ class FakeGroupMessage:
 
 
 class FakeGroupAtMessage(FakeGroupMessage):
-    def __init__(self, plaintext="", segments=None, author_bot=False):
+    def __init__(self, plaintext="", segments=None, **kwargs):
         segments = list(segments or [])
         if not any(segment.type == "mention_user" for segment in segments):
             segments.insert(0, FakeSegment("", "mention_user", is_bot=True))
-        super().__init__(plaintext, segments, author_bot)
+        super().__init__(plaintext, segments, **kwargs)
 
     def is_tome(self):
         return True
@@ -95,28 +105,27 @@ async def main():
         assert relay_list.await_args.args[1].get_plaintext() == "/菜单"
         relay_list.reset_mock()
 
-        # 仅 @、不同事件格式的 @、@ 后的未知内容、未知斜杠命令都导向目标列表。
+        # 仅 @、不同事件格式的 @ 导向目标列表。
         for event in (
             FakeGroupAtMessage("", [FakeSegment("", "mention_user", is_bot=True)]),
             FakeGroupMessage("", [FakeSegment("", "to_me")]),
             FakeGroupMessage("", []),
-            FakeGroupAtMessage(
-                "随便问问",
-                [FakeSegment("", "mention_user", is_bot=True), FakeSegment("随便问问")],
-            ),
             FakeGroupMessage(
                 "", [FakeSegment("", "mention_user", is_bot=True, user_id="bot-openid")]
             ),
-            FakeGroupMessage("/不存在", [FakeSegment("/不存在")]),
+            FakeGroupMessage(
+                "", [FakeSegment("", "mention_user", user_id="bot-id")]
+            ),
         ):
             if not event.get_plaintext() and not event.get_message():
                 event.is_tome = lambda: True
             await manage.handle_group_at_hint(bot, event)
             relay_list.assert_awaited_with(bot, event)
-        assert relay_list.await_count == 6
+        assert relay_list.await_count == 5
         relay_list.reset_mock()
 
-        # 普通聊天、@其他成员、已知命令、机器人消息不被接管。
+        # 普通聊天、@其他成员、已知命令、机器人消息、@机器人后附带内容或引用、
+        # 未知斜杠命令都不接管。
         unrelated_at = FakeGroupMessage(
             "你好", [FakeSegment("", "mention_user", is_bot=False, user_id="other")]
         )
@@ -128,12 +137,26 @@ async def main():
             FakeGroupAtMessage("/注册群", [FakeSegment("/注册群")]),
             FakeGroupAtMessage("/注册", [FakeSegment("/注册")]),
             FakeGroupAtMessage("未知内容", [FakeSegment("未知内容")], author_bot=True),
+            FakeGroupAtMessage(
+                "随便问问",
+                [FakeSegment("", "mention_user", is_bot=True), FakeSegment("随便问问")],
+            ),
+            FakeGroupAtMessage(
+                "",
+                [FakeSegment("", "mention_user", is_bot=True), FakeSegment("", "image")],
+                attachments=[{"url": "https://example.com/1.png"}],
+            ),
+            FakeGroupAtMessage(
+                "", [FakeSegment("", "mention_user", is_bot=True)], reply=object()
+            ),
+            FakeGroupMessage("/不存在", [FakeSegment("/不存在")]),
+            FakeGroupMessage("/菜单", [FakeSegment("/菜单")]),
         ):
             await manage.handle_group_at_hint(bot, event)
         relay_list.assert_not_awaited()
 
-    # 群未登记：@ 机器人 / 未知命令属于「功能请求」，提示先登记群，
-    # 不展示转发目标列表；普通群消息/@其他成员不受影响。
+    # 群未登记：单独 @ 机器人属于「功能请求」，提示先登记群，
+    # 不展示转发目标列表；@机器人后带内容、普通群消息和未知命令都不提示。
     with (
         mock.patch.object(manage, "QQBot", FakeQQBot),
         mock.patch.object(manage, "GroupMessageCreateEvent", FakeGroupMessage),
@@ -143,14 +166,22 @@ async def main():
         mock.patch.object(manage, "send_titled_reply", new=mock.AsyncMock()) as send_reply,
     ):
         relay_list.reset_mock()
-        await manage.handle_group_at_hint(
-            bot,
-            FakeGroupAtMessage("随便问问", [FakeSegment("", "mention_user", is_bot=True), FakeSegment("随便问问")]),
-        )
+        await manage.handle_group_at_hint(bot, FakeGroupAtMessage())
         relay_list.assert_not_awaited()
         send_reply.assert_awaited_once_with(
             mock.ANY, mock.ANY, "群准入提示", manage.GROUP_NOT_REGISTERED_TEXT
         )
+        send_reply.reset_mock()
+        for event in (
+            FakeGroupAtMessage(
+                "随便问问",
+                [FakeSegment("", "mention_user", is_bot=True), FakeSegment("随便问问")],
+            ),
+            FakeGroupMessage("/不存在", [FakeSegment("/不存在")]),
+        ):
+            await manage.handle_group_at_hint(bot, event)
+        relay_list.assert_not_awaited()
+        send_reply.assert_not_awaited()
 
     unknown_private = FakePrivateMessage("/不存在")
     with (

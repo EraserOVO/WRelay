@@ -49,6 +49,7 @@ from plugins.message_time import format_message_datetime
 
 DISCORD_API_TIMEOUT = 20
 _discord_client = None
+_discord_client_proxy = None
 _discord_request_tasks = set()
 _discord_stopping = False
 
@@ -65,13 +66,30 @@ def _get_discord_proxy():
     return None
 
 
+def _discard_discord_client():
+    """丢弃缓存客户端，下次请求按当前代理重建。"""
+    global _discord_client, _discord_client_proxy
+    stale = _discord_client
+    _discord_client = None
+    _discord_client_proxy = None
+    if stale is None:
+        return
+    try:
+        asyncio.get_running_loop().create_task(stale.aclose())
+    except RuntimeError:
+        pass
+
+
 def _get_discord_client():
-    global _discord_client
-    if _discord_client is None:
+    global _discord_client, _discord_client_proxy
+    proxy = _get_discord_proxy()
+    if _discord_client is None or proxy != _discord_client_proxy:
+        _discard_discord_client()
         _discord_client = httpx.AsyncClient(
-            proxy=_get_discord_proxy(),
+            proxy=proxy,
             timeout=DISCORD_API_TIMEOUT,
         )
+        _discord_client_proxy = proxy
     return _discord_client
 
 
@@ -91,7 +109,7 @@ async def _discord_request(method, *args, **kwargs):
 
 @get_driver().on_shutdown
 async def _close_discord_client():
-    global _discord_client, _metadata_stopping, _discord_stopping
+    global _discord_client, _discord_client_proxy, _metadata_stopping, _discord_stopping
     _metadata_stopping = True
     _discord_stopping = True
     request_tasks = set(_discord_request_tasks)
@@ -106,6 +124,7 @@ async def _close_discord_client():
     if _discord_client is not None:
         await _discord_client.aclose()
         _discord_client = None
+    _discord_client_proxy = None
 
 # =====================================================
 # 补发抓取分页参数（仅 fetch_channel_messages_after 使用）

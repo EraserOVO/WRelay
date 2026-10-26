@@ -211,7 +211,7 @@ async def handle_bilibili_auto_resolve(
         return
 
     if _mentions_bot(bot, event, list(event.get_message())):
-        # 交给 plugins.manage 的群 @ 提示，避免同一消息两次回复。
+        # @机器人 的消息只由 plugins.manage 的单独 @ 提示接管，链接不解析。
         return
 
     url = extract_first_video_url(message)

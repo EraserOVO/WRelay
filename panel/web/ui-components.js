@@ -29,6 +29,7 @@
     messageTraceModal: {size: "large", heading: ".message-trace-toolbar", tools: ["messageTraceSummary", "btnMessageTraceRefresh"]},
     confirmModal: {size: "small", footer: "confirmOk"},
     bilibiliSourceModal: {size: "medium", footer: "bilibiliSourceSave", heading: ".bilibili-source-heading", backdrop: true},
+    youtubeSourceModal: {size: "medium", footer: "youtubeSourceSave", heading: ".bilibili-source-heading", backdrop: true},
     filterModal: {size: "medium", footer: "filterSave", backdrop: true},
     translationSourceModal: {size: "small", footer: "translationSourceSave", grid: true, backdrop: true},
     relayChannelsModal: {size: "medium", footer: "relayChannelsSave", grid: true, tools: ["relayScopeTabs"], backdrop: true},

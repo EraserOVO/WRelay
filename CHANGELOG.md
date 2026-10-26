@@ -2,9 +2,29 @@
 
 ## 未发布
 
+- 修复冷启动时 Discord 网关已恢复但启动补发持续失败：代理端口失效后，网关重试只把新端口同步给 Discord 适配器，补发抓取与媒体下载读取的驱动配置仍是旧端口，表现为客户端在线、补发请求全部 `ConnectError`。现在切换代理时同步更新驱动配置，`plugins/fetch.py` 与 `plugins/media.py` 的缓存 HTTP 客户端会在代理变化时重建，并补充 `scripts/test_discord_proxy_recovery.py` 的接线校验。
+
+- 修复 Discord 在本机代理端口变化后长期离线：当 `.env.prod` 的 `DISCORD_PROXY` 指向本机端口且该端口已不可用时，Bot 启动时会自动改用 Windows 系统代理的当前端口；同时在启动后按 15／30／60 秒重试 Discord 网关，弥补 NoneBot Discord 适配器首次网关请求失败后不再重试的行为。新增 `plugins/proxy_guard.py`、`plugins/discord_reconnect.py` 与 `scripts/test_discord_proxy_recovery.py`，测试已登记到 `scripts/run_tests.py`。
+
+- 修复重启电脑后 Discord 长期离线：冷启动时代理隧道常比机器人晚几分钟才可用，原先 15／30／60 秒的三次重试不足以覆盖。现在网关重试延长到约 24 分钟（15／30／60／120 秒，之后每 5 分钟一次），并在每次重试前重新检查 `DISCORD_PROXY` 的本机端口，端口失效时跟随系统代理并同步给 Discord 适配器；连上即停止重试。
+
+- 修复「YouTube」页机器人状态卡布局：此前 YouTube 未登记进 `panel/web/discord-page.js` 的共享展示页配置，状态卡没有生成「连接信息 / 统计」两个分组，`.robot-status-summary` 的两列网格把徽标、Bot 下拉和四项统计拆成了三行。现在 YouTube 与 X / Bilibili 共用同一套规则——首行是运行徽标与 Bot 下拉，右侧同一行显示 PID / 今日转发 / 累计 / 失败；YouTube 专属的状态卡覆盖样式随之删除，底部两个操作栏也与其它功能页一致地分组排列。同时把「YouTube → QQ」在侧栏导航与总览链路卡中的位置调整到「Bilibili → QQ」上方，总览顺序变为 Discord、X、YouTube、Bilibili、QQ。
+
+- 新增「YouTube RSS → QQ」第一期：在「YouTube」页按 `UC...` 频道 ID、`@handle` 或频道主页链接登记来源，使用 YouTube 官方 `feeds/videos.xml` 拉取更新（无需 API Key，不走 RSSHub）；每条新视频向该来源绑定的 QQ 群发送来源头、标题、封面与视频链接，不解析或上传视频本体，不支持关键词/搜索来源，也不提供 YouTube 手动转发。每个来源可独立设置关键词、消息类型（文字/图片/链接）、翻译与目标转发组；封面下载复用 `DISCORD_PROXY`，失败降级为图片链接。投递沿用 Bilibili 的限速/积压保护（默认 60 秒间隔、每小时 10 条、每来源积压 10 条）与 `youtube:<video_id>` 幂等记录，游标写入 `discord_last.json`，频道解析与 ETag 状态写入 `data/youtube.json`，保护队列写入 `data/youtube_protection.json`，并纳入设置备份、自动备份和维护告警。面板新增 YouTube 工作区及并发来源翻译开关；解析、配置/路由、渲染/投递测试已登记到 `scripts/run_tests.py`。
+
+- YouTube 链路的配置校验兼容接入前的 `data/settings.json` 与老备份：缺少 `youtube_sources` 字段按空来源处理，不再被维护检查判为「损坏或格式无效」，也不会让每小时自动备份失败。YouTube 来源连续三轮轮询失败的告警改为提示检查频道与网络/代理，不再提到 RSSHub。
+
+- 侧栏、总览与「打开 YouTube」按钮的 YouTube 图标改用 MingCute 的 `youtube_line` 空心播放图标（Apache-2.0，与其余品牌图标同库同粗细），替换原先内联手绘的实心播放标记；`THIRD_PARTY_NOTICES.md` 的 MingCute 图标清单同步补上 `youtube_line`。
+
+- 右下角的维护告警浮层改为小卡片样式：标题「维护提醒」+ 告警正文 + 左下角「查看维护」按钮，外观（卡底、描边、圆角、内边距、阴影）与页面卡片一致，原先写在标签上的内联定位样式移到 `style.css`。
+
 - 桌面端 Discord「离线补发」改为转发组下方的小卡片：与其它小卡片共用两列网格，1500px 视口实测 576×164px，1280px 及以下退化为单列；卡内保留单次补发上限与待补发数量，底部依次为「启用补发」胶囊、「立即补发」、刷新与清空，控件 ID、接口与补发行为不变。原先为整行横向布局服务的 `desktop-backfill-parameters` / `desktop-backfill-actions` 分组移除。
 
 - 桌面端小卡片胶囊开关落位规则统一（长期有效）：胶囊默认贴卡片左下角；动作栏左侧已有按钮时改贴右下角；右下角另有按钮时紧贴该按钮左侧。当前「定时消息」卡的「启用定时发送」已从「编辑定时消息」右侧移到卡片右下角，只有单个胶囊的「自动解析」卡与「离线补发」卡保持贴左。结构由 `scripts/test_desktop_modal_grid.py` 固化校验。
+
+- 群聊回复收窄为「单独 @机器人」：只有 @ 机器人且消息里不带文字、附件或引用时，才显示当前群可转发目标列表（未登记群同样只在单独 @ 时给群准入提示）。@机器人后附带内容、普通聊天和未知斜杠命令一律不回复；私聊命令、群聊 `/菜单`、`/转发`、`/注册群` 与 Bilibili 链接自动解析的行为不变。判定与静默场景由 `scripts/test_manage_group_at_hint.py` 覆盖。
+
+- 桌面端状态卡外观统一（长期有效）：所有页面的机器人状态卡与各页 RSS 状态卡改用同一套卡片表面（1px 描边、`radius-card` 圆角、内边距 `12px 18px`），以 Discord 的机器人状态卡与 X 的 RSS 状态卡为基准。YouTube 页不再是无描边的扁平状态带：标题与「运行中」徽标各自独占一行，轮询间隔与限速按钮行与 X / Bilibili 同规格。X / Bilibili / YouTube 页同时具有这两类卡，仍保持为两张独立卡片，卡片纵向间距沿用 16px；Discord 与 QQ 页顶部本就只有一张机器人状态卡，保持不变。总览页的机器人状态卡同样采用这套表面，并继续保留启动、停止与重启按钮，其他页面仍不显示启停按钮。改动只在 `panel/web/style.css` 与 `panel/web/ui-components.css`，卡片 DOM、控件 ID 与状态判定不变；规则由 `scripts/test_desktop_modal_grid.py` 固化校验。
 
 - Bilibili 自动解析在拿不到视频时改为完全静默：下载失败、超过媒体大小上限、视频多段、接口报错或解析异常都不再回复「暂时无法获取 + 原链接」，只在日志中记录原因；卡片帮助文案同步改为「拿不到视频时不回复」。成功解析后的视频回复与 10 分钟发送窗口不变。
 
