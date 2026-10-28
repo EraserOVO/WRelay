@@ -1,9 +1,10 @@
-"""Discord 网关连接重试。
+"""QQ / Discord 网关连接监督。
 
-NoneBot 的 Discord 适配器在首次网关请求失败后直接返回，不会自行重试
-（nonebot/adapters/discord/adapter.py:91-101）。重启电脑后代理软件往往比
-机器人晚就绪，启动瞬间的隧道抖动就会让 Discord 一直离线，这里按退避持续
-重试，并在每次重试前复查代理端口。
+NoneBot 的两个适配器在首次取 access token / 网关地址失败后直接返回，不会
+自行重试（nonebot/adapters/discord/adapter.py:91-101、
+nonebot/adapters/qq/adapter.py:148-164）。网络抖动或代理隧道短暂不可用时，
+对应平台会一直离线，只能等面板看门狗按最长一小时的退避重启。这里在启动后
+常驻检查，发现适配器没有存活连接就重新发起，直到连上为止。
 """
 
 import asyncio
@@ -12,13 +13,16 @@ import os
 from nonebot import get_adapter, get_bots, get_driver, logger
 from nonebot.adapters.discord import Adapter as DiscordAdapter
 from nonebot.adapters.discord import Bot as DiscordBot
+from nonebot.adapters.qq import Adapter as QQAdapter
+from nonebot.adapters.qq import Bot as QQBot
 
 from plugins.proxy_guard import align_discord_proxy
 
 driver = get_driver()
 
-# 代理隧道在冷启动后可能需要几分钟才可用，覆盖约 24 分钟；连上即停止。
-RETRY_DELAYS = (15, 30, 60, 120, 300, 300, 300, 300)
+# 启动 15 秒后首次检查；未连上时按 15/30/60 秒退避持续重连，连上后每分钟巡检。
+RETRY_DELAYS = (15, 30, 60)
+HEALTHY_INTERVAL = 60
 
 
 def _refresh_proxy(adapter):
@@ -37,34 +41,69 @@ def _refresh_proxy(adapter):
     )
 
 
-def _discord_connected():
-    return any(isinstance(bot, DiscordBot) for bot in get_bots().values())
+def _gateway_connected(bot_type):
+    return any(isinstance(bot, bot_type) for bot in get_bots().values())
 
 
 def _attempt_in_flight(adapter):
     return any(not task.done() for task in adapter.tasks)
 
 
-async def _retry_gateway():
-    for attempt, delay in enumerate(RETRY_DELAYS, start=1):
+def _start_bots(adapter, bot_infos, runner):
+    for bot_info in bot_infos:
+        task = asyncio.create_task(runner(bot_info))
+        task.add_done_callback(adapter.tasks.discard)
+        adapter.tasks.add(task)
+
+
+async def _ensure_discord():
+    try:
+        adapter = get_adapter(DiscordAdapter)
+    except ValueError:
+        return True
+    if _gateway_connected(DiscordBot):
+        return True
+    bot_infos = list(adapter.discord_config.discord_bots)
+    if not bot_infos or _attempt_in_flight(adapter):
+        return not bot_infos
+    _refresh_proxy(adapter)
+    logger.warning("Discord 尚未建立网关连接，重新发起连接")
+    _start_bots(adapter, bot_infos, adapter.run_bot)
+    return False
+
+
+async def _ensure_qq():
+    try:
+        adapter = get_adapter(QQAdapter)
+    except ValueError:
+        return True
+    if _gateway_connected(QQBot):
+        return True
+    bot_infos = [info for info in adapter.qq_config.qq_bots if info.use_websocket]
+    if not bot_infos or _attempt_in_flight(adapter):
+        return not bot_infos
+    logger.warning("QQ 尚未建立网关连接，重新发起连接")
+    _start_bots(adapter, bot_infos, adapter.run_bot_websocket)
+    return False
+
+
+async def _supervise_gateways():
+    delay = RETRY_DELAYS[0]
+    failed = 0
+    while True:
         await asyncio.sleep(delay)
-        if _discord_connected():
-            return
-        try:
-            adapter = get_adapter(DiscordAdapter)
-        except ValueError:
-            return
-        bot_infos = list(adapter.discord_config.discord_bots)
-        if not bot_infos:
-            return
-        _refresh_proxy(adapter)
-        if _attempt_in_flight(adapter):
-            continue
-        logger.warning("Discord 尚未建立网关连接，进行第 {} 次重试", attempt)
-        for bot_info in bot_infos:
-            adapter.tasks.add(asyncio.create_task(adapter.run_bot(bot_info)))
+        healthy = True
+        for ensure in (_ensure_qq, _ensure_discord):
+            if not await ensure():
+                healthy = False
+        if healthy:
+            failed = 0
+            delay = HEALTHY_INTERVAL
+        else:
+            failed += 1
+            delay = RETRY_DELAYS[min(failed, len(RETRY_DELAYS) - 1)]
 
 
 @driver.on_startup
-async def _schedule_gateway_retry():
-    asyncio.create_task(_retry_gateway())
+async def _schedule_gateway_supervisor():
+    asyncio.create_task(_supervise_gateways())

@@ -254,7 +254,7 @@ WRelay/
 │  ├─ manage.py              # QQ 私聊管理命令
 │  ├─ registration.py        # QQ 用户/群注册申请
 │  ├─ fetch.py               # Discord 消息抓取、归一化和渲染
-│  ├─ discord_reconnect.py   # Discord 网关重试与代理端口跟随
+│  ├─ discord_reconnect.py   # QQ/Discord 网关监督与代理端口跟随
 │  ├─ proxy_guard.py         # 本机代理端口自检与系统代理跟随
 │  ├─ media.py               # Markdown、提及、Emoji 和媒体处理
 │  ├─ sender.py              # QQ 消息发送、分片、重试和降级

@@ -26,7 +26,7 @@ WRelay/
 │   ├── manage.py             QQ 私聊中文斜杠管理命令
 │   ├── registration.py       QQ 注册指令（/注册 / /注册群）+ 申请存储（异步处理器在线程池写入）
 │   ├── fetch.py              Discord 消息抓取 + 渲染（统一解析层；REST 使用 DISCORD_PROXY）
-│   ├── discord_reconnect.py  Discord 网关退避重试与代理端口切换同步
+│   ├── discord_reconnect.py  QQ/Discord 网关监督与代理端口切换同步
 │   ├── proxy_guard.py        本机代理端口自检与 Windows 系统代理跟随
 │   ├── sender.py             QQ 群发送（重试、分片、降级）
 │   ├── retry.py              失败消息延迟重试与持久化队列
@@ -577,7 +577,7 @@ QQ 私聊的 `/补发状态 开启/关闭` 走字段级接口 `POST /api/setting
 「连接诊断」按钮只读显示进程、Discord、QQ 连接和待重试投递数量，不会发送测试消息。
 面板看门狗在机器人进程正常但 QQ 或 Discord 连续不可用 2 分钟时重启整个机器人进程，尝试恢复网关连接；
 因此另一平台也会短暂重连。持续故障时，两类自动恢复重启的间隔分别从 5 分钟逐步延长，最长每小时一次；双链路同时故障时共享重启冷却，避免连续重启。
-Discord 网关启动失败后由 `plugins/discord_reconnect.py` 在约 24 分钟内按退避重试；每次重试前 `plugins/proxy_guard.py` 检查 `DISCORD_PROXY` 的本机端口，端口失效时改用 Windows 系统代理当前端口，并同步给 Discord 适配器与驱动配置。补发抓取与媒体下载的缓存 HTTP 客户端会记录创建时的代理，配置变化后在下次请求时按新端口重建，避免出现网关已在线但补发持续连接失败。
+Discord 与 QQ 网关启动失败后由 `plugins/discord_reconnect.py` 常驻监督：启动 15 秒后首次检查，未连上时按 15／30／60 秒退避持续重连，连上后每分钟巡检，不设次数上限，避免适配器取 token／网关地址失败后永久离线；每次 Discord 重试前 `plugins/proxy_guard.py` 检查 `DISCORD_PROXY` 的本机端口，端口失效时改用 Windows 系统代理当前端口，并同步给 Discord 适配器与驱动配置。补发抓取与媒体下载的缓存 HTTP 客户端会记录创建时的代理，配置变化后在下次请求时按新端口重建，避免出现网关已在线但补发持续连接失败。
 「失败通知」开关控制失败提醒；仅白名单中已启用且勾选「告警」的用户会收到通知。开关、冷却时间及收件人从同一 settings 快照在线程池读取；同一失败项和收件人的并发回调串行检查冷却，避免重复提醒。冷却按收件人分别记录且只在私聊发送成功后开始，暂时发送失败的收件人可在后续失败回调中重试。
 
 ---
@@ -649,7 +649,7 @@ QQ 定时消息可在每条计划内保存一张 PNG、JPEG、GIF 或 WebP 附�
 | `plugins/manage.py` | QQ 私聊管理命令（在线程池读取授权白名单，通过本机管道调用桌面管理路由）；`/菜单` 与 `/定时消息` 查询返回带按钮的 markdown 消息 | 中 |
 | `plugins/qq_keyboard.py` | QQ 消息按钮构造与发送：指令按钮 + `enter` 自动发送、5×5 行数上限、markdown 转义、群按钮布局，发送失败回退纯文本 | 低 |
 | `plugins/qq_interaction.py` | QQ 回调按钮（`INTERACTION_CREATE`）：回应交互、把按钮 `data` 还原成消息事件复用现有命令处理器；仅在 Webhook 接入下可达，默认不启用 | 低 |
-| `plugins/discord_reconnect.py` | Discord 网关启动失败后的退避重试；每次重试前复查 `DISCORD_PROXY` 的本机端口，失效时跟随系统代理，并把新地址同步给 Discord 适配器与驱动配置，使补发/媒体客户端在下一次请求时按新端口重建 | 低 |
+| `plugins/discord_reconnect.py` | QQ / Discord 网关常驻监督：适配器没有存活连接时重新发起，按 15/30/60 秒退避持续重连、连上后每分钟巡检，不再有次数上限；Discord 重试前复查 `DISCORD_PROXY` 的本机端口，失效时跟随系统代理，并把新地址同步给 Discord 适配器与驱动配置，使补发/媒体客户端在下一次请求时按新端口重建 | 低 |
 | `plugins/proxy_guard.py` | 本机 HTTP 代理端口自检：`DISCORD_PROXY` 指向不可用的回环端口时改用 Windows 系统代理当前端口；纯函数，便于测试 | 低 |
 | `plugins/fetch.py` | Discord 消息抓取 + 归一化 + 渲染为 QQ 消息段（唯一渲染逻辑）；消息抬头/时间/回复引用由上下文 helper 组装；正文提及/Markdown/Emoji、Embed 标题/链接/图片与附件分类分别由专责 helper 处理；图片/音频/视频附件共用下载、富媒体构造与链接回退流程；单条消息 200 响应 JSON 无效或根节点非对象时返回格式错误；频道元数据查询合并并限制 5 个并发，成功缓存最多 2048 项，失败（包括无效 JSON）缓存 30 秒，渲染回退为频道 ID；REST 消息作者结构无效时显示 unknown、username 类型无效时筛选值归一为空、正文类型无效时归一为空、Embed/附件集合无效时归一为空列表，媒体字段只保留字符串；内联及回退回复引用的作者结构无效时显示 unknown，昵称仅接受非空字符串，提及列表结构无效时忽略映射、正文类型无效时跳过引用行；代理配置变化后按新端口重建 REST 客户端；关闭时回收元数据与其他 REST 请求后关闭 HTTP 客户端 | 中 |
 | `plugins/forward_service.py` | Discord 实时转发、补发和重试共用的消息准备与翻译流程；频道筛选及翻译配置读取在线程池执行 | 中 |

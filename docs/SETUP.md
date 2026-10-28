@@ -374,7 +374,7 @@ WRELAY_TENCENT_SECRET_KEY=你的腾讯云SecretKey
 
 Discord 用途需要本机能访问 Discord API、Gateway 和 CDN。若本机代理软件提供 HTTP／混合端口，可在 `.env.prod` 设置 Discord 适配器支持的 `DISCORD_PROXY`，例如 `DISCORD_PROXY='http://127.0.0.1:7897'`；请将端口替换为代理软件当前监听端口。该设置作用于 Discord API/Gateway、Discord 域名上的媒体下载、X/Twitter 媒体 CDN（`pbs.twimg.com`、`video.twimg.com`），以及 YouTube 频道 RSS 与封面下载。
 
-若 `DISCORD_PROXY` 指向本机端口而该端口已不可用（例如代理软件重启后换了端口），Bot 启动时会自动改用 Windows 系统代理的当前端口并写入日志；代理软件未运行或系统代理也不可用时仍按原值连接。Discord 网关启动失败后会在约 24 分钟内按退避持续重试（15／30／60／120 秒，之后每 5 分钟一次），每次重试前重新检查代理端口；重启电脑后代理软件比机器人晚就绪也能自动恢复，连上即停止重试。切换端口时会同时更新 Discord 网关、补发抓取与媒体下载共用的代理配置，已缓存的 HTTP 客户端会在下次请求时按新端口重建，因此网关恢复后补发不会继续走旧端口。
+若 `DISCORD_PROXY` 指向本机端口而该端口已不可用（例如代理软件重启后换了端口），Bot 启动时会自动改用 Windows 系统代理的当前端口并写入日志；代理软件未运行或系统代理也不可用时仍按原值连接。Discord 与 QQ 网关在启动或运行中断开后由 `plugins/discord_reconnect.py` 常驻监督：启动 15 秒后首次检查，未连上时按 15／30／60 秒退避持续重连，连上后每分钟巡检，没有次数上限；每次 Discord 重试前重新检查代理端口，重启电脑后代理软件比机器人晚就绪也能自动恢复。切换端口时会同时更新 Discord 网关、补发抓取与媒体下载共用的代理配置，已缓存的 HTTP 客户端会在下次请求时按新端口重建，因此网关恢复后补发不会继续走旧端口。
 
 程序会清除 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 及小写形式；Bilibili 等非代理媒体下载仍使用系统路由，可在代理软件中启用可用的 TUN 虚拟网卡。YouTube 的 RSS 与封面请通过 `DISCORD_PROXY` 或 TUN 路由访问。设置代理后重启机器人，再在向导刷新连接状态。面板的「从全部可读频道注册」会运行 `scripts/diagnose_channels.py`，同样使用 `DISCORD_PROXY`；扫描提示无法连接 Discord 时，先核对代理端口是否仍与代理软件一致。
 

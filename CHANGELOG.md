@@ -2,6 +2,8 @@
 
 ## 未发布
 
+- 修复 QQ 或 Discord 在启动阶段短暂断网后长时间离线：NoneBot 适配器取 access token／网关地址失败后直接返回、不再重试，此前只有 Discord 有约 24 分钟的有限重试，QQ 完全没有兜底，网络抖动后会一直离线到看门狗按最长一小时的退避重启。现在 `plugins/discord_reconnect.py` 改为常驻网关监督，同时覆盖 QQ 与 Discord：启动 15 秒后首次检查，未连上时按 15／30／60 秒退避持续重连，连上后每分钟巡检，不设次数上限；Discord 重试前仍会复查并跟随本机代理端口。`scripts/test_discord_proxy_recovery.py` 的接线断言同步更新。
+
 - 修复冷启动时 Discord 网关已恢复但启动补发持续失败：代理端口失效后，网关重试只把新端口同步给 Discord 适配器，补发抓取与媒体下载读取的驱动配置仍是旧端口，表现为客户端在线、补发请求全部 `ConnectError`。现在切换代理时同步更新驱动配置，`plugins/fetch.py` 与 `plugins/media.py` 的缓存 HTTP 客户端会在代理变化时重建，并补充 `scripts/test_discord_proxy_recovery.py` 的接线校验。
 
 - 修复 Discord 在本机代理端口变化后长期离线：当 `.env.prod` 的 `DISCORD_PROXY` 指向本机端口且该端口已不可用时，Bot 启动时会自动改用 Windows 系统代理的当前端口；同时在启动后按 15／30／60 秒重试 Discord 网关，弥补 NoneBot Discord 适配器首次网关请求失败后不再重试的行为。新增 `plugins/proxy_guard.py`、`plugins/discord_reconnect.py` 与 `scripts/test_discord_proxy_recovery.py`，测试已登记到 `scripts/run_tests.py`。

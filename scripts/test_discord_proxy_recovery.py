@@ -1,4 +1,4 @@
-"""验证 Discord 代理端口自检与网关启动重试的接线。"""
+"""验证 Discord 代理端口自检与网关监督器接线。"""
 from pathlib import Path
 
 from plugins.proxy_guard import align_discord_proxy, loopback_http_proxy
@@ -86,9 +86,14 @@ def test_startup_wiring():
     assert '"plugins.discord_reconnect"' in bot
 
     plugin = RECONNECT_PATH.read_text(encoding="utf-8")
-    assert "RETRY_DELAYS = (15, 30, 60, 120, 300, 300, 300, 300)" in plugin
+    # 两个适配器都会在取 token / 网关地址失败后直接返回，监督器必须长期重试而不是有限次数后放弃
+    assert "RETRY_DELAYS = (15, 30, 60)" in plugin
+    assert "HEALTHY_INTERVAL = 60" in plugin
+    assert "while True" in plugin
     assert "@driver.on_startup" in plugin
-    assert "adapter.run_bot(bot_info)" in plugin
+    assert "adapter.run_bot)" in plugin
+    assert "adapter.run_bot_websocket)" in plugin
+    assert "_attempt_in_flight(adapter)" in plugin
     # 冷启动时代理可能几分钟后才可用：重试前要重新对齐端口并同步给适配器
     assert "_refresh_proxy(adapter)" in plugin
     assert "align_discord_proxy()" in plugin
