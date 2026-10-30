@@ -5,6 +5,7 @@ data/logs/
 backup/
 测试内容/
 .env.prod
+.env.prod.bak.*
 .zcode/
 *.egg-info/
 /data/
