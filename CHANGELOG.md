@@ -1,5 +1,9 @@
 # 更新记录
 
+## 0.2.1 — 2026-10-30
+
+- 依赖安全更新：`Pillow` 12.3.0 → 13.0.0、`certifi` 2026.7.22 → 2026.10.23，清空 GitHub Dependabot 针对这两个包的告警。`requirements-lock.txt`、`pyproject.toml` 的 Pillow 约束（`>=13.0.0,<14.0.0`）与内置运行环境 `.runtime/python` 同步更新，安装包重新构建。Discord 表情合成仍按原尺寸与顺序输出，坏图片继续静默降级；HTTPS 请求改用新版 CA 包。
+
 ## 0.2.0 — 2026-10-28
 
 - 修复 QQ 或 Discord 在启动阶段短暂断网后长时间离线：NoneBot 适配器取 access token／网关地址失败后直接返回、不再重试，此前只有 Discord 有约 24 分钟的有限重试，QQ 完全没有兜底，网络抖动后会一直离线到看门狗按最长一小时的退避重启。现在 `plugins/discord_reconnect.py` 改为常驻网关监督，同时覆盖 QQ 与 Discord：启动 15 秒后首次检查，未连上时按 15／30／60 秒退避持续重连，连上后每分钟巡检，不设次数上限；Discord 重试前仍会复查并跟随本机代理端口。`scripts/test_discord_proxy_recovery.py` 的接线断言同步更新。

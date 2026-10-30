@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "WRelay"
-version = "0.2.0"
+version = "0.2.1"
 description = "WRelay"
 readme = "README.md"
 requires-python = ">=3.10, <4.0"
@@ -21,7 +21,7 @@ dependencies = [
     #              启用 SOCKS extra，以支持 .env.prod 中的 socks5 代理
     "nonebot2[fastapi,httpx]>=2.5.0,<3.0.0",
     "httpx[socks]>=0.28.1,<0.29.0",
-    "Pillow>=12.0,<13.0",
+    "Pillow>=13.0.0,<14.0.0",
     # Metadata-only compatibility patch; install with requirements-lock.txt.
     "nonebot-adapter-qq==1.7.2+wrelay.1",
     "cryptography>=50.0.1,<51.0.0",
