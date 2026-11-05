@@ -13,6 +13,8 @@ from plugins.config import get_active_group_routing_snapshot, get_group_bot_ids
 from plugins.failure_notification import notify_delivery_failure
 from plugins.media import make_text, make_media_link
 from plugins.message_trace import record_delivery
+from plugins import personal_qq
+from plugins.personal_qq_config import is_personal
 
 
 # =====================================================
@@ -22,7 +24,8 @@ from plugins.message_trace import record_delivery
 #   - 文字部分：拼成一条消息发送；超过 QQ 文本长度上限(4000字符)
 #     时按 TEXT_CHUNK_LENGTH 分片为多条顺序发送
 #   - 媒体部分：每条单独一条消息，避免 QQ 把富媒体卡片渲染到文字上方；
-#     上传失败按 429/网络错误指数退避重试，仍失败则降级为文字 + 原链接
+#     上传失败按 429/网络错误指数退避重试，仍失败则降级为文字 + 原链接；
+#     标记 no_link_fallback 的媒体（视频）跳过且不补链接
 #   - 多群并行发送（asyncio.gather），一个群被限流不拖慢其他群
 #   - send_relay_message 返回 {group_openid: 是否送达}，供 relay.py
 #     按群记录去重 ID（失败的群不记录，重连补发时只补失败群，
@@ -144,17 +147,17 @@ async def _send_with_retry(qq_bot, group_openid, message, channel_id="", message
     for attempt in range(1, MAX_SEND_ATTEMPTS + 1):
         try:
 
-            await qq_bot.send_to_group(
-
-                group_openid=group_openid,
-
-                message=message
-
-            )
+            if isinstance(qq_bot, personal_qq.PersonalSender):
+                await qq_bot.send_to_group(group_openid, message, channel_id, message_id)
+            else:
+                await qq_bot.send_to_group(group_openid=group_openid, message=message)
 
             return True
 
         except Exception as exc:
+
+            if isinstance(exc, personal_qq.DeliveryUnknown):
+                raise
 
             is_rate = _is_rate_limit(exc)
             rate_limited = rate_limited or is_rate
@@ -459,6 +462,7 @@ async def _send_ordered_emoji_parts(
 async def send_media_items(qq_bot, groups, media_items, channel_id="", message_id=""):
     """发送媒体到指定群；返回 {group_openid: 是否送达}
     有来源链接的媒体上传重试后仍失败时，降级为文字 + 原链接（该降级视为已送达）；
+    标记 no_link_fallback 的媒体（视频）失败时静默跳过，不补链接，也不判整条失败；
     本地附件没有可用的来源链接，失败时仍记为投递失败；
     成功上传或成功降级才视为送达。"""
     ok_map = {group: True for group in groups}
@@ -481,6 +485,16 @@ async def send_media_items(qq_bot, groups, media_items, channel_id="", message_i
         pending = [group for group, ok in results.items() if not ok]
 
         if not pending:
+            continue
+
+        if item.get("no_link_fallback"):
+            logger.warning(
+                "富媒体上传失败，跳过且不补链接: {} 频道{} 消息{} 失败群{}",
+                item["kind"],
+                channel_id or "-",
+                message_id or "-",
+                pending,
+            )
             continue
 
         if not item.get("url"):
@@ -669,7 +683,7 @@ async def send_relay_message(
 
     qq_bot = get_qq_bot()
 
-    if qq_bot is None:
+    if qq_bot is None and not personal_qq.any_connected():
 
         logger.error(
             "QQ Bot 未连接，本次消息未发送、不记录去重ID"
@@ -692,6 +706,7 @@ async def send_relay_message(
     # 避免多 Bot 时因“取第一个 Bot”而投递到错误会话。未绑定的旧群保持
     # 使用第一个已连接 Bot。
     connected = get_qq_bots()
+    connected.update(personal_qq.connected_bots())
     default_id = _qq_bot_id(qq_bot)
     if default_id:
         connected.setdefault(default_id, qq_bot)
@@ -702,6 +717,15 @@ async def send_relay_message(
     for group in groups:
         bot_id = bot_ids.get(str(group), "")
         selected = qq_bot if not bot_id else connected.get(bot_id)
+        if is_personal(group):
+            automatic = bool(channel_id) and (
+                str(channel_id).isascii() and str(channel_id).isdecimal()
+                or str(channel_id).startswith(("x_rss:", "bilibili:", "youtube:", "qq_manual:", "scheduled:", "personal-link:"))
+            )
+            if not automatic or not is_personal(bot_id):
+                selected = None
+        elif is_personal(bot_id):
+            selected = None
         if selected is None:
             unavailable.append(group)
             logger.error("QQ Bot {} 未连接，群 {} 本次未发送", bot_id, group)
@@ -754,7 +778,7 @@ async def send_relay_message(
     )
 
     failed_groups = [group for group, ok in ok_map.items() if not ok]
-    if failed_groups:
+    if failed_groups and qq_bot is not None:
         await notify_delivery_failure(
             qq_bot,
             failed_groups,

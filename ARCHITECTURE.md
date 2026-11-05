@@ -7,6 +7,38 @@
 
 ## 1. 项目整体结构
 
+账号配置由 `plugins/bot_profiles.py` 拆分保存在 `data/bot_profiles/official_<AppID>.json` / `personal_<QQ号>.json`，
+`settings.json` 保留索引、接收群注册和绑定、授权、定时计划与全局服务。`config._load_settings` 在账号上下文中组合视图；
+面板请求、私聊管理、Discord 实时/补发/重试及 RSS 轮询传递同一账号上下文。空路由保持为空，损坏文件按账号暂停。
+RSS 缓存、队列和时间窗放在 `data/bot_profile_runtime/<配置名>/`，由 `profile_runtime.RSSProfiles` 串行切换状态，
+不改写现有频道 × 群游标或投递幂等身份。下文旧版 `settings.json` 的来源/路由字段现归属账号配置视图，
+旧版 `data/<RSS状态>.json` 路径仅供迁移；具体存储、导入 API 和恢复规则见 [Bot 独立配置](docs/BOT_PROFILES.md)。
+
+个人 QQ 出站层由 `plugins/personal_qq.py` 与 `personal_qq_config.py` 提供，
+`bot.py` 并列注册官方 QQ 与 OneBot v11 适配器。自定义 `/onebot/v11/ws` 反向入口
+按 QQ 号独立令牌鉴权，校验实际登录账号和在线状态后向 sender 暴露连接。
+第二期解析 message 入站事件，忽略通知及请求事件，不启用 OneBot HTTP 或正向 WS。不同账号可混用 NapCat / SnowLuma，
+同一 UIN 仅一个连接，不在账号间自动回退。
+
+`sender.py` 严格区分原 OpenID 与 `personal:<群号>`，个人目标须绑定 `personal:<QQ号>`，
+允许 Discord/X/Bilibili/YouTube，以及内部 `qq_manual:`、`scheduled:`、`personal-link:` 来源。个人号在线可恢复 RSS 轮询，验证完成后调用
+原有 Discord 补发入口；不恢复 `plugins/discord_history.py` 自动补发。
+`personal_qq_inbound.py` 单独处理已验证 OneBot 的个人号事件，官方 Bot 保留既有事件处理器。
+私聊 `/注册` 只追加默认禁用的命名空间用户；管理和手动转发均核对 `qq_user_openids`，
+群内手动转发还要求当前账号绑定、启用群及同属启用 QQ 转发组，媒体处理后复查授权和目标。
+普通消息只在有界内存保存十分钟，不自动转发；引用仅使用当前账号和会话内已观察的普通消息，断线清理内容缓存。
+管理命令复用 `manage._dispatch`，重启标记绑定个人号与授权用户；Bilibili 解析复用原有开关、群绑定、去重及 360P 视频服务。
+定时循环在验证通过后启动，计划使用 `scheduled:<计划ID>` 与预定触发时间作为投递身份。
+
+个人媒体转换为 OneBot 数组段，二进制使用 base64，远程媒体仅允许 HTTP(S)。
+发送前原子占位 `data/personal_qq_uncertain.json`，超时或断线保留并抛出 `DeliveryUnknown`，
+禁止未知结果自动重发或降级；成功片段身份不含协议端及账号，复用投递数据库。
+令牌存在 `data/personal_qq.json`，不进入普通备份；待确认文件进入高级运行状态备份并校验结构。
+
+`panel/personal_qq_api.py` 管理配置并代理已认证 Bot 接口；`panel/web/personal-qq.js` / `.css`
+提供连接、群发现和待确认界面。运行及编译依赖包含 `nonebot-adapter-onebot==2.4.6` 与 msgpack。
+身份约束、接入步骤与隔离验证见 [docs/PERSONAL_QQ.md](docs/PERSONAL_QQ.md)。
+
 ```
 WRelay/
 ├── bot.py                    机器人入口（NoneBot 启动、适配器注册、日志轮转）
@@ -110,13 +142,13 @@ plugins/fetch.py
     │ ⑤ build_parts() 渲染为 QQ 消息段
     │    └── 文字：@提及转换、Markdown 清理、Emoji 提取
     │    └── 媒体：并发下载图片/音频（media.fetch_bytes_many）
-    │    └── 失败降级：下载失败 → 文字 + 原链接
+    │    └── 失败降级：图片/音频下载失败 → 文字 + 原链接；视频失败 → 跳过，不补链接
     │
     ▼
 plugins/sender.py
     │ ⑥ send_relay_message()
     │    └── 文字超长自动分片（3900 字符/片）
-    │    └── 媒体上传失败 → 降级为链接
+    │    └── 媒体上传失败 → 图片/音频降级为链接；视频按 no_link_fallback 跳过
     │    └── 多群并行发送（asyncio.gather）
     │    └── 429 限流退避重试（最多 3 次）
     │    └── 返回 {群openid: 是否送达}
@@ -225,7 +257,7 @@ RSSHub 常与本程序由同一次开机启动拉起（例如运行在 Docker De
 “连续三轮轮询失败”告警；`pending` 与失败一样不推进游标。该宽限期按进程启动时间计算，
 只影响启动阶段，HTTP 状态码错误（如 503）在任何时候都仍按真实失败上报。
 两条 RSS 链路处理成功的 200 响应时，若响应没有新 ETag，会清除旧验证器；后续请求不再携带失效的 If-None-Match 值。
-X 公开时间线的 MP4 变体按有效非负 bitrate 选择；无效数值（含 NaN/Infinity）按 0 处理，不会中断整份时间线解析。
+X 公开时间线的 MP4 变体按有效非负 bitrate 取最低档；无效数值（含 NaN/Infinity）按 0 处理，不会中断整份时间线解析。RSSHub 正常路径只有一条视频直链，无法选择档位。
 X 公开时间线单条视频的 `video_info` 或 `variants` 结构无效时只跳过该视频媒体，推文正文仍保留。
 公开时间线中结构无效的单条 tweet entry 会被跳过，后续有效推文仍继续解析。
 公开时间线的主推文、转推和引用推文作者字段若不是对象，按空作者处理并保留正文及引用内容。
@@ -233,9 +265,11 @@ X、Bilibili 与 YouTube 的后台轮询任务由各自模块在应用启动钩�
 每轮轮询按当前配置回收已删除 X/Bilibili/YouTube 来源的解析结果缓存；Bilibili 来源取消某投稿类型后，也会清除该类型的缓存。仍配置但停用的来源缓存保留，以供重新启用后复用。
 活跃源按 RSS 状态身份去重：X key 大小写不敏感，Bilibili source ID 精确匹配；重复配置仅轮询首项并记录警告，避免并发争用同一 ETag、文章缓存和游标。
 每轮来源列表和目标群路由在工作线程中基于同一份 settings 快照生成，避免按来源重复检查文件版本、阻塞事件循环或在一次筛选中混用配置版本；开始具体投递时仍读取当前路由。
-X/Bilibili/YouTube 每条 RSS 内容的筛选与翻译选项也从同一份 settings 快照生成并在线程池读取，避免同一条内容因两次配置读取而混用版本。来源筛选还支持消息内容类型（X：文字/图片/视频；Bilibili：文字/图片/链接/视频；YouTube：文字/图片/链接），与关键词和推文/投稿类型分别判断；同时配置必须分别通过各筛选，即交集语义。渲染按组件过滤，关闭 X 的图片/视频会同时阻止媒体及其下载失败后的链接降级；关闭 Bilibili 的文字/图片/链接/视频分别过滤对应组件；关闭 YouTube 的文字/图片/链接分别过滤标题、封面与视频链接。缺省配置仍全开；X/Bilibili 旧值“文件”读取时迁移为“视频”，Discord 的“文件”保持通用附件含义。
+X/Bilibili/YouTube 每条 RSS 内容的筛选与翻译选项也从同一份 settings 快照生成并在线程池读取，避免同一条内容因两次配置读取而混用版本。来源筛选还支持消息内容类型（X：文字/图片/视频；Bilibili：文字/图片/链接/视频；YouTube：文字/图片/链接），与关键词和推文/投稿类型分别判断；同时配置必须分别通过各筛选，即交集语义。渲染按组件过滤，关闭 X 的图片/视频会同时阻止媒体下载；图片失败仍降级为链接，视频失败直接跳过；关闭 Bilibili 的文字/图片/链接/视频分别过滤对应组件；关闭 YouTube 的文字/图片/链接分别过滤标题、封面与视频链接。缺省配置仍全开；X/Bilibili 旧值“文件”读取时迁移为“视频”，Discord 的“文件”保持通用附件含义。
 X 每条推文在发送前仍重新读取最新目标群路由，但在工作线程执行；Bilibili 队列调度为来源和目标群只读取一次共同快照，避免对每个排队投稿同步重读路由。
 X/Bilibili 状态接口的来源配置在线程池读取；Bilibili 来源、保护选项和转发组由一次 settings 快照生成，避免管理面板轮询状态时同步执行多次文件摘要检查。X 单条推文抓取也在线程池读取 RSSHub 地址，避免命令触发的设置文件检查阻塞事件循环。
+
+X 自动投递的纯转推若有可靠原推 ID，使用原推 ID 与目标 QQ 群判重，因此再次转推及不同来源转推同一原推不会重复投递；原创与带评论的引用仍使用自身 ID。公开时间线保留 `retweeted_status` 的 ID；当前 RSSHub 格式没有可靠原推身份，缺失或无效 ID 时按当前消息 ID 保守放行，不依据正文或媒体地址猜测。旧成功记录不回填原推身份，首次仍可能再次投递。INFO 日志记录当前消息、原推、去重键、候选媒体类型/地址及成功群和重复跳过群；候选媒体不代表实际成功送达的文件。
 
 X 来源保留各自的 `x_rss:{handle}` 游标；此外，投递时按 X 原生推文 ID 与 QQ 群检查共享成功记录，避免同一推文从多个来源进入同一群。某群已有成功记录时会推进当前来源游标并跳过发送，其他尚未收到该推文的群仍会正常发送。记录保存在 `data/delivery_dedup.sqlite3`，保留 90 天并限制最多 100,000 条。
 
@@ -257,9 +291,9 @@ plugins/bilibili.py
     │    单 Feed helper 负责 URL/ETag 校验、304 缓存回退、解析结果缓存和单类型错误记录
     │ ④ plugins/bilibili_parser.py 解析投稿类型、标题、作者、标签、链接和封面
     │ ⑤ 以 bilibili:{kind}:{value} 和类型子键保存 feed 状态与游标基线
-    │ ⑥ 按关键词和投稿类型筛选；消息类型含「视频」时对视频投稿尝试发送单段视频
+    │ ⑥ 按关键词和投稿类型筛选；消息类型含「视频」时对视频投稿尝试发送 360P 单段视频
     │ ⑦ 进入有限积压队列，按最短间隔和每小时上限复用 translation/sender 投递
-    │    消息类型含「视频」时仅对视频投稿尝试发送单段视频；超限、多段或失败时附视频链接
+    │    消息类型含「视频」时仅对视频投稿尝试发送 360P 单段视频；超限、多段、非 360P 或失败时省略视频
     └── 首次启用来源或群只建基线；专栏/动态 feed 首次启用时单独建基线
          发送失败、QQ 未连接时不推进游标
 ```
@@ -267,7 +301,7 @@ plugins/bilibili.py
 Bilibili 与 Discord、X 使用独立的转发组和来源游标；全局来源、QQ 群启用状态以及当前
 转发组成员关系必须同时满足才会投递。消息文本使用“自动转发来自 Bilibili 中[UP 主名称]的投稿”
 来源头，优先使用 RSS 投稿作者，缺少作者时回退到注册来源值；只渲染标题和
-原始投稿地址（纯文本链接），并发送 RSS 提供的封面图片；不发送作者行、标签、其他分类、简介及播放统计。UP 主来源可选择视频、专栏和动态；标签与关键词来源只支持视频。来源的消息类型筛选勾选「视频」时即尝试从 RSS 视频地址或 Bilibili 播放接口获取单段视频并上传本体，复用媒体下载器的大小上限（默认 30 MiB）；超过上限、多段视频或下载失败时附上视频链接，不勾选「视频」则连视频链接也不发送。投稿链接中的 BV 号大小写敏感（base58 变体），解析时必须原样保留：大写化会得到另一个不存在的投稿号，`view` / `playurl` 接口返回 `-400 请求错误`，视频只能降级为链接，私聊手动转发也会直接报「获取Bilibili投稿失败」。`view` 接口的常见业务错误码会转换为可读原因后再展示（例如 `62012：仅UP主自己可见`、`62004：稿件审核中`、`62002：稿件不可见`、`-404：投稿不存在或已删除`），未收录的码仍保留接口原始 message；这类投稿需要有效登录态才能抓取，请求不携带 cookie 时只会得到该提示。
+原始投稿地址（纯文本链接），并发送 RSS 提供的封面图片；不发送作者行、标签、其他分类、简介及播放统计。UP 主来源可选择视频、专栏和动态；标签与关键词来源只支持视频。来源的消息类型筛选勾选「视频」时即尝试从 Bilibili 播放接口只请求 360P 单段视频并上传本体，复用媒体下载器的大小上限（默认 30 MiB）；超过上限、多段、接口未返回 360P 或下载失败时只省略视频本体，不补发 CDN 地址或投稿页链接，不勾选「视频」则不尝试视频本体。投稿链接中的 BV 号大小写敏感（base58 变体），解析时必须原样保留：大写化会得到另一个不存在的投稿号，`view` / `playurl` 接口返回 `-400 请求错误`，视频本体只能跳过，私聊手动转发也会直接报「获取Bilibili投稿失败」。`view` 接口的常见业务错误码会转换为可读原因后再展示（例如 `62012：仅UP主自己可见`、`62004：稿件审核中`、`62002：稿件不可见`、`-404：投稿不存在或已删除`），未收录的码仍保留接口原始 message；这类投稿需要有效登录态才能抓取，请求不携带 cookie 时只会得到该提示。
 RSSHub 请求失败、解析失败或发送失败只影响对应 Bilibili 来源，不会阻断其他自动链路。
 Bilibili 链路复用与 X 相同的启动宽限：进程启动 4 分钟内的 RSSHub 连接异常记为
 `pending`，不累计连续失败，也不推进游标。
@@ -336,14 +370,14 @@ YouTube 没有 QQ 手动转发。投递复用 `send_and_record` 的 `youtube:<vi
     │ ④ 复用 plugins/bilibili.py：_resolve_manual_ref 解析/跟随短链 → kind 非「视频」
     │    （直播、番剧、专栏、动态、跳转后不是视频）时静默返回，不发送任何提示
     │ ⑤ 以 (group_openid, 投稿编号, 分 P) 抢占去重槽：10 分钟窗口内已发送或仍在途则跳过
-    │ ⑥ _fetch_video_manual_post 取投稿与 cid，_fetch_video_url 走 playurl 单段下载
+    │ ⑥ _fetch_video_manual_post 取投稿与 cid，_fetch_video_url 只请求 360P 单段下载
     │    （受 media.fetch_bytes 的超时、大小上限与全局限流约束）
     └── 有字节 → bot.send(event, Message([file_video(...)]))；
         无字节/异常 → 记录日志后静默返回，不回复提示或原链接
 ```
 
 回复使用 `bot.send(event, ...)`，因此带上原消息 `msg_id` 走群被动回复，不需要额外群选择器。
-视频分成多段、超过媒体大小上限（默认 30 MiB）或下载失败都由 `_fetch_video_url` 返回空字节，
+视频分成多段、接口未返回 360P、超过媒体大小上限（默认 30 MiB）或下载失败都由 `_fetch_video_url` 返回空字节，
 本模块统一静默跳过，不引入 ffmpeg、yt-dlp、B 站 Cookie 与 DASH 合并。
 去重状态只在进程内存中（`_sent_at` + `_inflight`，由 `asyncio.Lock` 保护），重启后清空；
 它不影响 RSS 链路的 `data/delivery_dedup.sqlite3`。
@@ -446,7 +480,7 @@ QQ 私聊管理命令依赖桌面进程持续运行；窗口隐藏到托盘时�
 - 新版 QQ 引用事件把引用内容放在 `parallel_message.msg_nodes`，`msg_elements` 只保留 `msg_idx`/`message_type`，缺少适配器必填的 `content`；`plugins/qq_event_compat.py` 会把节点内容回填到与 `ref_msg_idx` 对应的引用元素，否则整条 `/转发` 事件会在 pydantic 校验阶段被丢弃。
 - 普通文字消息：已授权用户的普通文字消息会写入最近内容缓存，但不消费事件，`plugins/manage.py` 仍会回复「未知命令」；其中包含 http(s) 链接的消息在缓存后还会 `mark_consumed`，低优先级 matcher 不再回复「未知命令」。未授权用户的内容不记录，由 `plugins/manage.py` 回复准入提示。relay 指令本身仍会 `mark_consumed` / `stop_propagation`，避免转发命令再被当作未知命令回复。
 
-引用或最近内容若是 Discord、X/Twitter 或 Bilibili 链接，会抓取单条原消息并按对应媒体规则发送；Bilibili 视频默认尝试上传，复用媒体大小上限，超限、多段或下载失败时附视频链接。Bilibili 手动转发支持投稿视频与 opus 内容（专栏、动态）：`bilibili_parser.parse_manual_post_url` 统一识别 `/video/`、`/opus/{id}`、`/dynamic/{id}` 和 b23.tv 短链（短链跟随重定向后重新判定类型），`fetch_bilibili_manual_post` 按类型分派——视频走 `x/web-interface/view` 取分 P 与封面，专栏与动态共用 `x/polymer/web-dynamic/v1/detail`，由响应中的 `item.type`（`DYNAMIC_TYPE_ARTICLE` 为专栏，其余为动态）区分，`bilibili_parser.parse_opus_detail` 把两种结构归一为同一 post 形状并补上 `post_type`。专栏渲染标题、简介摘要（`major.article.desc`）、封面（`covers[0]`）和 `jump_url`；动态渲染正文（`module_dynamic.desc.text`）与封面（`major.draw.items[0].src`）；接口返回的 `//` 与 `http://` 地址统一补全并升级为 https。该路径按链接直连接口且不携带 Cookie，仅 UP 主可见等需要登录态的内容仍无法抓取；正文只在手动转发（传入 `enabled_types`）时渲染，自动转发格式不变。三种私聊手动转发都由 `config.get_active_user_openids` 执行同一套 QQ 用户白名单校验；这是授权用户触发的 QQ → QQ 手动操作，不是 QQ → Discord 自动同步。
+引用或最近内容若是 Discord、X/Twitter 或 Bilibili 链接，会抓取单条原消息并按对应媒体规则发送；Bilibili 视频只尝试 360P 单段本体，复用媒体大小上限，超限、多段、非 360P 或下载失败时省略视频且不补链接，仅启用「视频」时整条静默跳过、不回复筛选提示。Discord 与 X 的视频同样只发送视频本体，拿不到时不补链接；X 公开时间线回退路径取最低码率档。Bilibili 手动转发支持投稿视频与 opus 内容（专栏、动态）：`bilibili_parser.parse_manual_post_url` 统一识别 `/video/`、`/opus/{id}`、`/dynamic/{id}` 和 b23.tv 短链（短链跟随重定向后重新判定类型），`fetch_bilibili_manual_post` 按类型分派——视频走 `x/web-interface/view` 取分 P 与封面，专栏与动态共用 `x/polymer/web-dynamic/v1/detail`，由响应中的 `item.type`（`DYNAMIC_TYPE_ARTICLE` 为专栏，其余为动态）区分，`bilibili_parser.parse_opus_detail` 把两种结构归一为同一 post 形状并补上 `post_type`。专栏渲染标题、简介摘要（`major.article.desc`）、封面（`covers[0]`）和 `jump_url`；动态渲染正文（`module_dynamic.desc.text`）与封面（`major.draw.items[0].src`）；接口返回的 `//` 与 `http://` 地址统一补全并升级为 https。该路径按链接直连接口且不携带 Cookie，仅 UP 主可见等需要登录态的内容仍无法抓取；正文只在手动转发（传入 `enabled_types`）时渲染，自动转发格式不变。三种私聊手动转发都由 `config.get_active_user_openids` 执行同一套 QQ 用户白名单校验；这是授权用户触发的 QQ → QQ 手动操作，不是 QQ → Discord 自动同步。
 普通文字与附件由 `qq_fwd.build_forward_content` 构造；QQ 表情不在 `get_plaintext()` 中，私聊会优先保留原始文本与表情段。私聊转发按用户串行处理（`_get_c2c_lock`），授权、目标群、来源筛选及翻译配置均在线程池读取，等待 settings 文件检查时事件循环仍可调度其他消息。
 转发入口负责引用校验、最近内容回退、目标群复查和投递；Discord/X/Bilibili 内容分别由来源 helper 准备，返回具名的文本、媒体、翻译身份和配置。抓取失败或筛选为空时由入口统一回复既有提示并终止本次转发。
 
@@ -651,9 +685,9 @@ QQ 定时消息可在每条计划内保存一张 PNG、JPEG、GIF 或 WebP 附�
 | `plugins/qq_interaction.py` | QQ 回调按钮（`INTERACTION_CREATE`）：回应交互、把按钮 `data` 还原成消息事件复用现有命令处理器；仅在 Webhook 接入下可达，默认不启用 | 低 |
 | `plugins/discord_reconnect.py` | QQ / Discord 网关常驻监督：适配器没有存活连接时重新发起，按 15/30/60 秒退避持续重连、连上后每分钟巡检，不再有次数上限；Discord 重试前复查 `DISCORD_PROXY` 的本机端口，失效时跟随系统代理，并把新地址同步给 Discord 适配器与驱动配置，使补发/媒体客户端在下一次请求时按新端口重建 | 低 |
 | `plugins/proxy_guard.py` | 本机 HTTP 代理端口自检：`DISCORD_PROXY` 指向不可用的回环端口时改用 Windows 系统代理当前端口；纯函数，便于测试 | 低 |
-| `plugins/fetch.py` | Discord 消息抓取 + 归一化 + 渲染为 QQ 消息段（唯一渲染逻辑）；消息抬头/时间/回复引用由上下文 helper 组装；正文提及/Markdown/Emoji、Embed 标题/链接/图片与附件分类分别由专责 helper 处理；图片/音频/视频附件共用下载、富媒体构造与链接回退流程；单条消息 200 响应 JSON 无效或根节点非对象时返回格式错误；频道元数据查询合并并限制 5 个并发，成功缓存最多 2048 项，失败（包括无效 JSON）缓存 30 秒，渲染回退为频道 ID；REST 消息作者结构无效时显示 unknown、username 类型无效时筛选值归一为空、正文类型无效时归一为空、Embed/附件集合无效时归一为空列表，媒体字段只保留字符串；内联及回退回复引用的作者结构无效时显示 unknown，昵称仅接受非空字符串，提及列表结构无效时忽略映射、正文类型无效时跳过引用行；代理配置变化后按新端口重建 REST 客户端；关闭时回收元数据与其他 REST 请求后关闭 HTTP 客户端 | 中 |
+| `plugins/fetch.py` | Discord 消息抓取 + 归一化 + 渲染为 QQ 消息段（唯一渲染逻辑）；消息抬头/时间/回复引用由上下文 helper 组装；正文提及/Markdown/Emoji、Embed 标题/链接/图片与附件分类分别由专责 helper 处理；图片/音频/视频附件共用下载与富媒体构造；图片/音频失败回退链接，视频失败跳过且不补链接；单条消息 200 响应 JSON 无效或根节点非对象时返回格式错误；频道元数据查询合并并限制 5 个并发，成功缓存最多 2048 项，失败（包括无效 JSON）缓存 30 秒，渲染回退为频道 ID；REST 消息作者结构无效时显示 unknown、username 类型无效时筛选值归一为空、正文类型无效时归一为空、Embed/附件集合无效时归一为空列表，媒体字段只保留字符串；内联及回退回复引用的作者结构无效时显示 unknown，昵称仅接受非空字符串，提及列表结构无效时忽略映射、正文类型无效时跳过引用行；代理配置变化后按新端口重建 REST 客户端；关闭时回收元数据与其他 REST 请求后关闭 HTTP 客户端 | 中 |
 | `plugins/forward_service.py` | Discord 实时转发、补发和重试共用的消息准备与翻译流程；频道筛选及翻译配置读取在线程池执行 | 中 |
-| `plugins/sender.py` | QQ 群发送：在线程池读取目标群及 Bot 绑定路由；分片、图片媒体、重试、限流退避、链接降级 | 低 |
+| `plugins/sender.py` | QQ 群发送：在线程池读取目标群及 Bot 绑定路由；分片、图片媒体、重试、限流退避、图片/音频链接降级、视频按 no_link_fallback 跳过 | 低 |
 | `plugins/retry.py` | 发送失败欠账队列、持久化恢复与延迟重试；到期重试入口负责内容重建和发送，发送结果 helper 单独更新逐群欠账、重试次数及退避；`send_and_record` 可接收 RSS 幂等键，跨来源按群过滤已确认投递；关闭时回收频道 worker 并保留队列供下次启动恢复 | 中 |
 | `plugins/delivery_dedup.py` | SQLite 持久记录 X/Bilibili 投稿 ID、YouTube 视频 ID 与已成功接收的 QQ 群；保留 90 天并限制 100,000 条；写入异常时用有界进程内记录兜底，数据库读写在线程池执行 | 低 |
 | `plugins/message_trace.py` | 投递结果追踪与持久化；异步写入在线程完成后再传播取消 | 低 |
@@ -661,7 +695,7 @@ QQ 定时消息可在每条计划内保存一张 PNG、JPEG、GIF 或 WebP 附�
 | `plugins/x_rss.py` | X RSS 轮询、来源游标、持久化积压和投递；投递按推文 ID 与 QQ 群执行跨来源判重，独立后台任务按 `x_protection` 速率排空队列；应用启动时创建轮询及投递任务；来源、路由、筛选、翻译和保护配置读取在线程池执行；关闭时回收轮询、投递和请求任务后关闭客户端 | 中 |
 | `plugins/x_rate_limit.py` | X 限速配置归一化、积压裁剪和成功投递时间窗计算；纯逻辑，不读写文件 | 低 |
 | `plugins/bilibili.py` | Bilibili RSS 轮询、来源筛选、限速队列、游标和投递；投递按投稿 ID 与 QQ 群执行跨来源判重；应用启动时创建轮询任务并每 5 秒检查 QQ 连接；异步流程的间隔、状态/来源/路由快照、发送路由、内容筛选/翻译/保护配置及保护队列读取在线程池执行；保护队列保存独立快照并在取消时等待落盘后释放投递锁；关闭时回收轮询与单条手动抓取请求后关闭客户端 | 中 |
-| `plugins/bilibili_auto_resolve.py` | 群内 Bilibili 视频链接自动解析：只处理已登记且启用群的普通群消息（跳过机器人、`/` 命令与 @ 机器人），复用 `plugins/bilibili.py` 的短链解析、投稿详情与单段下载，成功被动回复视频文件、失败/超限/多段静默跳过，按群×投稿×分 P 执行 10 分钟窗口与在途去重；开关与群门控在线程池读取 | 低 |
+| `plugins/bilibili_auto_resolve.py` | 群内 Bilibili 视频链接自动解析：只处理已登记且启用群的普通群消息（跳过机器人、`/` 命令与 @ 机器人），复用 `plugins/bilibili.py` 的短链解析、投稿详情与 360P 单段下载，成功被动回复视频文件、失败/超限/多段/非 360P 静默跳过，按群×投稿×分 P 执行 10 分钟窗口与在途去重；开关与群门控在线程池读取 | 低 |
 | `plugins/youtube.py` | YouTube 频道 RSS 轮询、标题/封面/链接投递、独立限速队列与游标；`@handle` 解析结果缓存于 `data/youtube.json`；投递按视频 ID 与 QQ 群执行跨来源判重；来源、路由、筛选、翻译和保护配置读取在线程池执行；关闭时回收轮询、投递和请求任务后关闭客户端 | 中 |
 | `plugins/youtube_parser.py` | YouTube 频道值/URL 归一化、`@handle` 频道页解析、Atom Feed 条目解析与稳定游标生成；拒绝非 feed 根节点，跳过缺 ID/标题/发布时间的条目 | 中 |
 | `plugins/rss_polling.py` | X/Bilibili/YouTube 共用的 RSS 轮询循环、每 5 秒连接状态检查和线程池间隔读取；各来源模块管理任务引用、启动与关闭状态 | 低 |
@@ -775,7 +809,7 @@ QQ 定时消息可在每条计划内保存一张 PNG、JPEG、GIF 或 WebP 附�
 ### `panel/web/` — 面板前端独立
 
 - 面板前端从 `管理面板.pyw` 中分离为独立的 `index.html` + `app.js` + `style.css` + `desktop.js`。
-- `ui-components.js` / `ui-components.css` 是公共展示层：复用既有节点、ID 和事件，统一外链按钮与网页 Modal 的 Header / Body / Footer；导航、表单、状态行和提示样式共用当前主题变量。小/中/大窗口宽度为 520/640/880px，Bilibili 来源注册窗口宽 560px；来源筛选复用 X 的“消息筛选”窗口。窗口最高 85vh，仅 Body 滚动。普通配置支持遮罩关闭，确认与恢复窗口保留明确关闭操作；不调用 API 或改变配置结构。二级窗口统一规则也落在这一层：规格表的 `grid: true` 让 `modalShell()` 给正文加 `.modal-grid`（单列网格、行左右缘与正文内边距对齐），配套 `.modal-split`（等宽两列）、`.modal-span-all`（跨整行）与 `.modal-actions` / `.modal-actions-start`（正文内按钮行的左右分区）；`.modal-footer` 用首/末按钮的 `margin-*-auto` 实现「取消贴左下、主要动作贴右下」；`.pill-switch` 提供「启用补发」同款胶囊开关（文字在左、`.settings-switch-track` 轨道在右，轨道 32×18；按钮外围无描边或常态底色，悬停铺浅色圆角底，键盘焦点框落在轨道上），由 `app.js` 的 `pillSwitchMarkup()` 统一生成标签与轨道；设置页没有文字标签的独立开关复用同一视觉，按钮框为 0、背景透明，只保留 32×18 轨道。
+- `ui-components.js` / `ui-components.css` 是公共展示层：复用既有节点、ID 和事件，统一外链按钮与网页 Modal 的 Header / Body / Footer；导航、表单、状态行和提示样式共用当前主题变量。小/中/大窗口宽度为 520/640/880px，Bilibili 来源注册窗口宽 560px；来源筛选复用 X 的“消息筛选”窗口。窗口最高 85vh，仅 Body 滚动。普通配置支持遮罩关闭，确认与恢复窗口保留明确关闭操作；不调用 API 或改变配置结构。二级窗口统一规则也落在这一层：规格表的 `grid: true` 让 `modalShell()` 给正文加 `.modal-grid`（单列网格、行左右缘与正文内边距对齐），配套 `.modal-split`（等宽两列）、`.modal-span-all`（跨整行）与 `.modal-actions` / `.modal-actions-start`（正文内按钮行的左右分区）；`.modal-footer` 用首/末按钮的 `margin-*-auto` 实现「次要入口贴左下、主要动作贴右下」，其中 Discord Bot / QQ Bot 配置窗口的左侧入口是平台外链（Discord 开发者门户 / QQ 机器人平台），不再提供「取消」按钮，关闭走标题栏 ×、Esc 与遮罩；`.pill-switch` 提供「启用补发」同款胶囊开关（文字在左、`.settings-switch-track` 轨道在右，轨道 32×18；按钮外围无描边或常态底色，悬停铺浅色圆角底，键盘焦点框落在轨道上），由 `app.js` 的 `pillSwitchMarkup()` 统一生成标签与轨道；设置页没有文字标签的独立开关复用同一视觉，按钮框为 0、背景透明，只保留 32×18 轨道。转发组五个功能页的底部操作栏只保留「＋ 新增 / 注册 / 注册审核」等主操作，原 Discord/X/Bilibili/YouTube 外链入口已移除。
 - `desktop_app.pyw` 在主线程创建 WebView2 窗口并加载 `panel/web/index.html`，不向 `file://` 地址追加查询参数，以免 WebView2 将参数误当成本地文件名。`local-api.js` 通过 PyWebView 桥将管理请求交给桌面进程内的 FastAPI 路由执行；桥接 8 秒内未就绪时显示失败，不启动 Uvicorn 或监听 `18090`。机器人自身的 `18082` 接口保持不变。
 - `panel/local_bridge.py` 提供进程内路由调用和带令牌验证的 Windows 本机管道；QQ 私聊管理命令通过该管道请求桌面进程，普通操作等待响应最多 12 秒，补发操作最多 35 秒。桌面入口通过原生桥向本地页面提供该窗口启动时生成的随机凭证，不放入文件 URL；`file://` 协议用于识别桌面环境，首次进入运行总览。
 - `/api/app/info` 从 `pyproject.toml` 读取当前应用版本；`/api/app/update-check` 只读查询 GitHub 最新稳定发行版并返回发布页。
@@ -845,3 +879,5 @@ QQ 定时消息可在每条计划内保存一张 PNG、JPEG、GIF 或 WebP 附�
 - X/Bilibili/YouTube 的 `source_health` 在每轮完成时按来源更新连续失败计数，成功归零；维护刷新不增加计数。三次失败、保护错误、磁盘文件校验失败及自动备份失败形成维护告警，成功后清除。`/api/maintenance/alert` 受 Bot 本地令牌保护，复用现有 QQ 告警授权与冷却，不发送原始 RSS URL、账号凭据或完整异常堆栈。
 - `panel/desktop_guardian.py` 在独立无控制台进程中持有原桌面的 Windows 进程句柄及随机退出事件，不会因 PID 重用结束其他进程。认证管道 ping 连续 120 秒失败或桌面异常退出触发恢复，30 秒冷却、600 秒内最多 5 次。正常退出先设置事件；恢复使用 `--autostart --restart --recover-desktop`，结合 `data/desktop_recovery.json` 的运行意图，不主动拉起被用户停止的机器人。看护日志有 1 MiB 轮转，且源码/正式/测试目录分别隔离。
 - 编译入口增加 Guardian 角色，安装包增加 WRelay.Guardian.exe。签名构建仍是默认流程；只有显式 `--unsigned` 才跳过正式签名，构建信息如实记录未签名。
+
+维护配置检测：`BackupRestoreService.validate_settings_document` 统一旧版完整主配置与账号分文件主配置的校验，维护服务复用该入口，避免将已迁出的来源字段误判为缺失。账号配置检查所属账号与文件名，缺失文件和错误版本继续告警；嵌套的账号运行文件使用原状态文件名校验。检测失败只记录告警，不写入或修复用户配置。

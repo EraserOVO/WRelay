@@ -1,0 +1,9 @@
+.personal-qq-row { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; padding: 16px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 10px; }
+.personal-qq-row input, .personal-qq-row select { width: 100%; box-sizing: border-box; }
+.personal-qq-row .form-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.personal-qq-state { grid-column: 1 / -1; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.personal-qq-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.personal-qq-actions .danger { margin-left: auto; }
+.personal-qq-uncertain { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.personal-qq-uncertain span { flex-basis: 100%; overflow-wrap: anywhere; }
+@media(max-width: 560px) { .personal-qq-row { grid-template-columns: 1fr; } }

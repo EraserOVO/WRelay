@@ -97,9 +97,16 @@ class MaintenanceService:
 
     def _check_files(self, alerts):
         service = self.backup_factory()
-        for name, path in service.backup_targets().items():
+        try:
+            targets = service.backup_targets()
+        except (OSError, ValueError, TypeError):
+            alerts['file:settings.json'] = 'settings.json 无法读取或账号索引无效，请检查配置与备份。'
+            return
+        for name, path in targets.items():
             if not os.path.exists(path):
                 self._checked.pop(name, None)
+                if name == 'settings.json' or name.startswith('bot_profiles/'):
+                    alerts['file:' + name] = name + ' 缺失，请检查配置与备份。'
                 continue
             try:
                 stat = os.stat(path)
@@ -120,9 +127,15 @@ class MaintenanceService:
                             with open(path, "r", encoding="utf-8") as f:
                                 data = json.load(f)
                             if name == "settings.json":
-                                error = service.settings_validator(data) or ""
+                                error = service.validate_settings_document(data) or ""
+                            elif name.startswith("bot_profiles/"):
+                                from plugins import bot_profiles
+                                bot_profiles.validate_profile(data)
+                                if 'bot_profiles/' + bot_profiles.filename(data['bot_id']) != name:
+                                    raise ValueError('账号归属不一致')
+                                error = ""
                             else:
-                                validate_runtime(name, data)
+                                validate_runtime(name.rsplit('/', 1)[-1], data)
                                 error = ""
                     self._checked[name] = (revision, error)
                 if error:

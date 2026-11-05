@@ -395,6 +395,11 @@ def _load_settings():
     if not os.path.exists(SETTINGS_FILE):
         _ensure_settings_file()
 
+    from plugins import bot_profiles
+    if bot_profiles.ids(SETTINGS_FILE):
+        # Each scope owns source switches/filters. Corrupt profiles fail closed.
+        return SettingsModel.from_data(bot_profiles.read(SETTINGS_FILE)).to_dict()
+
     try:
         st = os.stat(SETTINGS_FILE)
         mtime, size = st.st_mtime_ns, st.st_size
@@ -638,7 +643,7 @@ def _ensure_forwarding_groups(data):
             "groups": [str(o) for o in group_openids if o],
         })
 
-    if not normalized:
+    if not normalized and not data.get("bot_profile_ids"):
         normalized = [{
             "id": FORWARDING_GROUP_DEFAULT_ID,
             "name": "转发组1",
@@ -689,7 +694,7 @@ def _ensure_qq_forwarding_groups(data):
             "enabled": item.get("enabled", True) is not False,
             "groups": members,
         })
-    if not normalized:
+    if not normalized and not data.get("bot_profile_ids"):
         normalized = [{
             "id": QQ_FORWARDING_GROUP_DEFAULT_ID,
             "name": "转发组1",
@@ -904,6 +909,7 @@ def _failure_notification_recipients_from(data):
         and item.get("enabled") is True
         and item.get("failure_notification") is True
         and item.get("openid")
+        and not str(item["openid"]).startswith("personal:")
     ]
 
 
@@ -1006,7 +1012,7 @@ def get_qq_fwd_routing_snapshot(group_openid):
     """在同一 settings 版本返回群手动转发目标条目与关联群集合。"""
     data = _load_settings()
     return (
-        _qq_group_entries_from(data),
+        [item for item in _qq_group_entries_from(data) if not str(item["openid"]).startswith("personal:")],
         _related_group_openids_from(data, group_openid),
     )
 
@@ -1539,7 +1545,7 @@ def _ensure_x_forwarding_groups(data):
             "groups": xgroups,
         })
 
-    if not normalized:
+    if not normalized and not data.get("bot_profile_ids"):
         target = [o for o in _x_rss_target_groups(data) if o in valid_groups]
         if not target:
             target = _enabled_group_openids(data)
@@ -1763,7 +1769,7 @@ def _ensure_bilibili_forwarding_groups(data):
             "groups": target_groups,
         })
 
-    if not normalized:
+    if not normalized and not data.get("bot_profile_ids"):
         normalized = [{
             "id": BILIBILI_FORWARDING_GROUP_DEFAULT_ID,
             "name": BILIBILI_FORWARDING_GROUP_DEFAULT_NAME,
@@ -1948,7 +1954,7 @@ def _ensure_youtube_forwarding_groups(data):
             "groups": target_groups,
         })
 
-    if not normalized:
+    if not normalized and not data.get("bot_profile_ids"):
         normalized = [{
             "id": YOUTUBE_FORWARDING_GROUP_DEFAULT_ID,
             "name": YOUTUBE_FORWARDING_GROUP_DEFAULT_NAME,

@@ -7,6 +7,7 @@ import nonebot
 nonebot.init()
 
 from plugins import backfill
+from plugins import bot_profiles
 from plugins import relay_inflight
 
 
@@ -203,8 +204,43 @@ async def main():
     )
     print("PASS - 补发部分失败只为失败群排队，成功群仍记录已发送")
     await test_qq_connect_triggers_backfill()
-    await test_backfill_request_during_run_schedules_follow_up()
+    # The legacy coalescing check must not depend on real account profiles.
+    with mock.patch.object(bot_profiles, "ids", return_value=[]):
+        await test_backfill_request_during_run_schedules_follow_up()
+    await test_profile_backfill_serialization()
     await test_shutdown_reaps_backfill_tasks()
+
+
+async def test_profile_backfill_serialization():
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = []
+
+    async def run_profile():
+        calls.append(bot_profiles.CURRENT.get())
+        if len(calls) == 1:
+            started.set()
+            await release.wait()
+
+    with mock.patch.object(bot_profiles, "ids", return_value=["official_test"]), \
+            mock.patch.object(backfill, "_backfill_missed_profile", side_effect=run_profile):
+        first = asyncio.create_task(backfill._backfill_missed())
+        second = None
+        try:
+            await asyncio.wait_for(started.wait(), 1)
+            second = asyncio.create_task(backfill._backfill_missed())
+            await asyncio.sleep(0.05)
+            assert not second.done() and calls == ["official_test"]
+            release.set()
+            await asyncio.wait_for(asyncio.gather(first, second), 1)
+            assert calls == ["official_test", "official_test"]
+        finally:
+            release.set()
+            for task in (first, second):
+                if task is not None and not task.done():
+                    task.cancel()
+            await asyncio.gather(*(task for task in (first, second) if task is not None), return_exceptions=True)
+    print("PASS - 多账号补发串行执行并完成后续请求")
 
 
 if __name__ == "__main__":

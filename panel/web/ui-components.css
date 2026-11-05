@@ -122,7 +122,17 @@ body .modal-shell .modal-body.modal-grid > .backup-runtime.form-field input { ma
 /* 自动备份一行：说明在左、胶囊开关在右。 */
 .modal-shell .backup-auto { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .modal-shell .backup-auto .settings-item-copy { flex: 1 1 auto; min-width: 0; }
-.modal-shell .backup-auto .pill-switch { flex: 0 0 200px; width: 200px; }
+.modal-shell .backup-auto .pill-switch { flex: 0 0 auto; width: auto; }
+.modal-shell .backup-section { display: grid; gap: 10px; min-width: 0; }
+.modal-shell .backup-manual { border-top: 1px solid var(--panel-border); padding-top: 16px; }
+.modal-shell .backup-section > select { width: 100%; min-width: 0; box-sizing: border-box; }
+.modal-shell .backup-select-label { color: var(--muted); font-size: 13px; }
+.modal-shell .backup-section-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.modal-shell .backup-section-actions #btnAutoBackupRestore { margin-left: auto; }
+.modal-shell .backup-status { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.modal-shell .backup-status.has-alert { color: var(--danger); }
+.modal-shell .backup-manual .backup-runtime.form-field { display: flex; flex-direction: row; align-items: center; gap: 8px; margin: 0; }
+.modal-shell .backup-manual .backup-runtime.form-field input { margin: 0; }
 .modal-shell .backup-warning:empty { display: none; }
 .modal-footer .backup-file-select { display: inline-flex; align-items: center; justify-content: center; min-width: 88px; padding: 0 12px; border: 1px solid var(--field-border); border-radius: var(--radius-control); background: var(--sec-bg); }
 body .modal-shell :is(.diagnostic-row, .status-row) { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border: 0; border-bottom: 1px solid var(--panel-border); background: transparent; border-radius: 0; }

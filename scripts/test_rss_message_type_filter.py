@@ -112,6 +112,23 @@ async def verify_x_component_filter_and_intersection():
     assert image_and_text is not None and [m["kind"] for m in image_and_text[1]] == ["图片"]
     assert text_only is not None and text_only[1] == []
     assert default is not None and [m["kind"] for m in default[1]] == ["图片", "视频"]
+    assert default[1][1].get("no_link_fallback") is True
+
+    # 视频拿不到时不补链接；纯视频消息整条不发，文字消息只省略视频。
+    video_media = [{"kind": "视频", "url": "https://video.invalid/v.mp4"}]
+    with mock.patch.object(x_rss, "fetch_bytes_many", new=mock.AsyncMock(return_value={})):
+        video_only = await x_rss._render_post(
+            _x_post(media=video_media), "alice", enabled_types={"视频"}
+        )
+        text_and_video = await x_rss._render_post(
+            _x_post(media=video_media), "alice", enabled_types={"文字", "视频"}
+        )
+    assert video_only is None
+    assert text_and_video is not None and text_and_video[1] == []
+    failure_text = "".join(str(getattr(part, "data", {})) for part in text_and_video[0])
+    assert "[视频]" not in failure_text
+    assert "video.invalid" not in failure_text
+    print("PASS - X 视频失败时跳过且不补链接")
 
 
 async def verify_bilibili_component_filter_and_intersection():
@@ -138,8 +155,28 @@ async def verify_bilibili_component_filter_and_intersection():
     assert text_link is not None and text_link[1] == []
     assert image_only is not None and [m["kind"] for m in image_only[1]] == ["图片"]
     assert default is not None and [m["kind"] for m in default[1]] == ["图片", "视频"]
+    assert default[1][-1].get("no_link_fallback") is True
     assert all("简介不该自动发" not in str(getattr(part, "data", {})) for part in default[0])
     assert fetch_video.await_count == 1
+
+    # 视频取不到时不再降级为 CDN 或投稿页链接；仅勾选「视频」时整条不发送。
+    with mock.patch.object(
+        bilibili, "fetch_bytes_many", new=mock.AsyncMock(return_value={
+            "https://image.invalid/c.jpg": b"cover",
+        })
+    ), mock.patch.object(
+        bilibili, "_fetch_video_url", new=mock.AsyncMock(return_value=(None, None))
+    ):
+        unavailable = await bilibili._render_post(
+            post, source, enabled_types=None, include_body=False
+        )
+        video_only = await bilibili._render_post(
+            post, source, enabled_types={"视频"}, include_body=False
+        )
+    assert unavailable is not None
+    assert [m["kind"] for m in unavailable[1]] == ["图片"]
+    assert all("[视频]" not in str(getattr(part, "data", {})) for part in unavailable[0])
+    assert video_only is None
 
 
 async def main():

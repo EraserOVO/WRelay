@@ -18,16 +18,22 @@ nonebot.init()
 from plugins import manage
 
 
+def message_text(value):
+    if isinstance(value, str):
+        return value
+    return "".join(str(getattr((getattr(seg, "data", {}) or {}).get("markdown"), "content", "") or "") for seg in value)
+
+
 class FakeQQBot:
     def __init__(self, self_id):
         self.self_id = self_id
         self.messages = []
 
     async def send_to_c2c(self, openid, message):
-        self.messages.append((openid, message))
+        self.messages.append((openid, message_text(message).split("\n", 1)[-1]))
 
     async def send(self, event, message):
-        self.messages.append((event.author.id, message))
+        self.messages.append((event.author.id, message_text(message).split("\n", 1)[-1]))
 
 
 class FakeC2CEvent:
@@ -114,7 +120,8 @@ async def verify_cancelled_restart_marker_write_is_cleaned():
                 assert isinstance(result[0], asyncio.CancelledError), result
                 panel_post.assert_not_called()
             assert not marker.exists(), "取消的重启请求遗留了确认标记"
-            assert bot.messages == [("command-openid", "正在重启机器人...")]
+            assert len(bot.messages) == 1 and bot.messages[0][0] == "command-openid"
+            assert "正在重启机器人..." in message_text(bot.messages[0][1])
         finally:
             release_write.set()
             if task is not None and not task.done():
@@ -188,10 +195,9 @@ async def main():
             ),
         ):
             await manage.handle(bot, event)
-        assert bot.messages == [
-            ("command-openid", "正在重启机器人..."),
-            ("command-openid", "机器人重启失败，请检查桌面端日志"),
-        ]
+        assert [openid for openid, _ in bot.messages] == ["command-openid", "command-openid"]
+        assert "正在重启机器人..." in message_text(bot.messages[0][1])
+        assert "机器人重启失败，请检查桌面端日志" in message_text(bot.messages[1][1])
         assert not marker.exists()
 
     with tempfile.TemporaryDirectory() as directory:
@@ -298,7 +304,7 @@ async def main():
 
     class BlockingFakeQQBot(FakeQQBot):
         async def send_to_c2c(self, openid, message):
-            self.messages.append((openid, message))
+            self.messages.append((openid, message_text(message).split("\n", 1)[-1]))
             confirmation_started.set()
             await release_confirmation.wait()
 

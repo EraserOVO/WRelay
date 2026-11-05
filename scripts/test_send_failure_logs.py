@@ -177,6 +177,40 @@ async def test_retry_after_is_finite_and_bounded():
     print("[OK] QQ Retry-After 非有限值回退，极大值限制到 30 秒")
 
 
+async def test_no_link_fallback_media_is_skipped():
+    records, sink_id = capture_logs()
+    original_send_to_groups = sender._send_to_groups
+    calls = []
+
+    async def fake_send_to_groups(qq_bot, groups, message, channel_id="", message_id=""):
+        calls.append(message)
+        return {g: False for g in groups}
+
+    sender._send_to_groups = fake_send_to_groups
+    try:
+        ok_map = await sender.send_media_items(
+            None,
+            ["G1"],
+            [{
+                "kind": "视频",
+                "url": "https://x/v.mp4",
+                "segment": make_text("视频占位"),
+                "no_link_fallback": True,
+            }],
+            channel_id="CH100",
+            message_id="MSG200",
+        )
+    finally:
+        sender._send_to_groups = original_send_to_groups
+    stop_capture(sink_id)
+
+    joined = "\n".join(records)
+    assert len(calls) == 1, "视频上传失败后不应再尝试发送链接"
+    assert ok_map == {"G1": True}, "跳过视频不补链接，不判整条失败"
+    assert "富媒体上传失败，跳过且不补链接: 视频" in joined, joined
+    print("[OK] 视频上传失败静默跳过且不补链接")
+
+
 async def test_media_degradation_log_has_message_id():
     records, sink_id = capture_logs()
     original_send_to_groups = sender._send_to_groups
@@ -297,6 +331,7 @@ async def main():
     await test_non_rate_limit_log_format_with_defaults()
     await test_success_path_unchanged()
     await test_retry_after_is_finite_and_bounded()
+    await test_no_link_fallback_media_is_skipped()
     await test_media_degradation_log_has_message_id()
     await test_partial_failure_summary()
     await test_failed_group_skips_remaining_message_parts()

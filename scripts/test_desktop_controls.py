@@ -150,7 +150,7 @@ class DesktopTests(unittest.TestCase):
             "_log": Mock(), "migrate_forwarding_groups": Mock(), "read_pid": lambda: 0,
             "_ensure_bot_running": Mock(), "bot_status": lambda: {"running": False},
             "threading": SimpleNamespace(Thread=thread), "_watchdog_loop": Mock(),
-            "_want_running": False}
+            "_want_running": False, "_maintenance": Mock()}
         exec(compile(ast.Module(body=[main], type_ignores=[]), "<isolated main>", "exec"), env)
         env["main"]()
         self.assertEqual(thread.call_count, 1)

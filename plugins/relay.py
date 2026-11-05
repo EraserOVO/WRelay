@@ -157,7 +157,7 @@ async def _load_active_groups(channel_id):
     return await asyncio.to_thread(get_groups_for_channel, channel_id)
 
 
-async def _process_event(
+async def _process_profile_event(
     bot: DiscordBot,
     event: Event
 ):
@@ -355,6 +355,21 @@ async def _process_event(
             channel_id,
             message_id
         )
+
+
+async def _process_event(bot, event):
+    from plugins import bot_profiles, config
+    owners = await asyncio.to_thread(bot_profiles.ids, config.SETTINGS_FILE)
+    if not owners:
+        return await _process_profile_event(bot, event)
+    for owner in owners:
+        if owner == "unassigned":
+            continue
+        try:
+            with bot_profiles.scope(owner):
+                await _process_profile_event(bot, event)
+        except Exception:
+            logger.exception("Bot {} Discord 配置处理失败，其他账号继续", owner)
 
 
 @relay.handle()

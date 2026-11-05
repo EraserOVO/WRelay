@@ -480,6 +480,9 @@ async function ensurePanelToken() {
 }
 
 async function jget(url) {
+  if (typeof activeQQBotId !== "undefined" && activeQQBotId && url.startsWith("/api/") && !/[?&]bot_id=/.test(url)) {
+    url += (url.includes("?") ? "&" : "?") + "bot_id=" + encodeURIComponent(activeQQBotId);
+  }
   await ensurePanelToken();
   const r = await fetch(url, {
     headers: {"X-WRelay-Token": panelToken},
@@ -487,6 +490,9 @@ async function jget(url) {
   return r.json();
 }
 async function jpost(url, body) {
+  if (typeof activeQQBotId !== "undefined" && activeQQBotId && url.startsWith("/api/") && !/[?&]bot_id=/.test(url)) {
+    url += (url.includes("?") ? "&" : "?") + "bot_id=" + encodeURIComponent(activeQQBotId);
+  }
   await ensurePanelToken();
   const r = await fetch(url, {
     method: "POST",
@@ -513,6 +519,15 @@ function openBackupRestore() {
   refreshMaintenance();
 }
 var maintenanceEnabled = true;
+const MAINTENANCE_DISMISS_MS = 10 * 60 * 1000;
+let maintenanceDismissedUntil = 0;
+document.getElementById("btnMaintenanceDismiss").addEventListener("click", function () {
+  maintenanceDismissedUntil = Date.now() + MAINTENANCE_DISMISS_MS;
+  document.getElementById("maintenanceBanner").style.display = "none";
+});
+document.getElementById("backupRestoreFile").addEventListener("change", function () {
+  document.getElementById("backupSelectedFile").textContent = this.files[0] ? "已选择：" + this.files[0].name : "尚未选择 ZIP 文件";
+});
 async function refreshMaintenance() {
   try {
     const st = await jget("/api/maintenance/status");
@@ -523,11 +538,15 @@ async function refreshMaintenance() {
     document.getElementById("maintenanceStatus").textContent = alerts.length ? "有 " + alerts.length + " 项维护提醒，请查看" : (st.enabled ? "自动备份已开启 · 最近备份 " + last : "自动备份已关闭");
     const toggle = document.getElementById("btnAutoBackupToggle");
     toggle.querySelector(".pill-switch-label").textContent = st.enabled ? "已开启" : "已关闭";
+    toggle.dataset.on = st.enabled ? "1" : "0";
     toggle.setAttribute("aria-pressed", String(st.enabled));
     toggle.setAttribute("aria-checked", String(st.enabled));
-    document.getElementById("maintenanceDetail").textContent = alerts.length ? alerts.map(function (a) { return a.message; }).join("\n") : "维护检查正常。最近备份：" + last;
+    const detail = document.getElementById("maintenanceDetail");
+    detail.textContent = alerts.length ? alerts.map(function (a) { return a.message; }).join("\n") : "维护检查正常。最近备份：" + last;
+    detail.classList.toggle("has-alert", alerts.length > 0);
     const banner = document.getElementById("maintenanceBanner");
-    banner.style.display = alerts.length ? "" : "none";
+    if (!alerts.length) maintenanceDismissedUntil = 0;
+    banner.style.display = alerts.length && Date.now() >= maintenanceDismissedUntil ? "" : "none";
     document.getElementById("maintenanceBannerText").textContent = alerts.length ? alerts[0].message : "";
   } catch (error) { /* Retry on the next refresh. */ }
 }
@@ -1904,6 +1923,7 @@ function startFgRename(ctx) {
 }
 
 let qqBotIds = [];
+let personalQQConnections = [];
 let connectedQQBotIds = [];
 let qqBotStatusKnown = false;
 let qqAggregateStatusKnown = false;
@@ -1924,6 +1944,7 @@ function currentQQBotId() {
 function groupInActiveQQBotWorkspace(group) {
   if (!group || !group.openid) return false;
   const active = currentQQBotId();
+  if (!group.bot_id && active.startsWith("personal:")) return false;
   const owner = String(group.bot_id || "");
   // 旧配置没有 Bot 归属时，沿用原有“第一个 Bot”语义，显示在第一个工作区。
   return owner === active || (!owner && active && active === qqBotIds[0]);
@@ -1943,7 +1964,9 @@ function renderQQBotWorkspace() {
     const statusKnown = qqBotStatusKnown || aggregateCanRepresentSingleBot;
     const connected = qqBotStatusKnown ? connectedQQBotIds.includes(botId) : qqAggregateConnected;
     const state = !statusKnown ? "状态未知" : connected ? "已连接" : "未连接";
-    return '<option value="' + escapeHtml(botId) + '">' + escapeHtml(botId) + " · " + state + '</option>';
+    const personal = personalQQConnections.find(item => "personal:" + item.uin === botId);
+    const label = personal ? (personal.name || "个人 QQ") + " · " + personal.uin + (personal.enabled ? "" : " · 已停用") : botId;
+    return '<option value="' + escapeHtml(botId) + '">' + escapeHtml(label) + " · " + state + '</option>';
   }).join("");
   select.value = active;
   select.disabled = qqBotIds.length < 2;
@@ -1951,10 +1974,22 @@ function renderQQBotWorkspace() {
 
 const qqBotWorkspace = document.getElementById("qqBotWorkspace");
 if (qqBotWorkspace) {
-  qqBotWorkspace.addEventListener("change", function (event) {
+  qqBotWorkspace.addEventListener("change", async function (event) {
+    const previous = settings?._profile_bot || activeQQBotId;
     activeQQBotId = String(event.target.value || "");
-    try { localStorage.setItem(QQ_BOT_WORKSPACE_KEY, activeQQBotId); } catch (e) {}
-    renderSettings();
+    qqBotWorkspace.disabled = true;
+    try {
+      const loaded = await jget("/api/settings");
+      if (loaded.ok === false) throw new Error(loaded.msg || "无法读取配置");
+      settings = loaded;
+      try { localStorage.setItem(QQ_BOT_WORKSPACE_KEY, activeQQBotId); } catch (e) {}
+      renderSettings();
+    } catch (error) {
+      activeQQBotId = previous;
+      showAlert("切换失败", error.message);
+    } finally {
+      renderQQBotWorkspace();
+    }
   });
 }
 
@@ -2196,7 +2231,7 @@ function renderQQPage() {
     (qfg.groups || []).forEach(function (openid) { memberGroups[String(openid)] = true; });
   }
   const groupRows = allGroups.filter(function (group) {
-    return memberGroups[String(group.openid)];
+    return memberGroups[String(group.openid)] && groupInActiveQQBotWorkspace(group);
   });
   groupBody.innerHTML = "";
   if (!groupRows.length) {
@@ -4960,6 +4995,9 @@ document.getElementById("filterSave").addEventListener("click", async function (
 });
 
 async function saveAndReload() {
+  if (settings?._profile_bot && settings._profile_bot !== currentQQBotId()) {
+    showAlert("保存失败", "账号正在切换，请等待配置加载完成"); return false;
+  }
   const result = await jpost("/api/settings/save", settings);
   if (!result.ok) {
     if (result.conflict) {
@@ -4990,7 +5028,7 @@ function renderQQBotRows() {
     return '<div class="qq-bot-form-row">' +
       '<label style="font-size:13px;color:var(--muted);">AppID<input class="qq-bot-appid" data-i="' + index + '" value="' + escapeHtml(bot.appid || "") + '" autocomplete="off" spellcheck="false" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;"></label>' +
       '<label style="font-size:13px;color:var(--muted);">AppSecret<input class="qq-bot-secret" data-i="' + index + '" type="password" autocomplete="new-password" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;"></label>' +
-      '<button type="button" class="danger qq-bot-remove" data-i="' + index + '" ' + (qqBotDraft.length === 1 ? 'disabled title="至少保留一个 Bot"' : 'title="删除此 Bot"') + '>删除</button></div>';
+      '<button type="button" class="danger qq-bot-remove" data-i="' + index + '" ' + (qqBotDraft.length === 1 && !personalQQConnections.some(item => item.enabled) ? 'disabled title="至少保留一个 Bot"' : 'title="删除此 Bot"') + '>删除</button></div>';
   }).join("");
   body.querySelectorAll(".qq-bot-remove").forEach(function (button) {
     button.addEventListener("click", function () {
@@ -5014,7 +5052,7 @@ async function openQQConfigModal() {
   } catch (e) { r = null; }
   if (r && r.ok) {
     qqBotDraft = (r.bots || []).map(function (bot) { return {appid: bot.appid || ""}; });
-    if (!qqBotDraft.length) qqBotDraft = [{appid: ""}];
+    if (!qqBotDraft.length && !personalQQConnections.some(item => item.enabled)) qqBotDraft = [{appid: ""}];
     renderQQBotRows();
   } else {
     showAlert("读取配置失败", (r && r.msg) || "无法读取当前 QQ Bot 配置");
@@ -5028,16 +5066,13 @@ async function saveQQConfig() {
   });
   if (bots.some(function (bot) { return !bot.appid; })) { showAlert("QQ Bot 配置", "AppID 不能为空"); return; }
   const saveBtn = document.getElementById("qqConfigSave");
-  const cancelBtn = document.getElementById("qqConfigCancel");
   saveBtn.disabled = true;
-  cancelBtn.disabled = true;
   let r;
   try {
     r = await jpost("/api/bot/qq-config", {bots: bots});
   } catch (e) { r = { ok: false, msg: "保存失败，请重试" }; }
   if (!r || !r.ok) {
     saveBtn.disabled = false;
-    cancelBtn.disabled = false;
     showAlert("保存失败", (r && r.msg) || "保存 QQ Bot 配置失败");
     return;
   }
@@ -5048,12 +5083,11 @@ async function saveQQConfig() {
   } catch (e) { rr = { ok: false }; }
   if (!rr || !rr.ok) {
     saveBtn.disabled = false;
-    cancelBtn.disabled = false;
     showAlert("配置已保存", "配置已保存，但机器人重启失败，请稍后手动重启");
     return;
   }
   closeQQConfigModal();
-  qqBotIds = (r.bot_ids || []).map(String);
+  qqBotIds = (r.bot_ids || []).map(String).concat(personalQQConnections.map(item => "personal:" + item.uin));
   renderSettings();
   await refreshStatus();
 }
@@ -5427,16 +5461,13 @@ async function openDiscordConfigModal() {
 async function saveDiscordConfig() {
   const token = document.getElementById("discordConfigToken").value;
   const saveBtn = document.getElementById("discordConfigSave");
-  const cancelBtn = document.getElementById("discordConfigCancel");
   saveBtn.disabled = true;
-  cancelBtn.disabled = true;
   let r;
   try {
     r = await jpost("/api/bot/discord-config", { token: token });
   } catch (e) { r = { ok: false, msg: "保存失败，请重试" }; }
   if (!r || !r.ok) {
     saveBtn.disabled = false;
-    cancelBtn.disabled = false;
     showAlert("保存失败", (r && r.msg) || "保存 Discord Bot 配置失败");
     return;
   }
@@ -5447,7 +5478,6 @@ async function saveDiscordConfig() {
   } catch (e) { rr = { ok: false }; }
   if (!rr || !rr.ok) {
     saveBtn.disabled = false;
-    cancelBtn.disabled = false;
     showAlert("配置已保存", "配置已保存，但机器人重启失败，请稍后手动重启");
     return;
   }
@@ -5522,6 +5552,7 @@ document.addEventListener("click", async function (e) {
       qqWhitelistModal: closeQQWhitelistModal,
       translationConfigModal: closeTranslationConfigModal,
       qqConfigModal: closeQQConfigModal,
+      personalQQModal: function () { window.WRelayPersonalQQ.close(); },
       discordConfigModal: closeDiscordConfigModal,
       scheduledMessageContentModal: function () {
         scheduledMessageDraft = null;
@@ -5606,7 +5637,6 @@ document.addEventListener("click", async function (e) {
   }
   if (["btnMaintenanceOpen", "btnMaintenanceBanner"].includes(btn.id)) { openBackupRestore(); return; }
   if (["btnAutoBackupToggle", "btnAutoBackupNow", "btnAutoBackupRestore"].includes(btn.id)) { await runMaintenanceAction(btn); return; }
-  if (btn.id === "btnBackupRestore") { openBackupRestore(); return; }
   if (btn.id === "btnBackupExport") {
     try { await exportBackup(); } catch (err) { showAlert("导出备份", err.message || "导出失败"); }
     return;
@@ -5786,20 +5816,12 @@ document.addEventListener("click", async function (e) {
     saveTranslationConfig();
     return;
   }
-  if (btn.id === "qqConfigCancel") {
-    closeQQConfigModal();
-    return;
-  }
   if (btn.id === "qqConfigSave") {
     saveQQConfig();
     return;
   }
   if (btn.id === "btnDiscordConfig") {
     openDiscordConfigModal();
-    return;
-  }
-  if (btn.id === "discordConfigCancel") {
-    closeDiscordConfigModal();
     return;
   }
   if (btn.id === "discordConfigSave") {
@@ -5867,35 +5889,6 @@ document.addEventListener("click", async function (e) {
   }
   if (btn.id === "btnSyncQQGroups") {
     await openRegistrationReview("groups");
-    return;
-  }
-  if (btn.id === "btnQQPlatformX") {
-    openExternal("https://q.qq.com/qqbot/dashboard/");
-    return;
-  }
-  if (btn.id === "btnQQPlatformBilibili") {
-    openExternal("https://q.qq.com/qqbot/dashboard/");
-    return;
-  }
-  if (btn.id === "btnQQPlatformYoutube") {
-    openExternal("https://q.qq.com/qqbot/dashboard/");
-    return;
-  }
-  if (btn.id === "btnQQPlatformQQ") {
-    openExternal("https://q.qq.com/qqbot/dashboard/");
-    return;
-  }
-  if (btn.id === "btnOpenX") {
-    // 与 QQ 开放平台管理页同一新标签页跳转方式
-    openExternal("https://x.com/");
-    return;
-  }
-  if (btn.id === "btnOpenBilibili") {
-    openExternal("https://www.bilibili.com/");
-    return;
-  }
-  if (btn.id === "btnOpenYoutube") {
-    openExternal("https://www.youtube.com/");
     return;
   }
   if (btn.id === "btnAddXUser") {
@@ -6159,6 +6152,7 @@ document.addEventListener("click", async function (e) {
 });
 
 const keyboardModalClosers = {
+  personalQQModal: function () { window.WRelayPersonalQQ.close(); },
   confirmModal: hideConfirm,
   bilibiliSourceModal: closeBilibiliSourceModal,
   youtubeSourceModal: closeYoutubeSourceModal,
@@ -6181,6 +6175,7 @@ const keyboardModalClosers = {
   runtimeLogModal: function () { document.getElementById("runtimeLogModal").style.display = "none"; },
 };
 const keyboardModalSaveButtons = {
+  personalQQModal: "personalQQSave",
   bilibiliSourceModal: "bilibiliSourceSave",
   youtubeSourceModal: "youtubeSourceSave",
   filterModal: "filterSave",
@@ -6653,12 +6648,21 @@ async function init() {
   // 桌面端默认总览，并记忆页面选择。
   setActivePage(activePage);
   try {
-    settings = await jget("/api/settings");
     const qqConfig = await jget("/api/bot/qq-config");
     qqBotIds = qqConfig && qqConfig.ok && Array.isArray(qqConfig.bot_ids) ? qqConfig.bot_ids.map(String) : [];
+    const personalConfig = await jget("/api/personal-qq/config");
+    if (personalConfig.ok) {
+      personalQQConnections = personalConfig.connections || [];
+      qqBotIds.push(...personalQQConnections.map(item => "personal:" + item.uin));
+    }
+    currentQQBotId();
+    renderQQBotWorkspace();
+    settings = await jget("/api/settings");
+    if (settings.ok === false) { const message = settings.msg; settings = null; throw new Error(message); }
     renderSettings();
     renderOverviewCounts();
-  } catch (err) { /* ignore */ }
+    if (settings._profile_warnings?.length) showAlert("配置迁移提示", settings._profile_warnings.join("\n"));
+  } catch (err) { showAlert("配置读取失败", err.message); }
   await loadAppInfo();
   // 启动后自动检查一次（默认开启，可在设置页关闭）；只提示，不自动安装
   if (isAutoUpdateCheckEnabled()) await checkForUpdates();

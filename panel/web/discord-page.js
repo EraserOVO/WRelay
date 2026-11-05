@@ -101,11 +101,14 @@
         move(byId("autoTranslationCard"), lowerCards);
       }
       // Align the primary and external actions in the two table footers.
+      // 转发组底部已不再挂平台外链，没有可归类的控件时不生成空容器。
       byId(config.workspace).querySelectorAll(".addrow").forEach(bar => {
+        const nodes = [...bar.querySelectorAll(".linkbtn, .iconbtn")];
+        if (!nodes.length) return;
         const external = document.createElement("span");
         external.className = "discord-external-actions";
         bar.append(external);
-        [...bar.querySelectorAll(".linkbtn, .iconbtn")].forEach(node => move(node, external));
+        nodes.forEach(node => move(node, external));
       });
       toggles.forEach(decorateToggle);
     } else {

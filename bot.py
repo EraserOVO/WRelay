@@ -15,6 +15,7 @@ from plugins.json_io import load_json
 from plugins.proxy_guard import align_discord_proxy
 
 from nonebot.adapters.qq import Adapter as QQAdapter
+from plugins.personal_qq import PersonalQQAdapter
 from nonebot.adapters.discord import Adapter as DiscordAdapter
 
 
@@ -77,7 +78,7 @@ def _build_adapter_config(config_model):
 def _first_run_config_check():
     """检测首次配置是否就绪；未就绪时打印指引并 sys.exit(2)。
 
-    QQ 为必填；已有启用频道时 Discord 为必填，其他用途不要求 Discord。
+    官方 QQ 或已启用的个人 QQ 至少配置一种；已有启用频道时 Discord 为必填。
     无有效 Discord 凭据时，仅在本进程屏蔽模板中的占位适配器配置。
     已填真实配置（哪怕是伪造的 ASCII 值）则原样返回，继续走正常启动
     流程，后续认证失败交给 QQ / Discord 原有机制处理。
@@ -120,13 +121,21 @@ def _first_run_config_check():
         )
         if not qq_ok:
             qq_missing = ["id", "token", "secret"]
+            from plugins.personal_qq_config import enabled_connections
+            if enabled_connections():
+                qq_missing = []
+                os.environ["QQ_BOTS"] = "[]"
 
         # Discord：至少一个 bot 含非空 token（不是示例占位）
         dc_ok = any(
             not _is_placeholder(_field(b, "token"), _DC_PLACEHOLDER_TOKEN)
             for b in dc_cfg.discord_bots
         )
-        if not dc_ok and needs_discord(load_json(data_path("settings.json"), default={})):
+        from plugins import bot_profiles
+        startup_settings = load_json(data_path("settings.json"), default={})
+        if startup_settings.get(bot_profiles.INDEX):
+            startup_settings = bot_profiles.read(data_path("settings.json"))
+        if not dc_ok and needs_discord(startup_settings):
             dc_missing = ["token"]
         elif not dc_ok:
             # 未使用 Discord 时屏蔽模板占位配置，仅影响本次进程，不改用户文件。
@@ -377,11 +386,22 @@ async def _watch_log_level_loop():
 driver.register_adapter(
     QQAdapter
 )
+driver.register_adapter(PersonalQQAdapter)
 
 
 driver.register_adapter(
     DiscordAdapter
 )
+
+# Migrate before workers read their source configuration; retain credentials globally.
+from plugins import bot_profiles, personal_qq_config
+_settings_path = data_path("settings.json")
+if os.path.exists(_settings_path):
+    _qq_config = _build_adapter_config(__import__("nonebot.adapters.qq.config", fromlist=["Config"]).Config)
+    _owners = [str(b.get("id") if isinstance(b, dict) else b.id) for b in _qq_config.qq_bots]
+    _owners = [owner for owner in _owners if owner.isascii() and owner.isdigit()]
+    _owners += ["personal:" + b["uin"] for b in personal_qq_config.load_config()["connections"]]
+    bot_profiles.migrate(_settings_path, _owners)
 
 
 # 只加载真正包含事件处理器或 HTTP 路由的模块。
@@ -394,6 +414,7 @@ BOT_PLUGIN_MODULES = (
     "plugins.discord_reconnect",
     "plugins.health_api",
     "plugins.manage",
+    "plugins.personal_qq_inbound",
     "plugins.qq_fwd",
     "plugins.registration",
     "plugins.relay",

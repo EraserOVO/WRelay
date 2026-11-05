@@ -181,14 +181,10 @@
     border-radius: 6px; font-size: 18px; line-height: 1;
     display: inline-flex; align-items: center; justify-content: center;
   }
-  /* QQ机器人入口按钮：固定 36px 高度，与其右侧钥匙配置按钮（.iconbtn）高度一致，
-     图标+文字垂直居中；宽度随内容自适应（同页有 Discord 入口的同款按钮需保持视觉统一）
-     同时命中 Discord 页（btnQQPlatform）与 X 页（btnQQPlatformX），两页高度一致 */
-  button.linkbtn#btnQQPlatform, button.linkbtn#btnQQPlatformX, button.linkbtn#btnQQPlatformBilibili {
+  /* QQ 机器人平台入口现在只出现在「QQ Bot 配置」二级窗口底栏：
+     固定 36px 高度，与同行「保存」按钮高度一致；宽度随内容自适应。 */
+  button.linkbtn#btnQQPlatform {
     height: 36px; padding: 0 16px;
-  }
-  button.linkbtn#btnQQPlatform svg, button.linkbtn#btnQQPlatformX svg, button.linkbtn#btnQQPlatformBilibili svg {
-    width: 18px; height: 18px;
   }
   /* 重启面板：去掉按钮底色/边框，仅保留循环箭头图标（与「离线补发」刷新按钮同款 SVG）；与标题底部对齐（点击交互不变） */
   #btnRestartPanel {
@@ -2871,6 +2867,11 @@ body.desktop-host .desktop-connection-group .badge { max-width: none; }
 /* Global controls have one home: process actions in Overview, maintenance in Settings. */
 .discord-log-heading { display: none; }
 body:not([data-active-page="overview"]) .robot-status-actions { display: none; }
+.profile-config-menu { position: relative; display: inline-flex; }
+.profile-config-options { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 120px; padding: 6px; border: 1px solid var(--panel-border); border-radius: 8px; background: var(--card-bg); box-shadow: 0 8px 24px #0004; }
+.profile-config-options[hidden] { display: none; }
+.profile-config-options button { display: block; width: 100%; white-space: nowrap; }
+.profile-config-options button + button { margin-top: 4px; }
 body[data-active-page="overview"] .robot-core-actions :is(#btnStart, #btnStop, #btnRestart):disabled { display: none; }
 /* 设置页开关与「启用补发」一致：只保留轨道，外围不再有圆角底色或描边。 */
 #pageSettings :is(.settings-switch, #btnSettingsAutostart) {
@@ -3113,6 +3114,10 @@ body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"]
   box-shadow: 0 10px 28px rgba(0, 0, 0, .35);
 }
 .maintenance-banner > h2 { margin: 0; font-size: 15px; color: var(--card-heading); }
+.maintenance-banner .maintenance-dismiss { width: 32px; height: 32px; border: 1px solid transparent; border-radius: var(--radius-control); color: var(--muted); }
+.maintenance-banner .maintenance-dismiss:hover { background: var(--sec-bg); color: var(--fg); border-color: var(--field-border); }
+.maintenance-banner .maintenance-dismiss svg { width: 18px; height: 18px; pointer-events: none; }
+.maintenance-banner > h2 { padding-right: 32px; }
 .maintenance-banner-text { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .maintenance-banner .maintenance-banner-actions { display: flex; justify-content: flex-start; }
 body.theme-light .maintenance-banner { box-shadow: 0 10px 28px rgba(15, 23, 42, .18); }

@@ -173,10 +173,18 @@ manage_command = on_message(
 
 
 async def _panel_get(path):
+    from plugins.bot_profiles import CURRENT
+    from urllib.parse import quote
+    if CURRENT.get():
+        path += ("&" if "?" in path else "?") + "bot_id=" + quote(CURRENT.get(), safe="")
     return await asyncio.to_thread(request_manager, "GET", path)
 
 
 async def _panel_post(path, body=None):
+    from plugins.bot_profiles import CURRENT
+    from urllib.parse import quote
+    if CURRENT.get():
+        path += ("&" if "?" in path else "?") + "bot_id=" + quote(CURRENT.get(), safe="")
     return await asyncio.to_thread(request_manager, "POST", path, body)
 
 
@@ -973,6 +981,12 @@ async def handle(
     bot: Bot,
     event: Event
 ):
+    from plugins.bot_profiles import scope
+    with scope(_qq_bot_id(bot)):
+        await _handle_profile(bot, event)
+
+
+async def _handle_profile(bot, event):
 
     if not isinstance(
         bot,

@@ -417,6 +417,15 @@ def _validate_account_entries(data):
                 not isinstance(item.get("bot_id", ""), str)
             ):
                 return "qq_group_openids.bot_id 必须是字符串"
+            if key == "qq_group_openids":
+                from plugins.personal_qq_config import is_personal, numeric_id, PREFIX
+                target, owner = item.get("openid", ""), item.get("bot_id", "")
+                if is_personal(target) != is_personal(owner):
+                    return "个人 QQ 接收群必须绑定个人 QQ 账号"
+                if is_personal(target) and (
+                    not numeric_id(str(target)[len(PREFIX):]) or not numeric_id(owner[len(PREFIX):])
+                ):
+                    return "个人 QQ 的群号或账号格式无效"
 
 
 def _validate_x_sources(data):

@@ -286,6 +286,27 @@ class DesktopApi:
             return {"status": 403, "headers": {"content-type": "application/json"}, "body": ""}
         return dispatch(self._panel.app, self._panel.PANEL_TOKEN, method, path, headers, body)
 
+    def save_bot_profile(self, filename, content):
+        """Let the user choose the destination for an exported profile."""
+        try:
+            if not isinstance(content, str) or len(content.encode("utf-8")) > 5 * 1024 * 1024:
+                raise ValueError("配置文件超过 5 MB")
+            document = json.loads(content)
+            if not isinstance(document, dict) or document.get("format") != "wrelay-bot-export":
+                raise ValueError("配置格式无效")
+            import webview
+            name = os.path.basename(str(filename or "WRelay-config.json").replace("\\", "/"))
+            paths = webview.windows[0].create_file_dialog(webview.FileDialog.SAVE, save_filename=name,
+                file_types=("JSON 文件 (*.json)",))
+            if not paths:
+                return {"ok": True, "cancelled": True}
+            path = paths if isinstance(paths, str) else paths[0]
+            with open(path, "w", encoding="utf-8", newline="\n") as target:
+                target.write(content)
+            return {"ok": True, "path": path}
+        except (OSError, ValueError, IndexError, TypeError) as exc:
+            return {"ok": False, "msg": str(exc)}
+
     def set_close_behavior(self, value):
         try:
             return {"ok": True, **self._preferences.set_close_behavior(value)}

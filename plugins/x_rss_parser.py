@@ -25,6 +25,7 @@ x_rss.py 可直接消费的推文 dict。不碰网络、不碰文件、不碰 no
 
 import html
 import json
+import math
 import re
 import xml.etree.ElementTree as ET
 
@@ -52,6 +53,16 @@ def parse_status_id(guid):
         return None
     m = _STATUS_ID_RE.search(guid)
     return m.group(1) if m else None
+
+
+def delivery_identity(post):
+    """Pure retweets share the original identity; cursors keep the wrapper ID."""
+    original_id = post.get("original_id")
+    if (post.get("is_retweet") is True and isinstance(original_id, str)
+            and original_id.isascii() and original_id.isdecimal()
+            and int(original_id) > 0):
+        return "x:%s" % original_id
+    return "x:%s" % post["id"]
 
 
 def _unescape_url(url):
@@ -196,6 +207,7 @@ def parse_item(item_el):
         "pub_date": (item_el.findtext("pubDate") or "").strip(),
         "title": title,
         "is_retweet": is_rt,
+        "original_id": None,
         "rt_author": rt_author,
         "text": text,
         "media": media,
@@ -278,24 +290,26 @@ def _syndication_media(tweet):
         ]
         if not mp4:
             continue
-        best = max(mp4, key=_syndication_video_bitrate)
+        # 只取最低码率档位（通常也是最低分辨率），降低超限概率。
+        lowest = min(mp4, key=_syndication_video_bitrate)
         media.append({
             "kind": "视频",
-            "url": str(best.get("url") or "").strip(),
+            "url": str(lowest.get("url") or "").strip(),
             "poster": poster,
         })
     return media
 
 
 def _syndication_video_bitrate(variant):
-    """无效码率按 0 排序，避免一个坏变体中断整份时间线解析。"""
+    """有效码率；缺失、0 或非法值按无穷大处理，取最低档时忽略。"""
     value = variant.get("bitrate")
     if isinstance(value, bool):
-        return 0
+        return math.inf
     try:
-        return max(0, int(value or 0))
+        rate = int(value)
     except (OverflowError, TypeError, ValueError):
-        return 0
+        return math.inf
+    return rate if rate > 0 else math.inf
 
 
 def _syndication_quote(tweet):
@@ -378,6 +392,7 @@ def parse_syndication_feed(body, fallback_author=""):
             "pub_date": str(tweet.get("created_at") or "").strip(),
             "title": f"RT {rt_author}" if is_retweet and rt_author else text.splitlines()[0][:120],
             "is_retweet": is_retweet,
+            "original_id": str(retweeted.get("id_str") or retweeted.get("id") or "").strip() if is_retweet else None,
             "rt_author": rt_author,
             "text": text,
             "media": _syndication_media(media_tweet),

@@ -1,6 +1,8 @@
 """验证无可发送内容的 X 推文会推进游标，而不会在每轮轮询中重复处理。"""
 import asyncio
 import copy
+import tempfile
+from pathlib import Path
 from unittest import mock
 
 import nonebot
@@ -11,6 +13,9 @@ from plugins import x_rss
 
 
 async def main():
+    class FakeBot:
+        pass
+
     state = {"x_rss:source": {"G1": "100"}}
 
     def load():
@@ -24,7 +29,13 @@ async def main():
         "id": "101", "text": "", "is_retweet": False,
         "rt_author": "", "quote": None, "media": [],
     }
+    source = {"key": "source", "name": "测试源", "enabled": True}
     with (
+        tempfile.TemporaryDirectory() as tmp,
+        mock.patch.object(x_rss, "X_PROTECTION_FILE", str(Path(tmp) / "x_protection.json")),
+        mock.patch.object(x_rss, "_protection_runtime_state", None),
+        mock.patch.object(x_rss, "_protection_load_error", ""),
+        mock.patch.object(x_rss, "_protection_runtime_error", ""),
         mock.patch.object(x_rss, "load_last_messages", side_effect=load),
         mock.patch.object(x_rss, "update_last_messages", side_effect=update),
         mock.patch.object(x_rss, "get_x_groups_for_source", return_value=["G1"]),
@@ -34,10 +45,14 @@ async def main():
             new=mock.AsyncMock(return_value={"filter": {}, "translation": {}}),
         ),
         mock.patch.object(x_rss, "send_and_record", new=mock.AsyncMock()) as send,
+        mock.patch.object(x_rss, "QQBot", FakeBot),
+        mock.patch.object(x_rss, "get_bots", return_value={"test": FakeBot()}),
+        mock.patch.object(x_rss, "_load_polling_snapshot", new=mock.AsyncMock(return_value=([source], {"source": ["G1"]}))),
     ):
-        result = await x_rss._send_posts({"key": "source", "name": "测试源"}, [post])
+        result = await x_rss._send_posts(source, [post])
+        assert result == (1, 0, 0), result
+        await x_rss._dispatch_one_locked()
 
-    assert result == (0, 0, 0), result
     assert state["x_rss:source"]["G1"] == "101", state
     send.assert_not_awaited()
     print("PASS - 无可发送内容的 X 推文标记跳过并推进游标")

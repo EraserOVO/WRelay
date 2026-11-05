@@ -18,6 +18,7 @@ from plugins.history import (
 )
 from plugins.fetch import fetch_channel_latest, fetch_channel_messages_after
 from plugins.forward_service import load_channel_filter, prepare_discord_message
+from plugins import personal_qq
 from plugins.sender import log_partial_failure
 from plugins.retry import (
     send_and_record,
@@ -56,7 +57,8 @@ driver = get_driver()
 
 @driver.on_bot_connect
 async def _backfill_wrapper(bot: Bot):
-    if isinstance(bot, (DiscordBot, QQBot)) and not _backfill_stopping:
+    personal_ready = any(sender.bot is bot for sender in personal_qq.connected_bots().values())
+    if (isinstance(bot, (DiscordBot, QQBot)) or personal_ready) and not _backfill_stopping:
         task = asyncio.create_task(_backfill_missed())
         _backfill_tasks.add(task)
         task.add_done_callback(_on_backfill_task_done)
@@ -89,7 +91,27 @@ async def _stop_backfill_tasks():
     _backfill_rerun_requested = False
 
 
+_profile_backfill_lock = asyncio.Lock()
+
+
 async def _backfill_missed():
+    from plugins import bot_profiles, config
+    owners = await asyncio.to_thread(bot_profiles.ids, config.SETTINGS_FILE)
+    if not owners:
+        return await _backfill_missed_profile()
+    selected = bot_profiles.CURRENT.get()
+    async with _profile_backfill_lock:
+        for owner in ([selected] if selected else owners):
+            if owner == "unassigned":
+                continue
+            try:
+                with bot_profiles.scope(owner):
+                    await _backfill_missed_profile()
+            except Exception:
+                logger.exception("Bot {} 补发配置异常，跳过该账号", owner)
+
+
+async def _backfill_missed_profile():
 
     global _backfill_running, _backfill_rerun_requested
 

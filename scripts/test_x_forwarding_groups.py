@@ -323,14 +323,9 @@ async def test_send_posts_targets_async():
     # QX 是无关群哨兵（不在任何组），验证游标推进不触碰它
     write_last({"x_rss:A": {"QA": "1", "QB": "1", "QX": "5"}, "x_rss:B": {}})
 
-    # 优先拉真实 RSSHub feed；不可用时回退样例 RSS（都走真实 parse_feed）
+    # 使用固定 RSS 输入，避免测试依赖本机 RSSHub 和外网。
     url = "http://localhost:1200/twitter/user/A"
-    body, _etag, err = await x_rss_mod._fetch_feed(url)
-    if err or not body:
-        print("NOTE - RSSHub 不可用({})，使用样例 RSS 走真实 parse_feed".format(err))
-        body = _make_sample_posts()
-    else:
-        print("NOTE - 使用真实 RSSHub feed: " + url)
+    body = _make_sample_posts()
     posts = x_rss_mod.parse_feed(body)
     expected_ids = sorted({p["id"] for p in posts}, key=int)
     expected_latest = expected_ids[-1]
@@ -350,13 +345,29 @@ async def test_send_posts_targets_async():
                 message_id,
             )
         )
-        return {g: True for g in targets}
+        class SendResult(dict):
+            sent_groups = set(targets)
+            deduplicated_groups = set()
+            busy_groups = set()
+        return SendResult({g: True for g in targets})
+
+    class FakeBot:
+        pass
+
+    async def enqueue_and_dispatch():
+        await x_rss_mod._send_posts({"key": "A", "url": url, "name": "测试源A"}, posts)
+        for _ in posts:
+            await x_rss_mod._dispatch_one_locked()
 
     with mock.patch.object(x_rss_mod, "send_and_record", side_effect=fake_send), \
-         mock.patch.object(x_rss_mod, "record"), \
-         mock.patch.object(x_rss_mod, "fetch_bytes_many", return_value={}):
-        await x_rss_mod._send_posts(
-            {"key": "A", "url": url, "name": "测试源A"}, posts)
+         mock.patch.object(x_rss_mod, "record", new=mock.AsyncMock()), \
+         mock.patch.object(x_rss_mod, "fetch_bytes_many", return_value={}), \
+         mock.patch.object(x_rss_mod, "X_PROTECTION_FILE", str(TMP / "protection.json")), \
+         mock.patch.object(x_rss_mod, "_protection_runtime_state", None), \
+         mock.patch.object(x_rss_mod, "QQBot", FakeBot), \
+         mock.patch.object(x_rss_mod, "get_bots", return_value={"test": FakeBot()}), \
+         mock.patch.object(x_rss_mod, "rate_wait_seconds", return_value=0):
+        await enqueue_and_dispatch()
 
     ids = sorted({m[1] for m in captured}, key=int)
     targets_all = [sorted(m[2]) for m in captured]
@@ -381,11 +392,16 @@ async def test_send_posts_targets_async():
     load_case(s)
     write_last({"x_rss:A": {"QA": "1"}})
     captured.clear()
+    (TMP / "protection.json").unlink(missing_ok=True)
     with mock.patch.object(x_rss_mod, "send_and_record", side_effect=fake_send), \
-         mock.patch.object(x_rss_mod, "record"), \
-         mock.patch.object(x_rss_mod, "fetch_bytes_many", return_value={}):
-        await x_rss_mod._send_posts(
-            {"key": "A", "url": url, "name": "测试源A"}, posts)
+         mock.patch.object(x_rss_mod, "record", new=mock.AsyncMock()), \
+         mock.patch.object(x_rss_mod, "fetch_bytes_many", return_value={}), \
+         mock.patch.object(x_rss_mod, "X_PROTECTION_FILE", str(TMP / "protection.json")), \
+         mock.patch.object(x_rss_mod, "_protection_runtime_state", None), \
+         mock.patch.object(x_rss_mod, "QQBot", FakeBot), \
+         mock.patch.object(x_rss_mod, "get_bots", return_value={"test": FakeBot()}), \
+         mock.patch.object(x_rss_mod, "rate_wait_seconds", return_value=0):
+        await enqueue_and_dispatch()
     check("集成 两组共享同群 -> 同一条推文只发送一次",
           all(m[2] == ["QA"] for m in captured) and len(captured) == len(ids),
           str(captured))

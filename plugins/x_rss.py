@@ -18,7 +18,8 @@ RSSHub 拉取 → x_rss_parser 解析 → 去重 → 渲染 → sender.send_rela
   避免新群收到 feed 窗口内（最多 20 条）的历史刷屏
 - 媒体：图片/视频统一 media.fetch_bytes_many 并发下载（走代理、
   30MB 上限）；视频 ≤30MB 用 file_video(bytes) 发本体，
-  下载失败/超限降级为文字链接（sender 现有降级路径）
+  下载失败/超限时跳过视频且不补链接；图片失败仍降级为文字链接。
+  公开时间线回退路径的视频取最低码率档位
 - 容错：单个源、单条 item、单次请求失败都只记日志，不影响
   其他源与轮询循环；RSS 拉取失败/解析失败绝不推进游标
 - 投递保护：X 独立使用持久化队列和宽松默认限速（5 秒/条、每小时 300 条、
@@ -38,6 +39,7 @@ import httpx
 from nonebot import get_app, get_bots, get_driver
 from nonebot import logger
 
+from plugins import personal_qq
 from nonebot.adapters.qq import Bot as QQBot
 from nonebot.adapters.qq import MessageSegment as QQMessageSegment
 
@@ -77,7 +79,7 @@ from plugins.json_io import (
 )
 from plugins.paths import data_path
 from plugins.rss_polling import read_rss_poll_interval, run_rss_poll_loop
-from plugins.x_rss_parser import parse_feed, QUOTE_TEXT_LIMIT
+from plugins.x_rss_parser import parse_feed, QUOTE_TEXT_LIMIT, delivery_identity
 from plugins.x_rate_limit import (
     choose_overflow,
     normalize_x_protection_config,
@@ -667,7 +669,6 @@ async def _render_post(
     ]
 
     if all_media:
-        has_body = True
         urls = [m["url"] for m in all_media]
         bytes_map = await fetch_bytes_many(urls)
         for m in all_media:
@@ -683,19 +684,24 @@ async def _render_post(
                     data,
                     "video.mp4",
                 )
+            elif m["kind"] == "视频":
+                # 视频拿不到时不补链接，也不发送提示；纯视频消息整条不发。
+                logger.warning("X 视频下载失败，跳过视频本体: {}", m["url"])
+                continue
             else:
-                # 下载失败/超限：降级为文字链接
-                logger.warning(
-                    "X 媒体下载失败，降级为链接: {} {}",
-                    m["kind"],
-                    m["url"],
-                )
+                # 图片下载失败/超限：降级为文字链接
+                logger.warning("X 图片下载失败，降级为链接: {}", m["url"])
                 segment = make_media_link(m["kind"], m["url"])
-            media_items.append({
+            item = {
                 "kind": m["kind"],
                 "url": m["url"],
                 "segment": segment,
-            })
+            }
+            if m["kind"] == "视频":
+                item["no_link_fallback"] = True
+            media_items.append(item)
+        if media_items:
+            has_body = True
 
     if not has_body:
         # 纯 header 无任何内容（正文与媒体全为空的异常 item）不发送
@@ -970,7 +976,7 @@ async def _dispatch_one_locked():
     if not pending:
         return None
 
-    if not any(isinstance(bot, QQBot) for bot in get_bots().values()):
+    if not (any(isinstance(bot, QQBot) for bot in get_bots().values()) or personal_qq.any_connected()):
         return 5
 
     protection = normalize_x_protection_config(
@@ -1085,13 +1091,29 @@ async def _dispatch_one_locked():
                     raise XProtectionError("X 积压队列保存失败")
                 continue
 
+            post = item["post"]
+            media_metadata = [
+                {"kind": media.get("kind"), "url": media.get("url")}
+                for media in [*post.get("media", []), *(post.get("quote") or {}).get("media", [])]
+            ]
+            logger.info(
+                "X 投递身份: 消息={} 原推={} 去重键={} 候选媒体={}",
+                item["id"], post.get("original_id"), delivery_identity(post),
+                json.dumps(media_metadata, ensure_ascii=False),
+            )
             ok_map = await send_and_record(
                 channel_key,
                 item["cursor_id"],
                 text_parts,
                 media_items,
                 targets,
-                idempotency_key="x:%s" % item["id"],
+                idempotency_key=delivery_identity(item["post"]),
+            )
+            logger.info(
+                "X 投递结果: 消息={} 去重键={} 成功群={} 重复跳过群={}",
+                item["id"], delivery_identity(post),
+                sorted(getattr(ok_map, "sent_groups", ())),
+                sorted(getattr(ok_map, "deduplicated_groups", ())),
             )
         except XProtectionError:
             raise
@@ -1164,8 +1186,11 @@ async def _dispatch_loop():
         # and the wait below.
         _protection_wakeup.clear()
         try:
-            async with _protection_lock:
-                wait = await _dispatch_one_locked()
+            if await asyncio.to_thread(_profile_runtime.owners):
+                wait = await _profile_runtime.dispatch(_dispatch_one_locked)
+            else:
+                async with _protection_lock:
+                    wait = await _dispatch_one_locked()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -1268,7 +1293,7 @@ async def _poll_source(source):
 # 轮询循环与启动
 # =====================================================
 
-async def _poll_all():
+async def _poll_all_profile():
     """有限并发轮询全部启用源；单源异常不影响其他源。
 
     一轮结束后把聚合结果（完成时间/结果/新帖与发送计数）写入
@@ -1376,9 +1401,9 @@ async def _poll_loop():
         source_name="X RSS",
         has_connected_bot=lambda: any(
             isinstance(bot, QQBot) for bot in get_bots().values()
-        ),
+        ) or personal_qq.any_connected(),
         poll_all=_poll_all,
-        read_interval=_read_poll_interval,
+        read_interval=lambda: _profile_runtime.interval(_read_poll_interval),
         logger=logger,
     )
 
@@ -1391,6 +1416,14 @@ async def _read_poll_interval():
         source_name="X RSS",
         logger=logger,
     )
+
+
+from plugins.profile_runtime import RSSProfiles
+_profile_runtime = RSSProfiles(globals(), 'x')
+
+
+async def _poll_all():
+    return await _profile_runtime.poll(_poll_all_profile)
 
 
 _loop_started = False
@@ -1459,7 +1492,11 @@ _xrss_app = get_app()
 
 
 @_xrss_app.get("/api/x-rss/status")
-async def api_x_rss_status():
+async def api_x_rss_status(bot_id: str = ""):
+    if bot_id:
+        return await _profile_runtime.status(bot_id)
+    if await asyncio.to_thread(_profile_runtime.owners):
+        return await _profile_runtime.status_all()
     bots = get_bots()
     status_config = await asyncio.to_thread(get_x_rss_status_snapshot)
     sources = status_config["sources"]
@@ -1469,7 +1506,7 @@ async def api_x_rss_status():
     data.update({
         "ok": True,
         "running": bool(data.get("loop_started")),
-        "qq_connected": any(isinstance(b, QQBot) for b in bots.values()),
+        "qq_connected": any(isinstance(b, QQBot) for b in bots.values()) or personal_qq.any_connected(),
         "poll_interval": await asyncio.to_thread(get_x_rss_poll_interval),
         "sources_total": len(sources),
         "sources_enabled": sum(1 for s in sources if s["enabled"]),

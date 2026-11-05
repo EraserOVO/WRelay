@@ -24,6 +24,8 @@ idna==3.19
 loguru==0.7.3
 multidict==6.9.1
 nonebot-adapter-discord==1.1.9
+nonebot-adapter-onebot==2.4.6
+msgpack==1.2.1
 nonebot-adapter-qq==1.7.2+wrelay.1
 nonebot2==2.5.0
 Pillow==13.0.0

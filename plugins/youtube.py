@@ -17,6 +17,7 @@ import time
 import httpx
 
 from nonebot import get_app, get_bots, get_driver, logger
+from plugins import personal_qq
 from nonebot.adapters.qq import Bot as QQBot
 from nonebot.adapters.qq import MessageSegment as QQMessageSegment
 
@@ -929,7 +930,7 @@ async def _poll_source(source):
     }
 
 
-async def _poll_all():
+async def _poll_all_profile():
     configured_sources, groups_by_source = await _load_polling_snapshot()
     configured_ids = {str(source.get("id") or "") for source in configured_sources}
     for cached_key in list(_posts_cache):
@@ -1002,9 +1003,9 @@ async def _poll_loop():
         source_name="YouTube RSS",
         has_connected_bot=lambda: any(
             isinstance(bot, QQBot) for bot in get_bots().values()
-        ),
+        ) or personal_qq.any_connected(),
         poll_all=_poll_all,
-        read_interval=_read_poll_interval,
+        read_interval=lambda: _profile_runtime.interval(_read_poll_interval),
         logger=logger,
     )
 
@@ -1017,6 +1018,14 @@ async def _read_poll_interval():
         source_name="YouTube RSS",
         logger=logger,
     )
+
+
+from plugins.profile_runtime import RSSProfiles
+_profile_runtime = RSSProfiles(globals(), 'youtube')
+
+
+async def _poll_all():
+    return await _profile_runtime.poll(_poll_all_profile)
 
 
 _loop_started = False
@@ -1060,7 +1069,11 @@ _youtube_app = get_app()
 
 
 @_youtube_app.get("/api/youtube/status")
-async def api_youtube_status():
+async def api_youtube_status(bot_id: str = ""):
+    if bot_id:
+        return await _profile_runtime.status(bot_id)
+    if await asyncio.to_thread(_profile_runtime.owners):
+        return await _profile_runtime.status_all()
     bots = get_bots()
     status_config = await asyncio.to_thread(get_youtube_status_snapshot)
     sources = status_config["sources"]
@@ -1069,7 +1082,7 @@ async def api_youtube_status():
     data.update({
         "ok": True,
         "running": bool(data.get("loop_started")),
-        "qq_connected": any(isinstance(bot, QQBot) for bot in bots.values()),
+        "qq_connected": any(isinstance(bot, QQBot) for bot in bots.values()) or personal_qq.any_connected(),
         "poll_interval": await asyncio.to_thread(get_youtube_poll_interval),
         "sources_total": len(sources),
         "sources_enabled": sum(1 for source in sources if source["enabled"]),

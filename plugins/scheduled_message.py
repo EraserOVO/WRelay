@@ -243,6 +243,8 @@ async def _scheduled_message_loop():
                                 text_parts,
                                 media_items,
                                 groups=groups,
+                                channel_id="scheduled:" + str(message.get("id") or key),
+                                message_id=next_send_at[key].isoformat(),
                             )
                             if ok_map and all(ok_map.values()):
                                 logger.info("定时消息发送成功（{} 个群）", len(ok_map))
@@ -278,7 +280,9 @@ async def _scheduled_message_loop():
 async def _start_scheduled_message_loop(bot):
     """QQ Bot 连接后启动定时消息循环（仅启动一次）。"""
     global _loop_task, _loop_started
-    if not isinstance(bot, QQBot) or _stopping:
+    from plugins.personal_qq import connected_bots
+    personal_ready = any(sender.bot is bot for sender in connected_bots().values())
+    if (not isinstance(bot, QQBot) and not personal_ready) or _stopping:
         return
     if _loop_task is not None and not _loop_task.done():
         return

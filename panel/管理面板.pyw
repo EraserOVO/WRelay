@@ -223,7 +223,8 @@ PANEL_TOKEN = _load_panel_token()
 
 # ---------------- 配置读写 ----------------
 def load_settings():
-    raw = load_json(SETTINGS_FILE, default=None)
+    from plugins import bot_profiles
+    raw = bot_profiles.read(SETTINGS_FILE) if bot_profiles.ids(SETTINGS_FILE) else load_json(SETTINGS_FILE, default=None)
     model = SettingsModel.from_data(
         raw,
         _default_discord_channels(),
@@ -236,7 +237,8 @@ def load_settings():
 
 def _settings_revision():
     """返回 settings.json 当前版本，用于阻止旧页面覆盖新配置。"""
-    return file_revision(SETTINGS_FILE)
+    from plugins.bot_profiles import revision
+    return revision(SETTINGS_FILE)
 
 
 def _load_settings_snapshot():
@@ -277,7 +279,7 @@ def _validate_settings(data):
     return validate_settings(
         data,
         max_forwarding_groups=FORWARDING_GROUP_MAX,
-        require_nonempty_forwarding_groups=True,
+        require_nonempty_forwarding_groups=not bool(data.get("bot_profile_ids")),
         validate_forwarding_groups=True,
     )
 
@@ -644,6 +646,10 @@ def _normalize_qq_forwarding_groups(data):
 
 
 def save_settings(data, expected_revision=None):
+    from plugins import bot_profiles
+    if bot_profiles.ids(SETTINGS_FILE):
+        bot_profiles.save(SETTINGS_FILE, data, expected_revision)
+        return
     # 备份上一版配置（任何误写/损坏都可从 settings.json.bak 恢复），
     # 再走统一原子写（唯一 tmp + os.replace，见 plugins/json_io.py）
     _normalize_forwarding_groups(data)
@@ -1184,6 +1190,10 @@ BOT_API_BASE = "http://127.0.0.1:%d" % BOT_PORT
 def bot_api_get(path, timeout=10.0):
     """GET bot HTTP 端点，返回 dict；bot 不可用时返回 None"""
     import urllib.request
+    from plugins.bot_profiles import CURRENT
+    if CURRENT.get():
+        from urllib.parse import quote
+        path += ("&" if "?" in path else "?") + "bot_id=" + quote(CURRENT.get())
     try:
         req = urllib.request.Request(
             BOT_API_BASE + path,
@@ -1196,6 +1206,10 @@ def bot_api_get(path, timeout=10.0):
 
 
 def bot_api_post(path, timeout=30.0):
+    from plugins.bot_profiles import CURRENT
+    if CURRENT.get():
+        from urllib.parse import quote
+        path += ("&" if "?" in path else "?") + "bot_id=" + quote(CURRENT.get(), safe="")
     """POST bot HTTP 端点（无请求体），返回 dict；bot 不可用时返回 None"""
     import urllib.request
     try:
@@ -1237,6 +1251,27 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
 app = FastAPI()
+
+
+def _ensure_bot_profiles():
+    from plugins import bot_profiles, personal_qq_config
+    parsed = _read_qq_bots()
+    official = [item["appid"] for item in _public_qq_bots(parsed[0])] if parsed else []
+    owners = official + ["personal:" + item["uin"] for item in personal_qq_config.load_config()["connections"]]
+    return bot_profiles.migrate(SETTINGS_FILE, owners)
+
+
+@app.middleware("http")
+async def bot_profile_context(request: Request, call_next):
+    from plugins import bot_profiles
+    owner = request.query_params.get("bot_id", "")
+    if owner:
+        try:
+            bot_profiles.filename(owner)
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "msg": str(exc)}, status_code=400)
+    with bot_profiles.scope(owner):
+        return await call_next(request)
 
 
 @app.middleware("http")
@@ -1573,6 +1608,9 @@ def _settings_payload():
     逻辑，仅内存不写盘）：旧配置缺省时前端也能拿到默认 X 转发组用于渲染，
     避免前端另写一套默认逻辑。"""
     data, revision = _load_settings_snapshot()
+    if data.get("_profile_bot"):
+        data["_revision"] = revision
+        return data
     try:
         data["x_forwarding_groups"] = get_x_forwarding_groups()
     except Exception:
@@ -1590,8 +1628,15 @@ def _settings_payload():
 
 
 @app.get("/api/settings")
-def api_settings():
-    return _settings_payload()
+def api_settings(bot_id: str = ""):
+    from plugins import bot_profiles
+    try:
+        if bot_id:
+            _ensure_bot_profiles()
+        with bot_profiles.scope(bot_id):
+            return _settings_payload()
+    except (OSError, ValueError, TypeError) as exc:
+        return JSONResponse({"ok": False, "msg": "该账号配置无法读取：" + str(exc)}, status_code=400)
 
 
 @app.get("/api/settings/default")
@@ -1727,6 +1772,8 @@ def _save_settings_payload(data):
             },
             status_code=409,
         )
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "msg": str(exc)}, status_code=400)
     return {"ok": True, "settings": _settings_payload()}
 
 
@@ -2363,14 +2410,19 @@ def _public_qq_bots(bots):
     return [
         {"appid": str(bot.get("id") or bot.get("token") or "").strip()}
         for bot in bots
-        if isinstance(bot, dict) and str(bot.get("id") or bot.get("token") or "").strip()
+        if isinstance(bot, dict) and str(bot.get("id") or bot.get("token") or "").strip() not in ("", "你的AppID")
     ]
 
 
 def _prepare_qq_bots(payload, existing_bots):
     """校验并构造待写入 QQ_BOTS，绝不返回或记录 Secret。"""
-    if not isinstance(payload, list) or not payload:
+    if not isinstance(payload, list):
         raise ValueError("至少保留一个 QQ Bot")
+    if not payload:
+        from plugins.personal_qq_config import enabled_connections
+        if enabled_connections():
+            return []
+        raise ValueError("至少保留一个 QQ Bot，或先启用个人 QQ 连接")
     if len(payload) > 20:
         raise ValueError("QQ Bot 数量不能超过 20 个")
     existing = {
@@ -3050,6 +3102,12 @@ async def api_translation_ai_env_save(request: Request):
     return await run_in_thread_to_completion(_save_ai_env_value, env_name, api_key)
 
 
+from panel.personal_qq_api import register_routes as register_personal_qq_routes
+register_personal_qq_routes(app, globals())
+from panel.profile_api import register_routes as register_profile_routes
+register_profile_routes(app, globals())
+
+
 @app.get("/api/bot/qq-config")
 def api_bot_qq_config():
     """返回 QQ Bot 的 AppID 列表，绝不返回 AppSecret。"""
@@ -3103,7 +3161,7 @@ def _save_qq_bot_config(data):
         return JSONResponse({"ok": False, "msg": "保存 QQ Bot 配置失败"}, status_code=500)
     _log("QQ Bot 配置已更新（数量=%s）" % len(new_bots))
     public_bots = _public_qq_bots(new_bots)
-    return {"ok": True, "appid": public_bots[0]["appid"], "bot_ids": [item["appid"] for item in public_bots]}
+    return {"ok": True, "appid": public_bots[0]["appid"] if public_bots else "", "bot_ids": [item["appid"] for item in public_bots]}
 
 
 @app.post("/api/bot/qq-config")

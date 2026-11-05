@@ -15,7 +15,56 @@ from panel import desktop_guardian as guardian
 from plugins.json_io import json_file_lock, _atomic_write_json_unlocked
 
 
+def check_profile_validation():
+    from plugins import bot_profiles
+    from plugins.settings_model import SettingsModel, validate_settings
+    with tempfile.TemporaryDirectory(prefix='wrelay_maintenance_profiles_') as tmp:
+        root = Path(tmp)
+        settings = root / 'settings.json'
+        defaults = SettingsModel.default().to_dict()
+        global_data = {k: v for k, v in defaults.items() if k not in bot_profiles.OWNED}
+        global_data[bot_profiles.INDEX] = ['12345']
+        profile_path = Path(bot_profiles.profile_path(settings, '12345'))
+        profile_path.parent.mkdir()
+        profile = dict(format='wrelay-bot-profile', version=1, bot_id='12345',
+                       config={k: defaults[k] for k in bot_profiles.OWNED if k in defaults})
+        settings.write_text(json.dumps(global_data), encoding='utf-8')
+        profile_path.write_text(json.dumps(profile), encoding='utf-8')
+        service = BackupRestoreService(str(settings), str(root/'discord_last.json'), str(root/'retry_pending.json'),
+            str(root/'delivery_dedup.sqlite3'), str(root/'restore_backups'), json_file_lock,
+            _atomic_write_json_unlocked, lambda: defaults,
+            lambda data: validate_settings(data, validate_forwarding_groups=True), lambda text: None)
+        maintenance = MaintenanceService(lambda: service, root, lambda *a, **k: {}, lambda *a: {}, lambda text: None)
+        def errors():
+            alerts = {}
+            maintenance._check_files(alerts)
+            return alerts
+        assert not errors()
+        assert not service.validate_settings_document(defaults), 'Legacy format must still validate'
+        assert service.validate_settings_document(dict(global_data, qq_group_openids='bad'))
+        assert service.validate_settings_document(dict(global_data, bot_profile_ids=['../bad']))
+        assert service.validate_settings_document(dict(global_data, bot_profile_ids=['12345', '12345']))
+        profile_path.write_text(json.dumps(dict(profile, bot_id='23456')), encoding='utf-8')
+        assert 'file:bot_profiles/official_12345.json' in errors()
+        profile_path.unlink()
+        assert 'file:bot_profiles/official_12345.json' in errors()
+        profile_path.write_text(json.dumps(profile), encoding='utf-8')
+        runtime = Path(bot_profiles.runtime_path(settings, '12345', 'x_protection.json'))
+        runtime.parent.mkdir(parents=True)
+        runtime.write_text('{"version":999}', encoding='utf-8')
+        assert 'file:bot_profile_runtime/official_12345/x_protection.json' in errors()
+        runtime.write_text('{"version":1,"queues":{},"sent_at":[]}', encoding='utf-8')
+        assert not errors()
+        settings.write_text('{broken', encoding='utf-8')
+        assert 'file:settings.json' in errors()
+        settings.write_text(json.dumps(global_data), encoding='utf-8')
+        assert not errors()
+        assert not service.read_restore_archive(service.create_backup_archive(True)) is None
+    print('PASS: split settings, legacy format, corrupt/missing profiles, runtime validation and repaired alerts')
+
+
 def main():
+    check_profile_validation()
     with tempfile.TemporaryDirectory(prefix='wrelay_maintenance_') as tmp:
         root = Path(tmp)
         settings = root / 'settings.json'

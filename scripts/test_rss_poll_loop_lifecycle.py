@@ -29,13 +29,13 @@ async def verify_lifecycle(module, interval_name):
             mock.patch.object(module, "_poll_all", side_effect=wait_until_cancelled), \
             mock.patch.object(module, interval_name, return_value=30):
         bot = TestQQBot()
-        await module._start_poll_loop(bot)
+        await module._start_poll_loop()
         first_task = module._poll_task
         assert first_task is not None and not first_task.done()
         assert module.runtime_status()["loop_started"] is True
 
         # A repeated connect event must not start a duplicate polling task.
-        await module._start_poll_loop(bot)
+        await module._start_poll_loop()
         assert module._poll_task is first_task
 
         first_task.cancel()
@@ -50,7 +50,7 @@ async def verify_lifecycle(module, interval_name):
 
         # A later connect event can recover by starting a fresh task.
         stopped.clear()
-        await module._start_poll_loop(bot)
+        await module._start_poll_loop()
         second_task = module._poll_task
         assert second_task is not None and second_task is not first_task
         assert module.runtime_status()["loop_started"] is True
@@ -100,7 +100,6 @@ async def verify_interval_read_failure_keeps_worker_alive(module, interval_name)
     module._poll_task = None
     module._loop_started = False
     module._runtime_status["loop_started"] = False
-    module._poll_wakeup.clear()
     interval_calls = 0
     interval_error_seen = threading.Event()
     poll_calls = 0
@@ -109,7 +108,7 @@ async def verify_interval_read_failure_keeps_worker_alive(module, interval_name)
         nonlocal interval_calls
         interval_calls += 1
         if interval_calls <= 2:
-            if interval_calls == 2:
+            if interval_calls == 1:
                 interval_error_seen.set()
             raise OSError("模拟临时配置读取失败")
         return 30
@@ -126,7 +125,7 @@ async def verify_interval_read_failure_keeps_worker_alive(module, interval_name)
                 mock.patch.object(
                     module, interval_name, side_effect=flaky_interval
                 ):
-            await module._start_poll_loop(TestQQBot())
+            await module._start_poll_loop()
             task = module._poll_task
             assert task is not None
             seen = await asyncio.wait_for(
@@ -172,7 +171,7 @@ async def verify_connect_interval_read_nonblocking(module, interval_name):
     with mock.patch.object(module, "QQBot", TestQQBot), \
             mock.patch.object(module, "_poll_all", side_effect=wait_until_cancelled), \
             mock.patch.object(module, interval_name, side_effect=slow_interval):
-        task = asyncio.create_task(module._start_poll_loop(TestQQBot()))
+        task = asyncio.create_task(module._start_poll_loop())
         started = time.monotonic()
         await asyncio.sleep(0)
         elapsed = time.monotonic() - started
@@ -194,7 +193,7 @@ async def verify_connect_interval_read_nonblocking(module, interval_name):
 
 async def verify_status_interval_read_nonblocking(module, interval_name):
     sources_name = (
-        "get_x_rss_sources"
+        "get_x_rss_status_snapshot"
         if module is x_rss_mod
         else "get_bilibili_status_snapshot"
     )
@@ -205,7 +204,7 @@ async def verify_status_interval_read_nonblocking(module, interval_name):
         return 30
 
     source_config_result = (
-        []
+        {"sources": [], "protection": {}}
         if module is x_rss_mod
         else {"sources": [], "protection": {}, "forwarding_groups": []}
     )
@@ -266,7 +265,7 @@ def verify_bilibili_status_snapshot_single_read():
 
 async def verify_status_source_read_nonblocking(module):
     getter_name = (
-        "get_x_rss_sources"
+        "get_x_rss_status_snapshot"
         if module is x_rss_mod
         else "get_bilibili_status_snapshot"
     )
@@ -275,7 +274,7 @@ async def verify_status_source_read_nonblocking(module):
     def slow_config():
         time.sleep(0.25)
         if module is x_rss_mod:
-            return []
+            return {"sources": [], "protection": {}}
         return {"sources": [], "protection": {}, "forwarding_groups": []}
 
     patchers = [
@@ -309,49 +308,19 @@ async def verify_status_source_read_nonblocking(module):
 
 
 async def verify_concurrent_start_is_deduplicated(module, interval_name):
-    class TestQQBot:
-        pass
-
-    interval_started = threading.Event()
-    release_interval = threading.Event()
-    interval_calls = 0
-
-    def slow_interval():
-        nonlocal interval_calls
-        interval_calls += 1
-        interval_started.set()
-        if not release_interval.wait(1):
-            raise AssertionError("测试未及时释放模拟轮询间隔配置读取")
-        return 30
-
-    async def wait_until_cancelled():
+    async def blocked():
         await asyncio.Event().wait()
-
     module._poll_stopping = False
-    with mock.patch.object(module, "QQBot", TestQQBot), \
-            mock.patch.object(module, "_poll_all", side_effect=wait_until_cancelled), \
-            mock.patch.object(module, interval_name, side_effect=slow_interval):
-        first_start = asyncio.create_task(module._start_poll_loop(TestQQBot()))
-        started = await asyncio.wait_for(
-            asyncio.to_thread(interval_started.wait, 0.5),
-            timeout=0.75,
-        )
-        assert started
-        second_start = asyncio.create_task(module._start_poll_loop(TestQQBot()))
-        await second_start
-        assert interval_calls == 1
-        assert module._poll_task is None
-
-        release_interval.set()
-        await first_start
-        poll_task = module._poll_task
-        assert poll_task is not None and not poll_task.done()
-        poll_task.cancel()
-        await asyncio.gather(poll_task, return_exceptions=True)
+    with mock.patch.object(module, "_poll_loop", side_effect=blocked):
+        await asyncio.gather(module._start_poll_loop(), module._start_poll_loop())
+        task = module._poll_task
+        assert task is not None and not task.done()
+        await module._start_poll_loop()
+        assert module._poll_task is task
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
         await asyncio.sleep(0)
-        assert module._poll_task is None
-        assert module._loop_started is False
-        assert module.runtime_status()["loop_started"] is False
+        assert module._poll_task is None and not module._loop_started
 
 
 async def verify_shutdown_stops_poll_before_client(module, interval_name):
@@ -380,7 +349,7 @@ async def verify_shutdown_stops_poll_before_client(module, interval_name):
         module._feed_client = client
         bot = TestQQBot()
         bots["qq"] = bot
-        await module._start_poll_loop(bot)
+        await module._start_poll_loop()
         poll_task = module._poll_task
         assert poll_task is not None
         await poll_started.wait()
@@ -393,60 +362,44 @@ async def verify_shutdown_stops_poll_before_client(module, interval_name):
         assert module.runtime_status()["loop_started"] is False
         assert client.closed
         assert module._feed_client is None
-        await module._start_poll_loop(bot)
+        await module._start_poll_loop()
         assert module._poll_task is None
 
 
 async def verify_offline_pause_and_reconnect_wake(module, interval_name):
     class TestQQBot:
         pass
-
     bots = {}
-    interval_read = threading.Event()
-    poll_started = asyncio.Event()
-    poll_calls = 0
-
-    def interval():
-        interval_read.set()
-        return 60
-
-    async def poll_once():
-        nonlocal poll_calls
-        poll_calls += 1
-        poll_started.set()
-
+    polls = []
+    real_loop = module.run_rss_poll_loop
+    async def fast_loop(**kwargs):
+        await real_loop(**kwargs, connection_check_interval=0.01)
+    async def poll():
+        polls.append(1)
     module._poll_stopping = False
-    module._poll_wakeup.clear()
-
-
     with mock.patch.object(module, "QQBot", TestQQBot), \
             mock.patch.object(module, "get_bots", return_value=bots), \
-            mock.patch.object(module, "_poll_all", side_effect=poll_once), \
-            mock.patch.object(module, interval_name, side_effect=interval):
-        bot = TestQQBot()
-        await module._start_poll_loop(bot)
-        read_started = await asyncio.wait_for(
-            asyncio.to_thread(interval_read.wait, 0.5),
-            timeout=0.75,
-        )
-        assert read_started
-        await asyncio.sleep(0)
-        assert poll_calls == 0
-
-        bots["qq"] = bot
-        await module._start_poll_loop(bot)
-        await asyncio.wait_for(poll_started.wait(), timeout=0.75)
-        assert poll_calls == 1
-
-        poll_task = module._poll_task
-        assert poll_task is not None
-        poll_task.cancel()
-        await asyncio.gather(poll_task, return_exceptions=True)
-        await asyncio.sleep(0)
-        assert module._poll_task is None
-        assert module._loop_started is False
-        assert module.runtime_status()["loop_started"] is False
-    module._poll_wakeup.clear()
+            mock.patch.object(module.personal_qq, "any_connected", return_value=False), \
+            mock.patch.object(module, "run_rss_poll_loop", side_effect=fast_loop), \
+            mock.patch.object(module, "_poll_all", side_effect=poll), \
+            mock.patch.object(module, interval_name, return_value=60):
+        await module._start_poll_loop()
+        task = module._poll_task
+        try:
+            await asyncio.sleep(0.15)
+            assert not polls
+            bots["qq"] = TestQQBot()
+            await asyncio.sleep(0.25)
+            assert len(polls) == 1
+            bots.clear()
+            await asyncio.sleep(0.25)
+            bots["qq"] = TestQQBot()
+            await asyncio.sleep(0.25)
+            assert len(polls) == 2
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.sleep(0)
 
 
 async def verify_x_single_post_request_shutdown():

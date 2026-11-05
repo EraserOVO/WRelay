@@ -13,6 +13,7 @@ from plugins.message_trace import get_delivery_traces
 from plugins.translation import get_translation_status
 from plugins.json_io import load_json
 from plugins.paths import data_path
+from plugins import personal_qq
 
 
 # =====================================================
@@ -25,6 +26,19 @@ from plugins.paths import data_path
 # =====================================================
 
 app = get_app()
+
+
+@app.middleware("http")
+async def profile_context(request: Request, call_next):
+    from plugins import bot_profiles
+    owner = request.query_params.get("bot_id", "")
+    if owner:
+        try:
+            bot_profiles.filename(owner)
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "msg": str(exc)}, status_code=400)
+    with bot_profiles.scope(owner):
+        return await call_next(request)
 PANEL_AUTH_FILE = data_path("panel_auth.json")
 
 
@@ -55,17 +69,53 @@ async def api_health():
         if isinstance(bot, QQBot)
     ]
     qq_bots = [bot_id for bot_id in qq_bots if bot_id]
+    qq_bots.extend(personal_qq.connected_bots())
     return {
         "ok": True,
         "discord": any(
             isinstance(b, DiscordBot)
             for b in bots.values()
         ),
-        "qq": qq_connected,
+        "qq": qq_connected or personal_qq.any_connected(),
         "qq_bots": qq_bots,
+        "personal_qq": personal_qq.connection_status(),
         "retry": get_retry_status(),
         "translation": get_translation_status(),
     }
+
+
+@app.get("/api/personal-qq/status")
+async def personal_qq_status():
+    try:
+        records = await asyncio.to_thread(personal_qq.uncertain_records)
+        return {"ok": True, "connections": personal_qq.connection_status(),
+                "uncertain": [dict(key=key, **value) for key, value in records.items()]}
+    except Exception:
+        return {"ok": False, "msg": "个人 QQ 待确认记录无法读取"}
+
+
+@app.get("/api/personal-qq/groups")
+async def personal_qq_groups(uin: str):
+    sender = personal_qq.connected_bots().get("personal:" + uin)
+    if sender is None:
+        return {"ok": False, "msg": "个人 QQ 尚未连接并完成账号校验"}
+    try:
+        groups = await asyncio.wait_for(sender.bot.get_group_list(), 15)
+        return {"ok": True, "groups": [
+            {"group_id": str(item["group_id"]), "group_name": str(item.get("group_name") or "")}
+            for item in groups if isinstance(item, dict) and item.get("group_id")
+        ]}
+    except Exception:
+        return {"ok": False, "msg": "读取群列表失败，请检查个人 QQ 连接"}
+
+
+@app.post("/api/personal-qq/resolve/{key}/{action}")
+async def personal_qq_resolve(key: str, action: str):
+    try:
+        await personal_qq.resolve_uncertain(key, action)
+        return {"ok": True}
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "msg": str(exc)}, status_code=400)
 
 
 @app.get("/api/message-trace")

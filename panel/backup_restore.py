@@ -4,6 +4,7 @@ import io
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -21,6 +22,7 @@ BACKUP_DELIVERY_DEDUP_NAME = "delivery_dedup.sqlite3"
 BACKUP_RUNTIME_NAMES = (
     "discord_last.json",
     "retry_pending.json",
+    "personal_qq_uncertain.json",
     "x_protection.json",
     "bilibili_protection.json",
     "bilibili.json",
@@ -76,10 +78,11 @@ class BackupRestoreService:
         self.logger = logger
 
     def backup_targets(self):
-        return {
+        targets = {
             BACKUP_SETTINGS_NAME: self.settings_file,
             "discord_last.json": self.discord_last_file,
             "retry_pending.json": self.retry_pending_file,
+            "personal_qq_uncertain.json": os.path.join(os.path.dirname(self.settings_file), "personal_qq_uncertain.json"),
             "x_protection.json": self.x_protection_file,
             "bilibili_protection.json": os.path.join(os.path.dirname(self.settings_file), "bilibili_protection.json"),
             "bilibili.json": os.path.join(os.path.dirname(self.settings_file), "bilibili.json"),
@@ -88,6 +91,45 @@ class BackupRestoreService:
             "youtube.json": os.path.join(os.path.dirname(self.settings_file), "youtube.json"),
             BACKUP_DELIVERY_DEDUP_NAME: self.delivery_dedup_file,
         }
+        from plugins import bot_profiles
+        for owner in bot_profiles.ids(self.settings_file):
+            name = "bot_profiles/" + bot_profiles.filename(owner)
+            targets[name] = self.profile_target(name)
+            for runtime in ("x_rss.json", "bilibili.json", "youtube.json", "x_protection.json", "bilibili_protection.json", "youtube_protection.json"):
+                name = "bot_profile_runtime/" + bot_profiles.filename(owner)[:-5] + "/" + runtime
+                targets[name] = self.profile_target(name)
+        return targets
+
+    def validate_settings_document(self, data):
+        """Validate the global document without requiring fields moved to profiles."""
+        if not isinstance(data, dict):
+            return "配置必须是 JSON 对象"
+        from plugins import bot_profiles
+        if bot_profiles.INDEX not in data:
+            return self.settings_validator(data)
+        owners = data[bot_profiles.INDEX]
+        if not isinstance(owners, list) or not owners or any(not isinstance(x, str) for x in owners) or len(owners) != len(set(owners)):
+            return "Bot 配置索引无效"
+        try:
+            for owner in owners:
+                bot_profiles.filename(owner)
+        except ValueError as exc:
+            return str(exc)
+        from plugins.settings_model import SettingsModel
+        defaults = SettingsModel.default().to_dict()
+        checked = dict(data)
+        for key in bot_profiles.OWNED:
+            if key not in checked and key in defaults:
+                checked[key] = defaults[key]
+        return self.settings_validator(checked)
+
+    def profile_target(self, name):
+        """Resolve only known profile paths, including accounts absent on this machine."""
+        profile = r"(?:official_[1-9][0-9]{0,19}|personal_[1-9][0-9]{4,19}|unassigned)"
+        runtime = r"(?:x_rss|bilibili|youtube|x_protection|bilibili_protection|youtube_protection)\.json"
+        if re.fullmatch(r"bot_profiles/" + profile + r"\.json", name) or re.fullmatch(r"bot_profile_runtime/" + profile + "/" + runtime, name):
+            return os.path.join(os.path.dirname(self.settings_file), *name.split("/"))
+        raise ValueError("备份内含不允许的配置路径")
 
     @staticmethod
     def _sqlite_snapshot_bytes(path):
@@ -161,8 +203,11 @@ class BackupRestoreService:
     def lock_backup_targets(self, names):
         """按稳定顺序锁住一批文件，避免快照交错或死锁。"""
         targets = self.backup_targets()
+        for name in names:
+            if name not in targets:
+                targets[name] = self.profile_target(name)
         stack = ExitStack()
-        for name in sorted(names):
+        for name in sorted(names, key=lambda name: (name != BACKUP_SETTINGS_NAME, name)):
             stack.enter_context(self.file_lock(targets[name]))
         return stack
 
@@ -180,8 +225,10 @@ class BackupRestoreService:
         """生成只含白名单文件的 ZIP。"""
         targets = self.backup_targets()
         requested_names = [BACKUP_SETTINGS_NAME]
+        requested_names.extend(name for name in targets if name.startswith("bot_profiles/"))
         if include_runtime_state:
             requested_names.extend(BACKUP_RUNTIME_NAMES)
+            requested_names.extend(name for name in targets if name.startswith("bot_profile_runtime/"))
         with self.lock_backup_targets(requested_names):
             names = [name for name in requested_names if os.path.exists(targets[name])]
             if BACKUP_SETTINGS_NAME not in names:
@@ -248,6 +295,10 @@ class BackupRestoreService:
                     BACKUP_SETTINGS_NAME,
                     *BACKUP_RUNTIME_NAMES,
                 }
+                for name in names:
+                    if name not in allowed:
+                        self.profile_target(name)
+                        allowed.add(name)
                 if len(names) != len(set(names)) or set(names) - allowed:
                     raise ValueError("备份内含不允许的文件")
                 if (
@@ -256,7 +307,7 @@ class BackupRestoreService:
                 ):
                     raise ValueError("备份缺少清单或 settings.json")
                 if any(
-                    "/" in name or "\\" in name or name.startswith(".")
+                    ("/" in name and not name.startswith(("bot_profiles/", "bot_profile_runtime/"))) or "\\" in name or name.startswith(".")
                     for name in names
                 ):
                     raise ValueError("备份文件名不安全")
@@ -285,7 +336,7 @@ class BackupRestoreService:
                 ]:
                     raise ValueError("备份清单与文件不一致")
                 if (
-                    any(name in names for name in BACKUP_RUNTIME_NAMES)
+                    any(name in BACKUP_RUNTIME_NAMES or name.startswith("bot_profile_runtime/") for name in names)
                     and manifest.get("include_runtime_state") is not True
                 ):
                     raise ValueError("备份清单未声明运行状态")
@@ -313,10 +364,25 @@ class BackupRestoreService:
                         raise ValueError("%s 不是有效 JSON" % name) from exc
         except zipfile.BadZipFile as exc:
             raise ValueError("请选择有效的 ZIP 备份文件") from exc
-        err = self.settings_validator(data[BACKUP_SETTINGS_NAME])
+        err = self.validate_settings_document(data[BACKUP_SETTINGS_NAME])
         if err:
             raise ValueError("settings.json 配置校验失败: " + err)
+        from plugins import bot_profiles
+        owners = data[BACKUP_SETTINGS_NAME].get(bot_profiles.INDEX, [])
+        if not isinstance(owners, list) or any(not isinstance(owner, str) for owner in owners) or len(owners) != len(set(owners)):
+            raise ValueError("Bot 配置索引无效")
+        expected = {"bot_profiles/" + bot_profiles.filename(owner): owner for owner in owners}
+        if set(expected) != {name for name in data if name.startswith("bot_profiles/")}:
+            raise ValueError("备份缺少账号配置或含索引外配置")
         for name, value in data.items():
+            if name in expected:
+                bot_profiles.validate_profile(value, expected[name])
+                continue
+            if name.startswith("bot_profile_runtime/"):
+                if name.split("/")[1] not in {bot_profiles.filename(owner)[:-5] for owner in owners}:
+                    raise ValueError("运行状态账号不在配置索引中")
+                validate_runtime(name.rsplit("/", 1)[1], value)
+                continue
             if name not in (BACKUP_SETTINGS_NAME, BACKUP_DELIVERY_DEDUP_NAME):
                 validate_runtime(name, value)
         return data
@@ -330,6 +396,9 @@ class BackupRestoreService:
             % (datetime.now().strftime("%Y%m%d-%H%M%S"), uuid.uuid4().hex[:8]),
         )
         targets = self.backup_targets()
+        for name in names:
+            if name not in targets:
+                targets[name] = self.profile_target(name)
         with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr(
                 BACKUP_MANIFEST_NAME,
@@ -449,12 +518,17 @@ class BackupRestoreService:
         save_rollback = save_rollback or self.save_restore_rollback
 
         data = read_archive(payload)
-        names = [BACKUP_SETTINGS_NAME]
+        names = [name for name in data if name.startswith("bot_profiles/")]
         if include_runtime_state:
             if not confirmed_runtime_state:
                 raise ValueError("恢复运行状态需要明确确认风险")
             names.extend(name for name in BACKUP_RUNTIME_NAMES if name in data)
+            names.extend(name for name in data if name.startswith("bot_profile_runtime/"))
+        names.append(BACKUP_SETTINGS_NAME)
         targets = targets_provider()
+        for name in names:
+            if name not in targets:
+                targets[name] = self.profile_target(name)
         with lock_targets(names):
             rollback_path = save_rollback(names)
             written_names = []

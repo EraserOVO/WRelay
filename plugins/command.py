@@ -342,7 +342,7 @@ def _c2c_enabled_groups():
     """私聊可选目标：全部已注册且 enabled 的群（不受测试/正式隔离）"""
     return [
         e for e in get_qq_group_entries()
-        if e.get("enabled") and e.get("openid")
+        if e.get("enabled") and e.get("openid") and not str(e["openid"]).startswith("personal:")
     ]
 
 
@@ -407,6 +407,12 @@ async def handle(
     bot: Bot,
     event: Event
 ):
+    from plugins.bot_profiles import scope
+    with scope(_qq_bot_id(bot)):
+        await _handle_profile(bot, event)
+
+
+async def _handle_profile(bot, event):
 
     if not isinstance(
         bot,
@@ -612,6 +618,10 @@ class _ManualRelayContentError(Exception):
     """An expected fetch or filtering failure with a user-facing message."""
 
 
+class _ManualRelaySilentSkip(Exception):
+    """内容为空但不应回复提示（如仅启用视频且视频本体拿不到）。"""
+
+
 async def _prepare_discord_relay_content(message):
     logger.info("检测到Discord消息链接")
     msg, fetch_err = await fetch_message(message)
@@ -691,14 +701,17 @@ async def _prepare_bilibili_relay_content(message):
         )
 
     bilibili_filter = await asyncio.to_thread(get_bilibili_c2c_relay_filter)
+    enabled_types = get_enabled_message_types(
+        bilibili_filter, BILIBILI_MESSAGE_TYPES
+    )
     rendered = await render_bilibili_post(
         post,
         source_name,
-        enabled_types=get_enabled_message_types(
-            bilibili_filter, BILIBILI_MESSAGE_TYPES
-        ),
+        enabled_types=enabled_types,
     )
     if rendered is None:
+        if str(post.get("post_type") or "视频") == "视频" and "视频" in enabled_types:
+            raise _ManualRelaySilentSkip()
         raise _ManualRelayContentError("消息被筛选，未转发")
 
     text_parts, media_items = rendered
@@ -776,6 +789,9 @@ async def _consume_next(
             qq_message=qq_message,
             content_event=content_event,
         )
+    except _ManualRelaySilentSkip:
+        _stop_propagation()
+        return
     except _ManualRelayContentError as exc:
         await send_titled_reply(bot, event, "转发结果", str(exc))
         _stop_propagation()

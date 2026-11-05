@@ -22,7 +22,8 @@ from xml.etree import ElementTree
 ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN = {".py", ".pyw", ".pyc", ".pyo", ".cs", ".c", ".cpp", ".h", ".pdb", ".map"}
 WEB_FILES = ("index.html", "app.js", "style.css", "desktop.js", "local-api.js", "discord-page.js",
-             "ui-components.js", "ui-components.css", "onboarding.js", "onboarding.css", "wrelay-logo.svg")
+             "ui-components.js", "ui-components.css", "onboarding.js", "onboarding.css", "wrelay-logo.svg",
+             "personal-qq.js", "personal-qq.css", "bot-profiles.js")
 
 
 def run(args, **kwargs):
@@ -242,7 +243,7 @@ def main():
                "--include-module=wrelay_panel", "--include-module=wrelay_desktop",
                "--include-module=wrelay_restart", "--include-module=wrelay_diagnose",
                "--include-package=nonebot.drivers", "--include-package=nonebot.adapters.qq",
-               "--include-package=nonebot.adapters.discord", "--include-package=uvicorn",
+               "--include-package=nonebot.adapters.onebot", "--include-package=nonebot.adapters.discord", "--include-package=uvicorn",
                "--include-package=websockets.asyncio",
                "--include-module=webview.platforms.winforms", "--include-module=pystray._win32",
                "--include-module=pythonnet", "--include-module=clr_loader",

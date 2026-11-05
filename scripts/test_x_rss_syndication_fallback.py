@@ -12,7 +12,7 @@ import nonebot
 nonebot.init()
 
 from plugins import x_rss as x_rss_mod
-from plugins.x_rss_parser import parse_feed
+from plugins.x_rss_parser import parse_feed, delivery_identity
 
 
 class Response:
@@ -78,10 +78,15 @@ async def main():
                 "url": "https://video.example/high-bitrate.mp4",
                 "bitrate": 320000,
             },
+            {
+                "content_type": "video/mp4",
+                "url": "https://video.example/low-bitrate.mp4",
+                "bitrate": 128000,
+            },
         ]},
     }])
     video_posts = parse_feed(video_body)
-    assert video_posts[0]["media"][0]["url"] == "https://video.example/high-bitrate.mp4"
+    assert video_posts[0]["media"][0]["url"] == "https://video.example/low-bitrate.mp4"
 
     malformed_media_body = syndication_html([
         {"type": "video", "video_info": "invalid"},
@@ -129,6 +134,23 @@ async def main():
     assert malformed_user_post["text"] == "retweeted text"
     assert malformed_user_post["quote"]["author"] == ""
     assert malformed_user_post["quote"]["text"] == "quoted text"
+    original = {"id_str": "100", "full_text": "same original", "user": {}}
+    entries = [{"type": "tweet", "content": {"tweet": {
+        "id_str": wrapper, "retweeted_status": original,
+    }}} for wrapper in ("201", "202")]
+    retweets = parse_feed(syndication_html(entries=entries))
+    assert [p["id"] for p in retweets] == ["201", "202"]
+    assert [delivery_identity(p) for p in retweets] == ["x:100", "x:100"]
+    assert delivery_identity({"id": "100", "is_retweet": False}) == "x:100"
+    assert delivery_identity({"id": "203", "is_retweet": False,
+                              "original_id": "100", "quote": original}) == "x:203"
+    for invalid in (None, "", "bad", "０１２", "0", -1):
+        assert delivery_identity({"id": "204", "is_retweet": True,
+                                  "original_id": invalid}) == "x:204"
+    rss = b'<rss><channel><item><guid>https://x.com/a/status/205</guid><title>RT author</title><description>RT author&lt;br&gt;https://x.com/a/status/100</description></item></channel></rss>'
+    rss_post = parse_feed(rss)[0]
+    assert rss_post["is_retweet"] and rss_post["original_id"] is None
+    assert delivery_identity(rss_post) == "x:205"
     print("PASS - RSSHub 失败时回退 X 公开时间线并保留媒体字段")
 
 

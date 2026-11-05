@@ -88,7 +88,7 @@ def compute_target_list(entries, current_openid, related_openids):
     seen = set()
     for item in entries:
         oid = str(item.get("openid") or "")
-        if not oid or oid in seen:
+        if not oid or oid in seen or oid.startswith("personal:"):
             continue
         if oid == current:
             continue
@@ -534,6 +534,12 @@ fwd_command = on_message(
 
 @fwd_command.handle()
 async def handle_fwd(bot: Bot, event: Event):
+    from plugins.bot_profiles import scope
+    with scope(_qq_bot_id(bot)):
+        await _handle_fwd_profile(bot, event)
+
+
+async def _handle_fwd_profile(bot, event):
     if not isinstance(bot, QQBot):
         return
     if not isinstance(event, GroupMessageCreateEvent):

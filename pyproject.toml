@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "WRelay"
-version = "0.2.1"
+version = "0.3.0"
 description = "WRelay"
 readme = "README.md"
 requires-python = ">=3.10, <4.0"
@@ -24,6 +24,7 @@ dependencies = [
     "Pillow>=13.0.0,<14.0.0",
     # Metadata-only compatibility patch; install with requirements-lock.txt.
     "nonebot-adapter-qq==1.7.2+wrelay.1",
+    "nonebot-adapter-onebot==2.4.6",
     "cryptography>=50.0.1,<51.0.0",
     "nonebot-adapter-discord>=1.1.9,<2.0.0",
     "pywebview>=6.2.1,<7.0.0",
@@ -44,6 +45,10 @@ nonebot-adapter-qq = [
 
 nonebot-adapter-discord = [
     { name = "Discord", module_name = "nonebot.adapters.discord" }
+]
+
+nonebot-adapter-onebot = [
+    { name = "OneBot V11", module_name = "nonebot.adapters.onebot.v11" }
 ]
 
 

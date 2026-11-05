@@ -19,6 +19,7 @@ from urllib.parse import urlencode, urlparse
 import httpx
 
 from nonebot import get_app, get_bots, get_driver, logger
+from plugins import personal_qq
 from nonebot.adapters.qq import Bot as QQBot
 from nonebot.adapters.qq import MessageSegment as QQMessageSegment
 
@@ -403,18 +404,8 @@ async def fetch_bilibili_manual_post(url):
 
 
 async def _fetch_video_url(post):
-    """返回 (可下载的视频 URL, 可上传的视频字节)；失败时保留已知链接。"""
+    """只取 360P 单段视频；任何失败都返回 (None, None)，由调用方静默处理。"""
     referer = str(post.get("link") or "https://www.bilibili.com/")
-    direct_urls = [
-        item.get("url")
-        for item in (post.get("media") or [])
-        if item.get("kind") == "视频" and item.get("url")
-    ]
-    for video_url in direct_urls:
-        data = await fetch_bytes(video_url, headers={"Referer": referer})
-        if data:
-            return video_url, data
-
     video_ref = {
         "bvid": str(post.get("bvid") or ""),
         "avid": str(post.get("avid") or ""),
@@ -428,54 +419,72 @@ async def _fetch_video_url(post):
             page = pages[page_index] if pages else {}
             cid = page.get("cid") or view.get("cid")
         except Exception as exc:
-            logger.warning("获取 Bilibili 视频信息失败: {}", exc)
-            return (direct_urls[0] if direct_urls else referer), None
+            logger.warning("获取 Bilibili 视频信息失败，跳过视频本体: {}", exc)
+            return None, None
     if not cid:
-        return (direct_urls[0] if direct_urls else referer), None
+        logger.warning("Bilibili 视频缺少 cid，跳过视频本体: {}", referer)
+        return None, None
 
+    params = {
+        "cid": cid,
+        "qn": 16,
+        "fnval": 0,
+        "fnver": 0,
+        "fourk": 0,
+    }
+    if video_ref["bvid"]:
+        params["bvid"] = video_ref["bvid"]
+    elif video_ref["avid"]:
+        params["avid"] = video_ref["avid"]
+    try:
+        signed = await _signed_wbi_params(params)
+        response = await _bilibili_get(
+            "https://api.bilibili.com/x/player/wbi/playurl",
+            params=signed,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        logger.warning("获取 Bilibili 360P 视频地址失败，跳过视频本体: {}", exc)
+        return None, None
+    if payload.get("code") != 0:
+        logger.warning(
+            "Bilibili 360P 视频地址接口返回 {}，跳过视频本体: {}",
+            payload.get("code"),
+            payload.get("message") or referer,
+        )
+        return None, None
+
+    data = payload.get("data") or {}
+    quality = data.get("quality")
+    if not isinstance(quality, int) or quality > 16:
+        logger.warning("Bilibili 未返回 360P（quality={}），跳过视频本体: {}", quality, referer)
+        return None, None
+    segments = data.get("durl") or []
+    # 只支持单段直传；多段投稿需要合并，不能把其中一段误当完整视频。
+    if len(segments) != 1:
+        logger.warning("Bilibili 视频为多段（{} 段），跳过视频本体: {}", len(segments), referer)
+        return None, None
+    segment = segments[0]
+    video_url = str(segment.get("url") or "").strip()
+    if not video_url:
+        logger.warning("Bilibili 360P 视频地址为空，跳过视频本体: {}", referer)
+        return None, None
     limit = get_max_download_bytes()
-    for quality in (64, 32, 16):
-        params = {
-            "cid": cid,
-            "qn": quality,
-            "fnval": 0,
-            "fnver": 0,
-            "fourk": 0,
-        }
-        if video_ref["bvid"]:
-            params["bvid"] = video_ref["bvid"]
-        elif video_ref["avid"]:
-            params["avid"] = video_ref["avid"]
-        try:
-            signed = await _signed_wbi_params(params)
-            response = await _bilibili_get(
-                "https://api.bilibili.com/x/player/wbi/playurl",
-                params=signed,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            if payload.get("code") != 0:
-                continue
-            data = payload.get("data") or {}
-            segments = data.get("durl") or []
-            # 只支持单段直传；多段投稿需要合并，不能把其中一段误当完整视频。
-            if len(segments) != 1:
-                continue
-            segment = segments[0]
-            video_url = str(segment.get("url") or "").strip()
-            if not video_url:
-                continue
-            size = segment.get("size")
-            if isinstance(size, int) and size > limit:
-                return video_url, None
-            video_bytes = await fetch_bytes(
-                video_url,
-                headers={"Referer": referer},
-            )
-            return video_url, video_bytes
-        except Exception as exc:
-            logger.debug("Bilibili 视频清晰度 {} 获取失败: {}", quality, exc)
-    return (direct_urls[0] if direct_urls else referer), None
+    size = segment.get("size")
+    if isinstance(size, int) and size > limit:
+        logger.warning(
+            "Bilibili 360P 视频大小超过上限({}>{})，跳过视频本体: {}",
+            size,
+            limit,
+            referer,
+        )
+        return None, None
+    video_bytes = await fetch_bytes(video_url, headers={"Referer": referer})
+    if not video_bytes:
+        logger.warning("Bilibili 360P 视频下载失败，跳过视频本体: {}", referer)
+        return None, None
+    return video_url, video_bytes
 
 
 def _read_state():
@@ -1047,20 +1056,18 @@ async def _render_post(
             media_items.append({"kind": "图片", "url": url, "segment": segment})
 
     # 只要消息类型筛选启用「视频」（或未筛选即全部启用），视频投稿就尝试上传
-    # 视频本体；下载失败、超过大小上限或视频分段时降级为视频链接。
+    # 360P 单段视频本体；取不到时不再降级为视频或投稿页链接。
     if str(post.get("post_type") or "视频") == "视频" and (
         enabled_types is None or "视频" in enabled_types
     ):
         video_url, video_data = await _fetch_video_url(post)
         if video_data:
             segment = QQMessageSegment.file_video(video_data, "bilibili-video.mp4")
-            media_items.append({"kind": "视频", "url": video_url, "segment": segment})
-        elif video_url:
-            logger.info("Bilibili 视频未能上传，降级为投稿视频链接: {}", video_url)
             media_items.append({
                 "kind": "视频",
                 "url": video_url,
-                "segment": make_media_link("视频", video_url),
+                "segment": segment,
+                "no_link_fallback": True,
             })
 
     if enabled_types is not None:
@@ -1347,7 +1354,7 @@ async def _poll_source(source):
     return {"result": "ok", "error": "", "new": counts[0], "sent": counts[1], "failed": counts[2]}
 
 
-async def _poll_all():
+async def _poll_all_profile():
     configured_sources, groups_by_source = await _load_polling_snapshot()
     configured_cache_keys = set()
     for source in configured_sources:
@@ -1440,9 +1447,9 @@ async def _poll_loop():
         source_name="Bilibili RSS",
         has_connected_bot=lambda: any(
             isinstance(bot, QQBot) for bot in get_bots().values()
-        ),
+        ) or personal_qq.any_connected(),
         poll_all=_poll_all,
-        read_interval=_read_poll_interval,
+        read_interval=lambda: _profile_runtime.interval(_read_poll_interval),
         logger=logger,
     )
 
@@ -1455,6 +1462,14 @@ async def _read_poll_interval():
         source_name="Bilibili RSS",
         logger=logger,
     )
+
+
+from plugins.profile_runtime import RSSProfiles
+_profile_runtime = RSSProfiles(globals(), 'bilibili')
+
+
+async def _poll_all():
+    return await _profile_runtime.poll(_poll_all_profile)
 
 
 _loop_started = False
@@ -1498,7 +1513,11 @@ _bilibili_app = get_app()
 
 
 @_bilibili_app.get("/api/bilibili/status")
-async def api_bilibili_status():
+async def api_bilibili_status(bot_id: str = ""):
+    if bot_id:
+        return await _profile_runtime.status(bot_id)
+    if await asyncio.to_thread(_profile_runtime.owners):
+        return await _profile_runtime.status_all()
     bots = get_bots()
     status_config = await asyncio.to_thread(get_bilibili_status_snapshot)
     sources = status_config["sources"]
@@ -1508,7 +1527,7 @@ async def api_bilibili_status():
     data.update({
         "ok": True,
         "running": bool(data.get("loop_started")),
-        "qq_connected": any(isinstance(bot, QQBot) for bot in bots.values()),
+        "qq_connected": any(isinstance(bot, QQBot) for bot in bots.values()) or personal_qq.any_connected(),
         "poll_interval": await asyncio.to_thread(get_bilibili_poll_interval),
         "sources_total": len(sources),
         "sources_enabled": sum(1 for source in sources if source["enabled"]),

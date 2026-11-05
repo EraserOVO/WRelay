@@ -222,16 +222,12 @@ async def main():
     assert segments[0].data["file_name"] == "bilibili-BV1xx411c7mD.mp4"
     assert segments[0].data["file_data"] == b"video-bytes"
 
-    # 失败 / 超限 / 多段：静默，不回复原链接。
-    for label, video_result in (
-        ("下载失败", (BV_URL + "?p=1", None)),
-        ("超过大小上限", ("https://video.example/big.mp4", None)),
-        ("视频分段", ("https://video.example/part1.mp4", None)),
-    ):
+    # 失败 / 超限 / 多段 / 非 360P：_fetch_video_url 返回空，静默不回复原链接。
+    for label in ("下载失败", "超过大小上限", "视频分段", "非 360P"):
         _reset_state()
         with (
             mock.patch.object(auto.bilibili, "_fetch_video_manual_post", mock.AsyncMock(return_value=(_post(), "UP 主"))),
-            mock.patch.object(auto.bilibili, "_fetch_video_url", mock.AsyncMock(return_value=video_result)),
+            mock.patch.object(auto.bilibili, "_fetch_video_url", mock.AsyncMock(return_value=(None, None))),
         ):
             bot = await run(BV_URL)
         assert bot.sent == [], label

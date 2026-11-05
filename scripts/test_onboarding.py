@@ -93,7 +93,8 @@ def test_startup():
     configs = SimpleNamespace(qq_bots=[qq], discord_bots=[{"token": "在这里粘贴你的DiscordBotToken"}])
     namespace["_build_adapter_config"] = lambda model: configs
     exec(compile(ast.Module(body=[node], type_ignores=[]), str(ROOT / "bot.py"), "exec"), namespace)
-    with patch.dict(os.environ, {}, clear=False), patch("sys.stderr", io.StringIO()):
+    with patch.dict(os.environ, {}, clear=False), patch("sys.stderr", io.StringIO()), \
+            patch("plugins.personal_qq_config.enabled_connections", return_value={}) as personal_connections:
         namespace["_first_run_config_check"]()
         assert os.environ["DISCORD_BOTS"] == "[]"
         namespace["load_json"] = lambda *args, **kwargs: {"discord_channels": [{"enabled": True}]}
@@ -107,11 +108,14 @@ def test_startup():
         configs.qq_bots = []
         try:
             namespace["_first_run_config_check"]()
-            raise AssertionError("所有用途都需要 QQ")
+            raise AssertionError("缺少官方和个人 QQ 时不应启动")
         except SystemExit as exc:
             assert exc.code == 2
+        personal_connections.return_value = {"123456789": {"enabled": True}}
+        namespace["_first_run_config_check"]()
+        assert os.environ["QQ_BOTS"] == "[]"
     assert qq_ready(qq) and not discord_ready({"token": "在这里粘贴你的DiscordBotToken"})
-    print("PASS - 非 Discord 独立启动、Discord 按需必填、QQ 必填")
+    print("PASS - 非 Discord 独立启动、Discord 按需必填、官方或个人 QQ 必填")
 
 
 def test_watchdog():

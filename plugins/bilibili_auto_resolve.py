@@ -168,7 +168,7 @@ async def _resolve_and_send(bot, event, url):
 
 
 async def _fetch_and_reply(bot, event, video_ref):
-    """下载视频并回复文件；失败、超限或多段时静默。返回是否已发送消息。"""
+    """下载 360P 视频并回复文件；失败、超限、多段或非 360P 时静默。返回是否已发送消息。"""
     try:
         post, _author = await bilibili._fetch_video_manual_post(video_ref)
         _video_url, video_data = await bilibili._fetch_video_url(post)
@@ -218,7 +218,9 @@ async def handle_bilibili_auto_resolve(
     if not url:
         return
 
-    allowed = await asyncio.to_thread(_read_gate, event.group_openid, _qq_bot_id(bot))
+    from plugins.bot_profiles import scope
+    with scope(_qq_bot_id(bot)):
+        allowed = await asyncio.to_thread(_read_gate, event.group_openid, _qq_bot_id(bot))
     if not allowed:
         return
 

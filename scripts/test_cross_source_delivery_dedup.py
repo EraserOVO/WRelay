@@ -193,34 +193,94 @@ async def _exercise_volatile_cache_bounds(tmp):
 
 
 async def _exercise_x_sources(tmp):
-    _set_database(Path(tmp) / "x.sqlite3")
+    _set_database(Path(tmp) / "x_rss.sqlite3")
     cursors = {}
+    post = {"id": "400", "cursor_id": "400", "text": "same original", "is_retweet": True, "original_id": "100"}
+    state = {
+        "version": 1,
+        "queues": {
+            "source-a": {"items": [{"id": post["id"], "cursor_id": "400", "post": dict(post)}], "deferred_skips": []},
+            "source-b": {"items": [{"id": "401", "cursor_id": "401", "post": {**post, "id": "401"}}], "deferred_skips": []},
+        },
+        "sent_at": [],
+    }
+    sources = [
+        {"key": "source-a", "name": "source-a"},
+        {"key": "source-b", "name": "source-b"},
+    ]
     sender = mock.AsyncMock(return_value={"G1": True})
-    with mock.patch.object(x_rss, "_load_source_groups", new=mock.AsyncMock(return_value=["G1"])), \
+    with mock.patch.object(x_rss, "get_bots", return_value={"qq": object()}), \
+            mock.patch.object(x_rss, "QQBot", object), \
             mock.patch.object(x_rss, "_ensure_baselines", new=mock.AsyncMock()), \
-            mock.patch.object(x_rss, "load_last_messages_async", new=mock.AsyncMock(return_value=cursors)), \
+            mock.patch.object(x_rss, "_load_source_groups", new=mock.AsyncMock(return_value=["G1"])), \
             mock.patch.object(
-                x_rss,
-                "_load_source_delivery_config",
-                new=mock.AsyncMock(return_value={"filter": {}, "translation": {"show_datetime": False}}),
-            ), mock.patch.object(x_rss, "check_x_post_filter", return_value=True), \
-            mock.patch.object(x_rss, "_render_post", new=mock.AsyncMock(return_value=(["text"], []))), \
-            mock.patch.object(x_rss, "translate_text_parts", new=mock.AsyncMock(side_effect=lambda parts, *args, **kwargs: parts)), \
-            mock.patch.object(x_rss, "record", new=mock.AsyncMock()), \
-            mock.patch.object(retry, "send_relay_message", new=sender), \
-            mock.patch.object(
-                retry,
-                "update_last_messages",
-                new=_cursor_writer(cursors),
-            ), mock.patch.object(retry, "_purge_delivered_async", new=mock.AsyncMock()):
-        post = {"id": "300", "text": "same X post"}
-        first = await x_rss._send_posts({"key": "source-a", "name": "source-a"}, [post])
-        second = await x_rss._send_posts({"key": "source-b", "name": "source-b"}, [post])
+        x_rss,
+        "_load_x_protection_config",
+        new=mock.AsyncMock(return_value={"min_send_interval": 0, "hourly_limit": 10, "backlog_limit": 10}),
+    ), mock.patch.object(
+        x_rss,
+        "_load_protection_state_async",
+        new=mock.AsyncMock(return_value=(state, "")),
+    ), mock.patch.object(
+        x_rss,
+        "_load_polling_snapshot",
+        new=mock.AsyncMock(return_value=(sources, {"source-a": ["G1"], "source-b": ["G1"]})),
+    ), mock.patch.object(
+        x_rss,
+        "load_last_messages_async",
+        new=mock.AsyncMock(return_value=cursors),
+    ), mock.patch.object(
+        x_rss,
+        "_load_source_delivery_config",
+        new=mock.AsyncMock(return_value={"filter": {}, "translation": {}}),
+    ), mock.patch.object(
+        x_rss,
+        "check_x_post_filter",
+        return_value=True,
+    ), mock.patch.object(
+        x_rss,
+        "_render_post",
+        new=mock.AsyncMock(return_value=(["text"], [])),
+    ), mock.patch.object(
+        x_rss,
+        "translate_text_parts",
+        new=mock.AsyncMock(side_effect=lambda parts, *args, **kwargs: parts),
+    ), mock.patch.object(
+        x_rss,
+        "_save_protection_state_async",
+        new=mock.AsyncMock(return_value=True),
+    ), mock.patch.object(
+        x_rss,
+        "_flush_deferred_skips",
+        new=mock.AsyncMock(),
+    ), mock.patch.object(
+        x_rss,
+        "record",
+        new=mock.AsyncMock(),
+    ), mock.patch.object(
+        retry,
+        "send_relay_message",
+        new=sender,
+    ), mock.patch.object(
+        retry,
+        "update_last_messages",
+        new=_cursor_writer(cursors),
+    ), mock.patch.object(
+        retry,
+        "_purge_delivered_async",
+        new=mock.AsyncMock(),
+    ):
+        first = await x_rss._dispatch_one_locked()
+        second = await x_rss._dispatch_one_locked()
 
-    assert first == (1, 1, 0)
-    assert second == (0, 0, 0)
+    assert first == 0
+    assert second == 30
     assert sender.await_count == 1
-    print("PASS - X 多来源重叠投稿只向同一 QQ 群发送一次")
+    assert state["queues"]["source-a"]["items"] == []
+    assert state["queues"]["source-b"]["items"] == []
+    assert len(state["sent_at"]) == 1
+    assert cursors["x_rss:source-b"]["G1"] == "401"
+    print("PASS - X 不同转推 ID 的同一原推只发送一次且跳过不消耗限速配额")
 
 
 async def _exercise_bilibili_sources(tmp):

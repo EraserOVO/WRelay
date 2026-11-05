@@ -12,7 +12,12 @@ nonebot.init()
 
 from plugins import fetch
 from plugins import media
-from plugins.filter import MESSAGE_TYPE_AUDIO, MESSAGE_TYPE_FILE, MESSAGE_TYPE_IMAGE
+from plugins.filter import (
+    MESSAGE_TYPE_AUDIO,
+    MESSAGE_TYPE_FILE,
+    MESSAGE_TYPE_IMAGE,
+    MESSAGE_TYPE_TEXT,
+)
 
 
 async def main():
@@ -66,6 +71,7 @@ async def main():
     assert len(media_items) == 1
     assert media_items[0]["kind"] == "视频"
     assert media_items[0]["segment"].type == "file_video"
+    assert media_items[0]["no_link_fallback"] is True
     assert len(text_parts) == 1, text_parts
     print("PASS - Discord 视频附件以 QQ 视频富媒体发送")
 
@@ -108,7 +114,42 @@ async def main():
         if getattr(part, "type", None) == "text"
     )
     assert audio_url in text_content, text_content
-    print("PASS - 图片、音频、视频共用下载渲染且失败时保留链接")
+    print("PASS - 图片、音频、视频共用下载渲染，图片/音频失败保留链接")
+
+    with mock.patch.object(fetch, "fetch_bytes_many", return_value={}):
+        text_parts, media_items, has_content = await fetch.build_parts(
+            message,
+            enabled_types={MESSAGE_TYPE_FILE},
+        )
+        text_content = "".join(
+            part.data.get("text", "")
+            for part in text_parts
+            if getattr(part, "type", None) == "text"
+        )
+        assert has_content is False
+        assert media_items == []
+        assert "[视频]" not in text_content
+        assert video_url not in text_content
+
+        text_and_video = {
+            **message,
+            "content": "正文内容",
+            "attachments": [{"url": video_url, "filename": "clip.mp4"}],
+        }
+        text_parts, media_items, has_content = await fetch.build_parts(
+            text_and_video,
+            enabled_types={MESSAGE_TYPE_TEXT, MESSAGE_TYPE_FILE},
+        )
+        text_content = "".join(
+            part.data.get("text", "")
+            for part in text_parts
+            if getattr(part, "type", None) == "text"
+        )
+        assert has_content is True
+        assert media_items == []
+        assert "正文内容" in text_content
+        assert "[视频]" not in text_content
+    print("PASS - 视频下载失败时跳过且不补链接，纯视频消息不发送")
 
     file_url = "https://cdn.discordapp.com/attachments/notes.txt"
     file_message = {

@@ -107,7 +107,7 @@ async def main():
     active_finished = threading.Event()
     send_finished = asyncio.Event()
 
-    def slow_active_groups():
+    def slow_active_groups(*_args):
         active_started.set()
         time.sleep(0.3)
         active_finished.set()
@@ -120,7 +120,7 @@ async def main():
     due_config = {
         "enabled": True,
         "target_groups": ["group-1"],
-        "messages": [{"id": "due", "content": "scheduled", "schedule_type": "interval"}],
+        "messages": [{"id": "due", "content": "scheduled", "schedule_type": "interval", "target_groups": ["group-1"]}],
     }
     schedule_calls = 0
 
@@ -139,7 +139,7 @@ async def main():
         ),
         mock.patch.object(
             scheduled_message,
-            "get_active_groups",
+            "_message_target_groups",
             side_effect=slow_active_groups,
         ),
         mock.patch.object(scheduled_message, "next_scheduled_at", side_effect=due_once),
@@ -229,6 +229,7 @@ async def main():
                 "id": "invalid-date",
                 "content": "不会发送",
                 "schedule_type": "calendar",
+                "target_groups": ["group-1"],
                 "calendar_type": "yearly",
                 "month": 4,
                 "day": 31,
@@ -238,6 +239,7 @@ async def main():
                 "id": "valid-message",
                 "content": "正常消息",
                 "schedule_type": "interval",
+                "target_groups": ["group-1"],
             },
         ],
     }
@@ -265,7 +267,7 @@ async def main():
             "get_scheduled_message_config",
             return_value=config,
         ),
-        mock.patch.object(scheduled_message, "get_active_groups", return_value=["group-1"]),
+        mock.patch.object(scheduled_message, "_message_target_groups", return_value=["group-1"]),
         mock.patch.object(scheduled_message, "next_scheduled_at", side_effect=next_time),
         mock.patch.object(
             scheduled_message, "send_relay_message", new_callable=mock.AsyncMock,
@@ -292,11 +294,13 @@ async def main():
                 "id": "fails-once",
                 "content": "第一条",
                 "schedule_type": "interval",
+                "target_groups": ["group-1"],
             },
             {
                 "id": "continues",
                 "content": "第二条",
                 "schedule_type": "interval",
+                "target_groups": ["group-1"],
             },
         ],
     }
@@ -332,7 +336,7 @@ async def main():
             "get_scheduled_message_config",
             return_value=exception_config,
         ),
-        mock.patch.object(scheduled_message, "get_active_groups", return_value=["group-1"]),
+        mock.patch.object(scheduled_message, "_message_target_groups", return_value=["group-1"]),
         mock.patch.object(
             scheduled_message,
             "next_scheduled_at",
@@ -364,9 +368,9 @@ async def main():
         "enabled": True,
         "target_groups": ["group-1"],
         "messages": [
-            {"id": "bad-initial", "content": "不发送", "schedule_type": "interval"},
-            {"id": "bad-recalculation", "content": "重算异常", "schedule_type": "interval"},
-            {"id": "after-errors", "content": "继续发送", "schedule_type": "interval"},
+            {"target_groups": ["group-1"], "id": "bad-initial", "content": "不发送", "schedule_type": "interval"},
+            {"target_groups": ["group-1"], "id": "bad-recalculation", "content": "重算异常", "schedule_type": "interval"},
+            {"target_groups": ["group-1"], "id": "after-errors", "content": "继续发送", "schedule_type": "interval"},
         ],
     }
     calculation_calls = {}
@@ -404,7 +408,7 @@ async def main():
             "get_scheduled_message_config",
             return_value=calculation_error_config,
         ),
-        mock.patch.object(scheduled_message, "get_active_groups", return_value=["group-1"]),
+        mock.patch.object(scheduled_message, "_message_target_groups", return_value=["group-1"]),
         mock.patch.object(
             scheduled_message,
             "next_scheduled_at",

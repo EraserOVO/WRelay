@@ -557,6 +557,49 @@ async def _update_retry_after_send(
     await _save_pending_async()
 
 
+async def _send_profile_retry(channel_id, message_id, entry, owners):
+    from plugins import bot_profiles, config
+    result = {}
+    busy, deduplicated = set(), set()
+    for owner in owners:
+        if owner == "unassigned":
+            continue
+        with bot_profiles.scope(owner):
+            try:
+                data = await asyncio.to_thread(config._load_settings)
+                groups = [g["openid"] for g in data.get("qq_group_openids", [])
+                          if g.get("bot_id") == owner and g["openid"] in entry.groups]
+                if not groups:
+                    continue
+                route = await asyncio.to_thread(config.get_discord_relay_config, channel_id)
+                active = set(route["groups"]) if route else set()
+                skipped = [g for g in groups if g not in active]
+                targets = [g for g in groups if g in active]
+                rendered = await prepare_discord_message(entry.message, channel_id, message_id,
+                    source_label=entry.source_label, filter_config=await load_channel_filter(channel_id)) if targets else None
+                if rendered is None:
+                    skipped = groups
+                    targets = []
+                if skipped:
+                    await update_last_messages(lambda last: apply_skipped(
+                        normalize_channel_map(last, channel_id), skipped, message_id))
+                    result.update({g: True for g in skipped})
+                    await _purge_delivered_async(channel_id, message_id, skipped)
+                if targets:
+                    sent = await send_and_record(channel_id, message_id, *rendered, targets)
+                    result.update(sent)
+                    busy.update(getattr(sent, "busy_groups", ()))
+                    deduplicated.update(getattr(sent, "deduplicated_groups", ()))
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                registry = await asyncio.to_thread(bot_profiles.strict_read, config.SETTINGS_FILE)
+                busy.update(g["openid"] for g in registry.get("qq_group_openids", [])
+                            if g.get("bot_id") == owner and g.get("openid") in entry.groups)
+                logger.exception("Bot {} 延迟重试失败，保留待重试", owner)
+    return SendResult(result, busy_groups=busy, deduplicated_groups=deduplicated)
+
+
 async def _process_due(channel_id):
     """处理该频道所有到期的待重试条目（重试循环与测试共用）"""
     entries = _pending.get(channel_id)
@@ -575,6 +618,12 @@ async def _process_due(channel_id):
         ):
             continue
         requested_groups = set(entry.groups)
+        from plugins import bot_profiles, config
+        owners = await asyncio.to_thread(bot_profiles.ids, config.SETTINGS_FILE)
+        if owners:
+            ok_map = await _send_profile_retry(channel_id, message_id, entry, owners)
+            await _update_retry_after_send(channel_id, message_id, entries, requested_groups, ok_map)
+            continue
 
         logger.info(
             "延迟重试发送(第{}次) 频道{} 消息{} 群{}",

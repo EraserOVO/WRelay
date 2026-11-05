@@ -63,6 +63,10 @@ async def main():
             panel.RESTORE_BACKUP_DIR = str(root / "restore_backups")
             settings = panel.get_default_settings()
             Path(panel.SETTINGS_FILE).write_text(json.dumps(settings), encoding="utf-8")
+            uncertain_path = root / "personal_qq_uncertain.json"
+            uncertain = {"a" * 64: {"group": "personal:987654321", "account": "personal:123456789",
+                                     "channel_id": "x_rss:test", "message_id": "100", "created_at": 123.0}}
+            uncertain_path.write_text(json.dumps(uncertain), encoding="utf-8")
             Path(panel.DISCORD_LAST_FILE).write_text(json.dumps({"cursor": "100"}), encoding="utf-8")
             Path(panel.RETRY_PENDING_FILE).write_text(json.dumps({"version": 1, "entries": [], "last_error": "old"}), encoding="utf-8")
             connection = sqlite3.connect(panel.DELIVERY_DEDUP_DB_FILE)
@@ -119,12 +123,15 @@ async def main():
             runtime_archive = panel.create_backup_archive(True)
             with zipfile.ZipFile(io.BytesIO(runtime_archive), "r") as z:
                 assert "delivery_dedup.sqlite3" in z.namelist()
+                assert json.loads(z.read("personal_qq_uncertain.json")) == uncertain
+            uncertain_path.write_text("{}", encoding="utf-8")
             connection = sqlite3.connect(panel.DELIVERY_DEDUP_DB_FILE)
             try:
                 connection.execute("DELETE FROM delivered_items")
             finally:
                 connection.close()
             panel.restore_backup_archive(runtime_archive, True, True)
+            assert json.loads(uncertain_path.read_text(encoding="utf-8")) == uncertain
             connection = sqlite3.connect(panel.DELIVERY_DEDUP_DB_FILE)
             try:
                 row = connection.execute(
@@ -197,7 +204,8 @@ async def main():
             try:
                 panel.json_file_lock = recording_lock
                 panel.create_backup_archive(True)
-                assert acquired == sorted(panel._backup_targets().values())
+                targets = panel._backup_targets()
+                assert acquired == [targets[name] for name in sorted(targets, key=lambda name: (name != "settings.json", name))]
                 acquired.clear()
                 panel._save_restore_rollback = check_rollback
                 panel.restore_backup_archive(archive({

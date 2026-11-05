@@ -1172,22 +1172,33 @@ async def _append_embeds(
 
 
 async def _append_attachment_media(jobs, kind, segment_factory, text_parts, media_items):
-    """Download a group of attachments and append media or a link fallback."""
+    """下载一组附件并追加媒体；返回是否追加了任何媒体或链接。
+
+    图片/音频失败时降级为文字链接；视频失败时直接跳过，不补链接。
+    """
     if not jobs:
         return False
 
+    appended = False
     media_bytes_map = await fetch_bytes_many([url for url, _ in jobs])
     for url, filename in jobs:
         media_bytes = media_bytes_map.get(url)
         if media_bytes:
-            media_items.append({
+            item = {
                 "kind": kind,
                 "url": url,
                 "segment": segment_factory(media_bytes, filename),
-            })
+            }
+            if kind == "视频":
+                item["no_link_fallback"] = True
+            media_items.append(item)
+            appended = True
+        elif kind == "视频":
+            logger.warning("Discord 视频下载失败，跳过视频本体: {}", url)
         else:
             text_parts.append(make_media_link(kind, url))
-    return True
+            appended = True
+    return appended
 
 
 def _collect_attachment_jobs(
@@ -1285,7 +1296,8 @@ async def build_parts(
     - 回复引用行（↩ 用户名：被回复内容）位于 header 后、正文前；
       抓取失败时静默跳过，不进 has_content
     - 正文 + Emoji、embeds、附件统一渲染，媒体并发下载
-    - 下载失败降级为文字 + 原链接
+    - 图片/音频下载失败降级为文字 + 原链接；视频下载失败直接跳过，
+      不补链接，纯视频消息不发送
     - has_content 用于实时转发跳过空消息（仅 header 时）
     - source_label 区分消息来源（实时转发 / 启动补发）
     - enabled_types：消息类型筛选（plugins/filter.py 的类型名集合），

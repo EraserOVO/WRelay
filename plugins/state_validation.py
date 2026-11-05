@@ -1,5 +1,6 @@
 """Strict validation shared by verified backups and maintenance checks."""
 import math
+import re
 
 
 def _cursor(value):
@@ -35,6 +36,22 @@ def validate_runtime(name, data):
                         raise ValueError(name + '：投稿标识或游标无效')
                     if key == 'items' and not isinstance(item.get('post'), dict):
                         raise ValueError(name + '：投稿内容无效')
+    elif name == 'personal_qq_uncertain.json':
+        from plugins.personal_qq_config import PREFIX, numeric_id
+        if len(data) > 10000:
+            raise ValueError(name + '：记录数量超过上限')
+        for key, record in data.items():
+            if re.fullmatch(r'[a-f0-9]{64}', key) is None or not isinstance(record, dict):
+                raise ValueError(name + '：记录格式无效')
+            for field in ('group', 'account'):
+                value = record.get(field, '')
+                if not isinstance(value, str) or not value.startswith(PREFIX) or not numeric_id(value[len(PREFIX):]):
+                    raise ValueError(name + '：目标群或账号无效')
+            if any(not isinstance(record.get(field), str) for field in ('channel_id', 'message_id')):
+                raise ValueError(name + '：来源身份无效')
+            stamp = record.get('created_at')
+            if type(stamp) not in (int, float) or not math.isfinite(stamp) or stamp < 0:
+                raise ValueError(name + '：时间记录无效')
     elif name == 'retry_pending.json':
         if type(data.get('version', 1)) is not int or data.get('version', 1) != 1 or not isinstance(data.get('entries'), list):
             raise ValueError(name + '：重试队列结构无效')

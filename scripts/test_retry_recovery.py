@@ -109,6 +109,8 @@ class Ctx:
         retry_mod._pending_load_error = ""
         retry_mod._last_error = ""
         self._patch.start()
+        self._config_patch = mock.patch("plugins.config.SETTINGS_FILE", str(Path(self._retry_tempdir.name) / "settings.json"))
+        self._config_patch.start()
         retry_mod._LOOP_AUTO_START = False
         return self
 
@@ -117,6 +119,7 @@ class Ctx:
         retry_mod._inflight.clear()
         retry_mod._LOOP_AUTO_START = True
         self._patch.stop()
+        self._config_patch.stop()
         retry_mod._pending_load_error = self._pending_load_error
         retry_mod._last_error = self._last_error
         self._retry_tempdir.cleanup()
@@ -859,4 +862,5 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    with tempfile.TemporaryDirectory(prefix="wrelay_retry_settings_") as tmp, mock.patch("plugins.config.SETTINGS_FILE", str(Path(tmp) / "settings.json")):
+        asyncio.run(main())

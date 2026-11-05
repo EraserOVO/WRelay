@@ -80,10 +80,65 @@ async def check_content_error(source, fetch_failed):
     print(f"PASS - {source} {'抓取失败' if fetch_failed else '筛选为空'}：回复一次、不投递")
 
 
+async def check_video_only_silent():
+    """仅启用视频且视频本体拿不到时，不回复「消息被筛选」提示。"""
+    user = "user-1"
+    message = {"content": "link", "attachments": []}
+    bot = FakeBot()
+    post = {
+        "id": "BV1test",
+        "bvid": "BV1test",
+        "cid": 123,
+        "link": "https://www.bilibili.com/video/BV1test",
+        "post_type": "视频",
+        "media": [],
+    }
+
+    with ExitStack() as patches:
+        sync_values = {
+            "is_discord_url": False,
+            "is_x_status_url": None,
+            "parse_manual_post_url": True,
+            "get_all_channels": {},
+            "get_qq_c2c_relay_filter": {},
+            "get_x_c2c_relay_filter": {},
+            "get_bilibili_c2c_relay_filter": {},
+            "get_channel_translation_config": {},
+            "get_x_source_translation_config": {},
+            "get_enabled_message_types": {"视频"},
+            "localize_user_error": "诊断信息",
+        }
+        for name, value in sync_values.items():
+            patches.enter_context(mock.patch.object(command, name, return_value=value))
+        patches.enter_context(mock.patch.object(command, "is_user_authorized", return_value=True))
+        async_values = {
+            "fetch_message": (None, None),
+            "fetch_x_post": (None, "source", None),
+            "fetch_bilibili_manual_post": (post, "source", None),
+            "build_parts": ([], [], False),
+            "render_x_post": None,
+            "render_bilibili_post": None,
+        }
+        for name, value in async_values.items():
+            patches.enter_context(mock.patch.object(command, name, new=mock.AsyncMock(return_value=value)))
+        translator = patches.enter_context(mock.patch.object(command, "translate_text_parts", new=mock.AsyncMock()))
+        sender = patches.enter_context(mock.patch.object(command, "send_relay_message", new=mock.AsyncMock()))
+        stop = patches.enter_context(mock.patch.object(command, "_stop_propagation"))
+        await command._consume_next(
+            bot, SimpleNamespace(id="event-1"), message, ["group-1"], user,
+        )
+
+    assert bot.replies == [], bot.replies
+    assert translator.await_count == sender.await_count == 0
+    stop.assert_called_once()
+    print("PASS - 仅启用视频且拿不到视频：静默跳过，不回复筛选提示")
+
+
 async def main():
     for source in ("discord", "x", "bilibili"):
         await check_content_error(source, fetch_failed=True)
         await check_content_error(source, fetch_failed=False)
+    await check_video_only_silent()
 
 
 if __name__ == "__main__":
