@@ -6,6 +6,7 @@ import sys
 import tempfile
 import zipfile
 import importlib.util
+from importlib.machinery import SourceFileLoader
 from copy import deepcopy
 from pathlib import Path
 from unittest import mock
@@ -231,7 +232,8 @@ async def main():
         print("PASS - live Discord routing, retry rendering and requested backfill use account-specific settings")
 
         # Exercise the real protected panel routes without reading production credentials.
-        spec = importlib.util.spec_from_file_location("profile_test_panel", Path(__file__).resolve().parents[1] / "panel" / "管理面板.pyw")
+        panel_path = Path(__file__).resolve().parents[1] / "panel" / "管理面板.pyw"
+        spec = importlib.util.spec_from_file_location("profile_test_panel", panel_path, loader=SourceFileLoader("profile_test_panel", str(panel_path)))
         panel = importlib.util.module_from_spec(spec)
         old_stdout, old_stderr = sys.stdout, sys.stderr
         try:

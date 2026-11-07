@@ -22,7 +22,7 @@ from starlette.responses import Response
 ROOT = Path(__file__).resolve().parents[1]
 PANEL_PATH = ROOT / "panel" / "管理面板.pyw"
 _TEST_STDOUT = sys.stdout
-spec = importlib.util.spec_from_file_location("wrelay_panel_safety", PANEL_PATH)
+spec = importlib.util.spec_from_file_location("wrelay_panel_safety", PANEL_PATH, loader=importlib.machinery.SourceFileLoader("wrelay_panel_safety", str(PANEL_PATH)))
 panel = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(panel)
 # 面板模块为记录日志会接管 sys.stdout；测试结束后恢复控制台输出。

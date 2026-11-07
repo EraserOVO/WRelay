@@ -14,7 +14,8 @@ import httpx
 
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("wrelay_backup_panel", ROOT / "panel" / "管理面板.pyw")
+panel_path = ROOT / "panel" / "管理面板.pyw"
+spec = importlib.util.spec_from_file_location("wrelay_backup_panel", panel_path, loader=importlib.machinery.SourceFileLoader("wrelay_backup_panel", str(panel_path)))
 panel = importlib.util.module_from_spec(spec)
 saved_stdout = sys.stdout
 spec.loader.exec_module(panel)

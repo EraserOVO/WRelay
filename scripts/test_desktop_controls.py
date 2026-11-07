@@ -1,6 +1,7 @@
 """Isolated desktop preference/tray tests. Never starts or stops a real bot."""
 import ast
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -143,7 +144,8 @@ class DesktopTests(unittest.TestCase):
         self.action.assert_not_called()
 
     def test_native_menu_model_and_navigation(self):
-        import pystray
+        with patch.dict(os.environ, {"PYSTRAY_BACKEND": "dummy"} if sys.platform != "win32" else {}):
+            import pystray
         self.controls.dispatch = lambda action: action()
         menu = build_tray_menu(pystray, self.controls)
         for running in (True, False):

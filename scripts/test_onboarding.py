@@ -154,7 +154,8 @@ async def test_api():
     with tempfile.TemporaryDirectory(prefix="wrelay_onboarding_") as tmp:
         original_stdout, original_stderr = sys.stdout, sys.stderr
         with patch.object(paths, "DATA_DIR", Path(tmp)):
-            spec = importlib.util.spec_from_file_location("onboarding_test_panel", ROOT / "panel" / "管理面板.pyw")
+            panel_path = ROOT / "panel" / "管理面板.pyw"
+            spec = importlib.util.spec_from_file_location("onboarding_test_panel", panel_path, loader=importlib.machinery.SourceFileLoader("onboarding_test_panel", str(panel_path)))
             panel = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(panel)
             sys.stdout, sys.stderr = original_stdout, original_stderr

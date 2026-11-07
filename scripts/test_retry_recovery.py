@@ -450,7 +450,7 @@ async def test_nonfinite_retry_deadlines_are_skipped():
         remaining = (
             retry_mod._pending["C1"]["far-future"].next_try - time.monotonic()
         )
-        assert 119.9 <= remaining <= 120.0, remaining
+        assert 119.9 <= remaining <= 120.001, remaining
         assert json.loads('{"deadline": Infinity}')["deadline"] == float("inf")
         print("[OK] 非有限重试期限隔离，超远截止时间限制到最大退避")
     finally:

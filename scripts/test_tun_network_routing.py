@@ -21,7 +21,7 @@ def load_routing_function():
         if isinstance(node, ast.FunctionDef) and node.name == "_use_tun_network_routing"
     )
     module = ast.Module(body=[function], type_ignores=[])
-    namespace = {"os": os}
+    namespace = {"os": os, "_system_no_proxy": lambda: "localhost,[::1],127.0.0.1"}
     exec(compile(module, str(BOT_PATH), "exec"), namespace)
     return namespace["_use_tun_network_routing"]
 
@@ -49,12 +49,15 @@ def load_media_proxy_function():
 
 
 def main():
-    original = {key: os.environ.get(key) for key in PROXY_KEYS}
+    original = {key: os.environ.get(key) for key in (*PROXY_KEYS, "NO_PROXY", "no_proxy")}
     try:
+        for key in ("NO_PROXY", "no_proxy"):
+            os.environ.pop(key, None)
         for key in PROXY_KEYS:
             os.environ[key] = "http://127.0.0.1:7897"
         load_routing_function()()
         assert all(key not in os.environ for key in PROXY_KEYS)
+        assert os.environ["NO_PROXY"] == "localhost,127.0.0.1"
         get_proxy = load_media_proxy_function()
         proxy = "http://127.0.0.1:7897"
         assert get_proxy("https://media.example.net/image.png") is None
