@@ -2,7 +2,7 @@
 
 ## 自动检查
 
-运行 `python scripts/run_tests.py`。统一入口检查测试脚本登记状态，然后执行自动回归。CI 在 Ubuntu/Windows 与 Python 3.10/3.12 组合运行这条入口，并在 Windows 上单独构建测试安装包、执行安装冒烟检查。开发环境细节见 [构建指南](BUILDING.md)。
+运行 `python scripts/run_tests.py`。统一入口检查测试脚本登记状态，然后执行自动回归。CI 在 Ubuntu/Windows 与 Python 3.11/3.12 组合运行这条入口，并在 Windows 上单独构建未签名正式安装包、执行安装冒烟检查。开发环境细节见 [构建指南](BUILDING.md)。
 
 当前入口在项目目录运行测试，部分测试可能读取本机运行数据；发布前应在不含个人配置和 `data/` 的独立源码副本中验证，并避免不同测试共享运行数据。X 转发组测试使用固定 RSS 样例和模拟投递，不要求本机 RSSHub。
 

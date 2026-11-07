@@ -189,7 +189,7 @@ async def verify_cancelled_registration_waits_for_write():
                 pass
             else:
                 raise AssertionError("注册任务取消应在写入完成后传播")
-            save.assert_called_once_with("user-openid", "", "")
+            save.assert_called_once_with("user-openid", "", "", "bot-1")
         assert bot.sent == [], "已取消的请求不应发送迟到的成功回复"
     finally:
         release_write.set()
@@ -207,7 +207,7 @@ async def verify_menu_commands_submit_without_profile():
         ) as save_user,
     ):
         await registration.handle_register(user_bot, FakeUserEvent())
-    save_user.assert_called_once_with("user-openid", "", "")
+    save_user.assert_called_once_with("user-openid", "", "", "bot-1")
     assert "注册申请已提交" in sent_message_text(user_bot)
     assert "USER-2345" in sent_message_text(user_bot)
     assert "用法：" not in sent_message_text(user_bot)
@@ -308,7 +308,7 @@ async def main():
         FakeUserEvent(),
         "/注册",
         "register_user",
-        ("user-openid", "", ""),
+        ("user-openid", "", "", "bot-1"),
     )
     with mock.patch.object(
         registration,

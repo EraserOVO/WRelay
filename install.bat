@@ -20,7 +20,7 @@ if not defined PYTHON_EXE (
     ) else (
         where python >nul 2>&1
         if errorlevel 1 (
-            echo [错误] 未找到 Python 3.10+，请安装 Python 或使用 WRelay 安装包。
+            echo [错误] 未找到 Python 3.11+，请安装 Python 或使用 WRelay 安装包。
             pause
             exit /b 1
         )
@@ -41,9 +41,9 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-"%PYTHON_EXE%" -c "import sys; print('Python ' + sys.version.split()[0]); raise SystemExit(0 if sys.version_info >= (3,10) else 1)"
+"%PYTHON_EXE%" -c "import sys; print('Python ' + sys.version.split()[0]); raise SystemExit(0 if sys.version_info >= (3,11) else 1)"
 if errorlevel 1 (
-    echo [错误] Python 版本低于 3.10，请安装 Python 3.10+ 或使用 WRelay 安装包。
+    echo [错误] Python 版本低于 3.11，请安装 Python 3.11+ 或使用 WRelay 安装包。
     pause
     exit /b 1
 )

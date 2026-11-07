@@ -92,7 +92,7 @@ async def main():
         "get_scheduled_message_config",
         side_effect=slow_disabled_config,
     ):
-        task = asyncio.create_task(scheduled_message._scheduled_message_loop())
+        task = asyncio.create_task(scheduled_message._scheduled_owner_loop())
         started = time.monotonic()
         await asyncio.sleep(0)
         elapsed = time.monotonic() - started
@@ -149,7 +149,7 @@ async def main():
             side_effect=finish_send,
         ),
     ):
-        task = asyncio.create_task(scheduled_message._scheduled_message_loop())
+        task = asyncio.create_task(scheduled_message._scheduled_owner_loop())
         assert await asyncio.wait_for(
             asyncio.to_thread(active_started.wait, 1), timeout=1
         )
@@ -277,7 +277,7 @@ async def main():
         mock.patch.object(scheduled_message.asyncio, "sleep", side_effect=stop_after_two_checks),
     ):
         try:
-            await scheduled_message._scheduled_message_loop()
+            await scheduled_message._scheduled_owner_loop()
         except asyncio.CancelledError:
             pass
         else:
@@ -355,7 +355,7 @@ async def main():
         ),
     ):
         try:
-            await scheduled_message._scheduled_message_loop()
+            await scheduled_message._scheduled_owner_loop()
         except asyncio.CancelledError:
             pass
         else:
@@ -427,7 +427,7 @@ async def main():
         ),
     ):
         try:
-            await scheduled_message._scheduled_message_loop()
+            await scheduled_message._scheduled_owner_loop()
         except asyncio.CancelledError:
             pass
         else:

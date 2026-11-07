@@ -2,7 +2,7 @@
 
 ## 源码运行
 
-- Windows 10/11；源码运行需要 64 位 Python 3.10 或更高版本。
+- Windows 10/11；源码运行需要 64 位 Python 3.11 或更高版本。
 - 在项目目录运行 install.bat 安装锁定依赖并创建本机配置，再运行 启动面板.bat。
 - install.bat 会从 .env.example 创建 .env.prod。请只在本机填写凭据，不要提交该文件。
 - 完整安装与账号配置步骤见 [安装指南](SETUP.md)。
@@ -15,7 +15,7 @@
 python scripts/run_tests.py
 ```
 
-GitHub Actions 在 Ubuntu 和 Windows 上检查 Python 3.10 与 3.12，安装锁定依赖、检查空白错误、编译源文件并执行回归。工作流中的第三方 Actions 固定到完整提交 SHA；更新时应先核对上游正式版本。Windows 工作流还会构建未签名测试安装包并运行安装冒烟检查。手工界面检查和需要真实账号的投递检查不会由 CI 执行；请仅使用获授权的测试账号和群。
+GitHub Actions 在 Ubuntu 和 Windows 上检查 Python 3.11 与 3.12，安装锁定依赖、检查空白错误、编译源文件并执行回归。工作流中的第三方 Actions 固定到完整提交 SHA；更新时应先核对上游正式版本。Windows 工作流还会构建未签名正式安装包并在隔离环境运行安装冒烟检查，不发布该安装包。手工界面检查和需要真实账号的投递检查不会由 CI 执行；请仅使用获授权的测试账号和群。
 
 ## Windows 安装包
 

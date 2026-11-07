@@ -32,6 +32,7 @@ TESTS = (
     "test_personal_qq.py",
     "test_personal_qq_inbound.py",
     "test_bot_profiles.py",
+    "test_account_cards.py",
     "test_message_trace.py",
     "test_x_rss_send_results.py",
     "test_x_forwarding_groups.py",

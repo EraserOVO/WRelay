@@ -12,7 +12,7 @@ QQ 私聊命令执行的 QQ → QQ 手动转发。不提供 QQ → Discord 自�
 ## 1. 前置条件
 
 - Windows 10 / 11
-- 正式安装包无需预装 Python；仅源码安装需要 64 位 Python 3.10 或更高版本（安装时勾选 **Add to PATH**）
+- 正式安装包无需预装 Python；仅源码安装需要 64 位 Python 3.11 或更高版本（安装时勾选 **Add to PATH**）
 - QQ 官方机器人账号；选择 Discord 用途时还需 Discord Bot 与可访问 Discord 的网络（见第 7 节）
 - 选择 X/Bilibili 用途时需可访问的 RSSHub 服务；YouTube 使用官方频道 RSS，不需要 RSSHub；这三种用途都无需配置 Discord
 

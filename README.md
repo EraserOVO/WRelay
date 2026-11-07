@@ -202,7 +202,7 @@ WRelay 是一个基于 NoneBot2 的 Windows 消息转发服务。当前代码包
 
 ## 快速开始（Windows）
 
-当前安装脚本和桌面程序仅支持 Windows。正式安装包提供带 WRelay 名称和图标的可执行程序，目标电脑无需预装 Python；源码运行需要 Python 3.10 及以上。安装包会在缺少 WebView2 Runtime 时安装该组件。
+当前安装脚本和桌面程序仅支持 Windows。正式安装包提供带 WRelay 名称和图标的可执行程序，目标电脑无需预装 Python；源码运行需要 Python 3.11 及以上。安装包会在缺少 WebView2 Runtime 时安装该组件。
 
 1. 正式安装包使用编译后的 `WRelay.exe` 桌面程序和 `WRelay.Bot.exe` 机器人程序，安装时从 `.env.example` 生成 `.env.prod`；源码目录运行 `install.bat` 时，如果没有内置 Python，则创建 `.venv` 并安装项目依赖。
 
