@@ -14,7 +14,7 @@
     '<header class="modal-header"><div class="modal-heading"><h3 id="onboardingTitle">配置向导</h3><p>跟随步骤，完成你的第一条转发</p></div>' +
     '<div class="modal-header-actions"><button type="button" class="modal-x" id="onboardingClose" aria-label="稍后配置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div></header>' +
     '<div class="modal-body"><ol class="onboarding-steps" aria-label="配置步骤"></ol><fieldset id="onboardingForm"></fieldset><p id="onboardingNotice" role="status" aria-live="polite"></p></div>' +
-    '<footer class="modal-footer"><button type="button" class="sec" id="onboardingLater">稍后配置</button><button type="button" class="sec" id="onboardingBack">上一步</button><button type="button" id="onboardingNext">下一步</button></footer></section>';
+    '<footer class="modal-footer onboarding-footer"><div class="onboarding-footer-group"><button type="button" class="sec" id="onboardingLater">稍后配置</button><button type="button" class="sec" id="onboardingRestart">重新开始</button></div><div class="onboarding-footer-group"><button type="button" class="sec" id="onboardingBack">上一步</button><button type="button" id="onboardingNext">下一步</button></div></footer></section>';
   document.body.append(modal);
   const el = id => document.getElementById(id);
   const esc = escapeHtml;
@@ -22,7 +22,11 @@
   function fresh() { return {purpose: "discord", step: "0", bot_id: "", source_id: "", source_kind: "up", source_value: "", rsshub: "", name: "", groups: [], users: []}; }
   function notice(text, error) { el("onboardingNotice").textContent = text || ""; el("onboardingNotice").dataset.error = String(!!error); }
   function checked(result) { if (!result || result.ok === false) throw new Error(result?.msg || "操作失败，请稍后重试"); return result; }
-  async function post(url, body) { return checked(await jpost(url, body)); }
+  function accountUrl(url) {
+    const owner = (credentials.bots || []).some(bot => bot.appid === draft.bot_id) ? draft.bot_id : "";
+    return owner ? url + (url.includes("?") ? "&" : "?") + "bot_id=" + encodeURIComponent(owner) : url;
+  }
+  async function post(url, body) { return checked(await jpost(accountUrl(url), body)); }
   function button(action, text) { return '<button type="button" class="sec" data-setup="' + action + '">' + text + '</button>'; }
   function option(value, text, selected) { return '<option value="' + esc(value) + '"' + (value === selected ? ' selected' : '') + '>' + esc(text) + '</option>'; }
   function field(key, label, placeholder, type) { return '<label>' + label + '<input data-draft="' + key + '" value="' + esc(draft[key] || "") + '" placeholder="' + esc(placeholder || "") + '" type="' + (type || "text") + '"></label>'; }
@@ -39,13 +43,14 @@
     saved = result.state;
   }
   async function refresh() {
-    const [s, r, h, o] = await Promise.all([jget("/api/settings"), jget("/api/registrations"), jget("/api/status"), jget("/api/onboarding")]);
+    const [s, r, h, o] = await Promise.all([jget(accountUrl("/api/settings")), jget(accountUrl("/api/registrations")), jget(accountUrl("/api/status")), jget("/api/onboarding")]);
     snapshot = checked(s); registrations = checked(r); health = checked(h); credentials = checked(o).credentials;
   }
   function controls() {
     form.disabled = busy;
     el("onboardingClose").disabled = busy;
     el("onboardingLater").disabled = busy;
+    el("onboardingRestart").disabled = busy;
     el("onboardingBack").disabled = busy || Number(draft.step) === 0 || Number(draft.step) === 6;
     el("onboardingNext").disabled = busy;
     el("onboardingNext").textContent = busy ? "请稍候…" : Number(draft.step) === 5 ? "确认并启用" : Number(draft.step) === 6 ? "完成" : "下一步";
@@ -156,11 +161,11 @@
   }
   async function close() {
     if (busy) return;
-    await run(async () => { await persist(); modal.style.display = "none"; form.innerHTML = ""; trigger?.focus(); await reloadMain(); });
+    await run(async () => { capture(); await persist(); modal.style.display = "none"; form.innerHTML = ""; trigger?.focus(); await reloadMain(); });
   }
   async function reloadMain() {
     settings = await jget("/api/settings");
-    qqBotIds = (credentials.bots || []).map(bot => bot.appid);
+    qqBotIds = (credentials.bots || []).map(bot => bot.appid).concat(personalQQConnections.map(item => "personal:" + item.uin));
     renderSettings(); await refreshStatus();
   }
   async function next() {
@@ -185,7 +190,7 @@
       if (step === 3 && !draft.groups.length) throw new Error("请至少勾选一个接收群");
       if (step === 4) {
         if (draft.purpose === "discord" && !draft.source_id && !draft.source_value) throw new Error("请扫描并选择一个频道");
-        if (["x", "bilibili"].includes(draft.purpose)) { notice("正在检测来源，请稍候…"); checked(await jpost("/api/onboarding/probe", draft)); }
+        if (["x", "bilibili"].includes(draft.purpose)) { notice("正在检测来源，请稍候…"); checked(await jpost(accountUrl("/api/onboarding/probe"), draft)); }
       }
       if (step === 5) {
         const result = await post("/api/onboarding/apply", {draft, flow_id: saved.flow_id, revision: snapshot._revision}); saved = result.state; draft = {...saved.draft};
@@ -212,7 +217,7 @@
     probe: async () => { const r = await post("/api/onboarding/probe", draft); notice(r.msg); },
     verify: async () => {
       await refresh();
-      const r = checked(await jget("/api/message-trace?limit=200"));
+      const r = checked(await jget(accountUrl("/api/message-trace?limit=200")));
       const kind = {discord: "discord", x: "x_rss", bilibili: "bilibili"}[draft.purpose];
       let id = draft.source_id || draft.source_value;
       if (draft.purpose === "bilibili" && !draft.source_id) id = draft.source_kind + ":" + draft.source_value;
@@ -228,7 +233,11 @@
     else if (event.target.id === "onboardingChannel") { draft.source_value = event.target.value; draft.source_id = ""; const ch = scanned.find(item => String(item.id) === draft.source_value); draft.name = ch?.name || ""; render(); }
     else if (event.target.id === "onboardingSource") { capture(); if (draft.source_id) draft.source_value = ""; render(); }
   });
+  let overlayPress = false;
+  modal.addEventListener("pointerdown", event => { overlayPress = event.target === modal; });
   modal.addEventListener("click", event => {
+    if (overlayPress && event.target === modal) { overlayPress = false; close(); return; }
+    overlayPress = false;
     const target = event.target.closest("button");
     if (!target || busy) return;
     if (target.dataset.setup) run(actions[target.dataset.setup]);
@@ -243,6 +252,17 @@
   el("onboardingNext").onclick = next;
   el("onboardingClose").onclick = close;
   el("onboardingLater").onclick = close;
+  el("onboardingRestart").onclick = () => {
+    if (busy) return;
+    showConfirmDlg("重新开始配置向导", "将清除当前向导进度，从用途选择重新开始。已保存的账号和转发配置会保留。", () => run(async () => {
+      const previous = draft;
+      draft = fresh();
+      try { await persist(true); } catch (err) { draft = previous; throw err; }
+      scanned = [];
+      render();
+      el("onboardingNext").focus();
+    }), "重新开始");
+  };
   keyboardModalClosers.onboardingModal = close;
   el("btnOnboarding").onclick = () => open().catch(err => showAlert("配置向导", err.message));
   jget("/api/onboarding").then(result => { if (result.ok && result.show_welcome) return open(); }).catch(() => {});

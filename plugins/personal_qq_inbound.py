@@ -65,18 +65,52 @@ def content_event(bot, event):
     return record[1] if record else None
 
 
-def register_user(event):
+async def registration_nickname(bot, event):
+    """Prefer the event nickname; an optional protocol lookup fills missing data."""
+    nickname = str(getattr(event.sender, "nickname", "") or "").strip()
+    if nickname:
+        return nickname[:80]
+    try:
+        info = await asyncio.wait_for(bot.get_stranger_info(user_id=int(event.user_id)), 5)
+        if isinstance(info, dict) and str(info.get("user_id", event.user_id)) == str(event.user_id):
+            return str(info.get("nickname") or "").strip()[:80]
+    except Exception:
+        logger.info("个人 QQ 用户昵称查询不可用，继续登记")
+    return ""
+
+
+def register_user(event, nickname=""):
     """An explicit request is discoverable but never grants permission."""
     def mutate(data):
         entries = data.setdefault("qq_user_openids", [])
-        if any(item.get("openid") == user_id(event) for item in entries):
-            return
+        for item in entries:
+            if item.get("openid") == user_id(event):
+                if not item.get("qq_id"):
+                    item["qq_id"] = str(event.user_id)
+                if nickname and not item.get("name"):
+                    item["name"] = nickname
+                return
         if len(entries) >= LIMIT:
             raise ValueError("用户登记已达上限，请联系管理员")
         entries.append({"openid": user_id(event), "enabled": False,
-                        "name": str(getattr(event.sender, "nickname", "") or event.user_id)[:80],
+                        "name": nickname, "qq_id": str(event.user_id),
                         "remark": "个人 QQ 注册申请"})
-    update_json(config.SETTINGS_FILE, mutate, default={})
+    from plugins import bot_profiles
+    if bot_profiles.ids(config.SETTINGS_FILE):
+        # CURRENT is inherited from the inbound account context. A revision
+        # check prevents a concurrent panel edit from being overwritten.
+        for attempt in range(3):
+            revision = bot_profiles.revision(config.SETTINGS_FILE)
+            data = bot_profiles.read(config.SETTINGS_FILE)
+            mutate(data)
+            try:
+                bot_profiles.save(config.SETTINGS_FILE, data, expected_revision=revision)
+                break
+            except bot_profiles.ConcurrentWriteError:
+                if attempt == 2:
+                    raise
+    else:
+        update_json(config.SETTINGS_FILE, mutate, default={})
 
 
 def targets(bot, event):
@@ -209,7 +243,10 @@ async def confirm_restart(bot):
             await manage._clear_restart_pending_async()
             return
         try:
-            if await asyncio.to_thread(config.is_user_authorized, user):
+            from plugins.bot_profiles import scope
+            with scope("personal:" + str(bot.self_id)):
+                authorized = await asyncio.to_thread(config.is_user_authorized, user)
+            if authorized:
                 await bot.send_private_msg(user_id=int(user.split(":", 1)[1]), message="重启完毕")
         except Exception as exc:
             logger.warning("个人 QQ 重启确认失败: {}", type(exc).__name__)
@@ -235,8 +272,10 @@ async def dispatch(bot, event):
     text = event.get_plaintext().strip()
     private = getattr(event, "group_id", None) is None
     if private and text == "/注册":
-        await run_in_thread_to_completion(register_user, event)
-        await reply(bot, event, "已登记个人 QQ，请联系管理员在 QQ → QQ 页的白名单中明确启用。")
+        nickname = await registration_nickname(bot, event)
+        await run_in_thread_to_completion(register_user, event, nickname)
+        await reply(bot, event, "已登记个人 QQ。\nQQ 账号：{}\n昵称：{}\n请联系管理员在 QQ → QQ 页的白名单中明确启用。".format(
+            event.user_id, nickname or "未获取"))
         return
     authorized = await asyncio.to_thread(config.is_user_authorized, user_id(event))
     if text.startswith("/"):

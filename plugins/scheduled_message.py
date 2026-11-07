@@ -129,12 +129,14 @@ def _try_next_scheduled_at(now, message, key):
 
 def _message_target_groups(message):
     """按当前群与转发组配置解析一条定时消息的目标群。"""
-    return resolve_scheduled_targets(
-        message,
-        get_qq_group_entries(),
-        get_qq_forwarding_groups(),
-        get_active_groups(),
-    )
+    from plugins.bot_profiles import CURRENT
+    owner = CURRENT.get()
+    groups = get_qq_group_entries()
+    if owner:
+        groups = [group for group in groups if str(group.get("bot_id") or "") == owner]
+    allowed = {str(group.get("openid") or "") for group in groups}
+    active = [group for group in get_active_groups() if not owner or str(group) in allowed]
+    return resolve_scheduled_targets(message, groups, get_qq_forwarding_groups(), active)
 
 
 def _message_has_targets(message):
@@ -155,7 +157,7 @@ def _message_has_targets(message):
     return bool((message or {}).get("target_groups"))
 
 
-async def _scheduled_message_loop():
+async def _scheduled_owner_loop():
     """每秒检查配置，分别处理每条消息的下一次发送时间。
 
     每条消息可自带目标（指定群 / QQ→QQ 转发组 / 全部群）；缺少目标的旧消息
@@ -274,6 +276,40 @@ async def _scheduled_message_loop():
         except Exception:
             logger.exception("定时消息循环异常")
             await asyncio.sleep(1)
+
+
+async def _scheduled_message_loop():
+    """Keep one independent scheduler per configured account."""
+    from plugins import bot_profiles, config
+    tasks = {}
+
+    async def run_owner(owner):
+        with bot_profiles.scope(owner):
+            await _scheduled_owner_loop()
+
+    try:
+        while True:
+            try:
+                owners = await asyncio.to_thread(bot_profiles.ids, config.SETTINGS_FILE)
+                owners = [owner for owner in owners if owner != "unassigned"] or ([""] if not owners else [])
+                for owner in list(tasks):
+                    if owner not in owners or tasks[owner].done():
+                        task = tasks.pop(owner)
+                        if not task.done():
+                            task.cancel()
+                        await asyncio.gather(task, return_exceptions=True)
+                for owner in owners:
+                    if owner not in tasks:
+                        tasks[owner] = asyncio.create_task(run_owner(owner))
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("读取定时消息账号列表失败")
+            await asyncio.sleep(5)
+    finally:
+        for task in tasks.values():
+            task.cancel()
+        await asyncio.gather(*tasks.values(), return_exceptions=True)
 
 
 @get_driver().on_bot_connect

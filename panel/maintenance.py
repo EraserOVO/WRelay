@@ -156,7 +156,11 @@ class MaintenanceService:
             status = self.bot_get(endpoint, timeout=5)
             if not isinstance(status, dict):
                 continue
-            if status.get('protection_error'):
+            config_failure = status.get('config_error') or status.get('last_result') == 'config_failed'
+            if config_failure:
+                alerts['config:' + label] = label + ' 账号配置读取失败，相关账号的自动投递已暂停。请检查配置，并确认机器人和面板已更新及重启。'
+            legacy_config_failure = not status.get('config_error') and status.get('last_result') == 'config_failed'
+            if status.get('protection_error') and not legacy_config_failure:
                 alerts['protection:' + label] = label + ' 投递保护异常，自动投递已暂停，请检查维护与备份。'
             for item in status.get('source_health', []):
                 if item.get('consecutive_failures', 0) >= 3:

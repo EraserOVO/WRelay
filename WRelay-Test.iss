@@ -3,7 +3,7 @@
   #error CompiledRoot is required
 #endif
 #ifndef BuildVersion
-  #define BuildVersion "0.1.0"
+  #define BuildVersion "0.3.1"
 #endif
 #ifndef BuildId
   #error BuildId is required

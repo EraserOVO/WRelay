@@ -18,7 +18,7 @@ def portable(settings_file, owner):
             return {k: clean(v) for k, v in value.items() if not any(word in k.lower() for word in ("secret", "token", "password", "api_key"))}
         return [clean(x) for x in value] if isinstance(value, list) else value
     return dict(format="wrelay-bot-export", version=1, origin_bot=owner,
-        config=clean(profile["config"]), targets=[{k: item.get(k, "") for k in ("openid", "name", "qq_id", "bot_id")}
+        config=clean({k: v for k, v in profile["config"].items() if k not in (store.USER_KEY, *store.CARD_KEYS)}), targets=[{k: item.get(k, "") for k in ("openid", "name", "qq_id", "bot_id")}
         for item in data.get("qq_group_openids", []) if item.get("openid") in used])
 
 
@@ -28,6 +28,8 @@ def prepare(settings_file, owner, body):
     if not isinstance(document, dict) or document.get("format") != "wrelay-bot-export" or type(document.get("version")) is not int or document.get("version") != 1:
         raise ValueError("请选择支持版本的 Bot 配置 JSON")
     incoming = deepcopy(document.get("config"))
+    if isinstance(incoming, dict) and any(k in incoming for k in (store.USER_KEY, *store.CARD_KEYS)):
+        raise ValueError("导入文件不能包含用户授权、定时计划或翻译设置")
     store.validate_profile(dict(format="wrelay-bot-profile", version=1, bot_id=owner, config=incoming), owner)
     mode = body.get("mode", "merge")
     if mode not in ("merge", "replace"):
@@ -71,7 +73,8 @@ def prepare(settings_file, owner, body):
     candidate = deepcopy(data)
     if mode == "replace":
         for key in store.OWNED:
-            candidate.pop(key, None)
+            if key not in (store.USER_KEY, *store.CARD_KEYS):
+                candidate.pop(key, None)
         candidate.update(incoming)
     else:
         for key in store.LIST_KEYS:

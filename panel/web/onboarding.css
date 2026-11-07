@@ -25,5 +25,7 @@
 #onboardingNotice[data-error="true"] { color: var(--error); }
 #onboardingModal .onboarding-summary { margin: 16px 0; padding: 16px; background: var(--card-bg); border: 1px solid var(--panel-border); border-radius: var(--radius-card); line-height: 1.8; overflow-wrap: anywhere; }
 #onboardingModal code { overflow-wrap: anywhere; user-select: text; }
-#onboardingLater { margin-right: auto; }
+#onboardingModal .onboarding-footer { justify-content: space-between; }
+#onboardingModal .onboarding-footer-group { display: flex; flex-wrap: wrap; gap: 8px; }
+#onboardingModal .onboarding-footer-group button { min-width: 88px; }
 @media (max-width: 620px) { .onboarding-options, .onboarding-fields { grid-template-columns: minmax(0, 1fr); } }

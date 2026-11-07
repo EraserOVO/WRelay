@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN = {".py", ".pyw", ".pyc", ".pyo", ".cs", ".c", ".cpp", ".h", ".pdb", ".map"}
 WEB_FILES = ("index.html", "app.js", "style.css", "desktop.js", "local-api.js", "discord-page.js",
              "ui-components.js", "ui-components.css", "onboarding.js", "onboarding.css", "wrelay-logo.svg",
-             "personal-qq.js", "personal-qq.css", "bot-profiles.js")
+             "personal-qq.js", "personal-qq.css", "bot-profiles.js", "wrelay-loader.svg")
 
 
 def run(args, **kwargs):

@@ -157,6 +157,17 @@ def desktop_smoke(folder, base, edition="test"):
         run_value = autostart_run_value(value_name)
         assert autostart["ok"] and autostart["enabled"] and run_value
         assert str(folder / "WRelay.exe") in run_value and run_value.endswith("--autostart")
+        if edition == "release":
+            # Simulate an older upgrade left pointing at a previous install;
+            # the installer migration must refresh the value to this image.
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, AUTOSTART_RUN_KEY) as key:
+                winreg.SetValueEx(key, value_name, 0, winreg.REG_SZ,
+                                  '"C:\\Old WRelay\\WRelay.exe" --autostart')
+            subprocess.run([str(folder / "WRelay.exe"), "--migrate-autostart"],
+                           cwd=base, check=True, timeout=30,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+            run_value = autostart_run_value(value_name)
+            assert str(folder / "WRelay.exe") in run_value and run_value.endswith("--autostart")
         assert request("/api/autostart/set", {"enabled": False})["ok"]
         assert autostart_run_value(value_name) is None
         assert not any(path.exists() for path in legacy_startup_paths)

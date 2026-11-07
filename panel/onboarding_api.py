@@ -121,6 +121,9 @@ def install_onboarding(app, namespace):
 
     def apply_configuration(body):
         draft = clean_draft(body.get("draft"))
+        from plugins.bot_profiles import CURRENT, ids
+        if ids(p.SETTINGS_FILE) and CURRENT.get() != draft["bot_id"]:
+            raise ValueError("向导账号与当前工作区不同，请重新选择账号")
         with lock:
             saved = state()
             if not saved.get("flow_id") or saved["flow_id"] != body.get("flow_id"):

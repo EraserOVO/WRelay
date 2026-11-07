@@ -86,6 +86,8 @@ def _record_delivery_sync(
     ok_map,
     note,
 ):
+    from plugins.bot_profiles import CURRENT
+    owner = CURRENT.get()
     now = int(time.time())
     order = time.time_ns()
     channel = str(channel_id or "").strip()
@@ -95,7 +97,8 @@ def _record_delivery_sync(
     result_map = {str(group): bool(ok) for group, ok in (ok_map or {}).items()}
     preview = _preview_text(text_parts)
     media_count = len(media_items or ())
-    trace_key = "message:%s:%s" % (channel, message) if message else "event:" + uuid.uuid4().hex
+    trace_key = ("message:%s:%s:%s" % (owner, channel, message) if owner else
+                 "message:%s:%s" % (channel, message)) if message else "event:" + uuid.uuid4().hex
 
     def mutate(entries):
         if not isinstance(entries, list):
@@ -110,6 +113,7 @@ def _record_delivery_sync(
         if entry is None:
             entry = {
                 "trace_key": trace_key,
+                "bot_id": owner,
                 "first_at": now,
                 "attempts": 0,
                 "groups": [],
@@ -156,7 +160,15 @@ def _record_delivery_sync(
             ),
             reverse=True,
         )
-        del entries[TRACE_LIMIT:]
+        owner_count = 0
+        kept = []
+        for item in entries:
+            if str(item.get("bot_id") or "") == owner:
+                owner_count += 1
+                if owner_count > TRACE_LIMIT:
+                    continue
+            kept.append(item)
+        entries[:] = kept
         return entries
 
     update_json(TRACE_FILE, mutate, default=[], indent=2)
@@ -184,7 +196,7 @@ async def record_delivery(
     )
 
 
-def get_delivery_traces(limit=50):
+def get_delivery_traces(limit=50, bot_id=None):
     """返回最近记录，限制在 1–200 条；不暴露内部 trace_key。"""
     try:
         limit = max(1, min(int(limit), TRACE_LIMIT))
@@ -197,6 +209,8 @@ def get_delivery_traces(limit=50):
     cleaned = []
     for entry in entries:
         if not isinstance(entry, dict):
+            continue
+        if bot_id is not None and str(entry.get("bot_id") or "") != bot_id:
             continue
         item = dict(entry)
         item["first_at"] = _safe_int(item.get("first_at"))

@@ -386,6 +386,10 @@ async def _watch_log_level_loop():
 driver.register_adapter(
     QQAdapter
 )
+# QQ 群聊与私聊功能依赖同一个网关订阅；适配器默认关闭该订阅。
+# 在启动时统一启用，不改写账号凭据或其他事件设置。
+for _qq_bot in nonebot.get_adapter(QQAdapter).qq_config.qq_bots:
+    _qq_bot.intent.c2c_group_at_messages = True
 driver.register_adapter(PersonalQQAdapter)
 
 

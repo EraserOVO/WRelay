@@ -29,6 +29,7 @@ function openExternal(url) {
 }
 
 document.addEventListener("click", function (event) {
+  if (event.defaultPrevented) return;
   const link = event.target.closest('a[target="_blank"]');
   if (link && window.pywebview && window.pywebview.api) {
     event.preventDefault();
@@ -46,6 +47,7 @@ async function loadDesktopPreferences() {
     const preferences = await api.get_desktop_preferences();
     savedCloseBehavior = preferences.close_behavior;
     select.value = savedCloseBehavior;
+    window.refreshWRelaySelectOptions?.(select);
     select.disabled = false;
     select.removeAttribute("title");
   } catch (error) {

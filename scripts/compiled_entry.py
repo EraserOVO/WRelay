@@ -42,7 +42,12 @@ def main():
         if EDITION != "release":
             return 1
         import wrelay_panel
-        return 0 if not wrelay_panel.get_autostart() or wrelay_panel.set_autostart(True) else 1
+        # Recreate the branded Run value on every release install/upgrade.
+        # Windows resolves the Task Manager name and icon from this command;
+        # leaving an older value untouched can retain a stale path/icon cache.
+        if not wrelay_panel.get_autostart():
+            return 0
+        return 0 if wrelay_panel.set_autostart(True) else 1
     if "--diagnose-channels" in sys.argv:
         import wrelay_diagnose
         return asyncio.run(wrelay_diagnose.main())

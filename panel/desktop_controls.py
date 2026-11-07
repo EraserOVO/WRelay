@@ -1,6 +1,7 @@
 """Desktop preferences and tray actions; no forwarding configuration is changed."""
 import json
 import os
+import re
 import threading
 
 CLOSE_BEHAVIORS = ("tray", "exit", "ask")
@@ -12,32 +13,76 @@ class DesktopPreferences:
         self.lock = threading.Lock()
         try:
             with open(path, encoding="utf-8") as stream:
-                value = json.load(stream).get("close_behavior")
-        except (OSError, ValueError, AttributeError):
-            value = None
+                data = json.load(stream)
+            if not isinstance(data, dict):
+                data = {}
+        except (OSError, ValueError):
+            data = {}
+        value = data.get("close_behavior")
         self.close_behavior = value if value in CLOSE_BEHAVIORS else "tray"
+        bot = data.get("last_qq_bot", "")
+        self.last_qq_bot = bot if self._valid_bot(bot) else ""
+        theme = data.get("window_theme")
+        self.window_theme = theme if theme in ("light", "dark") else None
+
+    @staticmethod
+    def _valid_bot(value):
+        return isinstance(value, str) and (not value or bool(re.fullmatch(
+            r"(?:[1-9][0-9]{0,19}|personal:[1-9][0-9]{4,19})", value)))
 
     def get(self):
         with self.lock:
-            return {"close_behavior": self.close_behavior}
+            return {"close_behavior": self.close_behavior, "last_qq_bot": self.last_qq_bot}
+
+    def _save(self, behavior, bot):
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        temporary = self.path + ".tmp"
+        try:
+            with open(temporary, "w", encoding="utf-8") as stream:
+                data = {"close_behavior": behavior, "last_qq_bot": bot}
+                if self.window_theme is not None:
+                    data["window_theme"] = self.window_theme
+                json.dump(data, stream, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.path)
+        finally:
+            if os.path.exists(temporary):
+                os.remove(temporary)
+        self.close_behavior = behavior
+        self.last_qq_bot = bot
 
     def set_close_behavior(self, value):
         if value not in CLOSE_BEHAVIORS:
             raise ValueError("未知的关闭窗口行为")
         with self.lock:
-            os.makedirs(os.path.dirname(self.path), exist_ok=True)
-            temporary = self.path + ".tmp"
-            try:
-                with open(temporary, "w", encoding="utf-8") as stream:
-                    json.dump({"close_behavior": value}, stream, ensure_ascii=False)
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                os.replace(temporary, self.path)
-            finally:
-                if os.path.exists(temporary):
-                    os.remove(temporary)
-            self.close_behavior = value
+            self._save(value, self.last_qq_bot)
         return self.get()
+
+    def set_last_qq_bot(self, value):
+        if not self._valid_bot(value):
+            raise ValueError("机器人账号标识无效")
+        with self.lock:
+            self._save(self.close_behavior, value)
+        return self.get()
+
+    def get_window_theme(self):
+        with self.lock:
+            return self.window_theme
+
+    def set_window_theme(self, value):
+        if value not in ("light", "dark"):
+            raise ValueError("未知的窗口主题")
+        with self.lock:
+            if self.window_theme == value:
+                return
+            previous = self.window_theme
+            self.window_theme = value
+            try:
+                self._save(self.close_behavior, self.last_qq_bot)
+            except Exception:
+                self.window_theme = previous
+                raise
 
 
 class DesktopControls:

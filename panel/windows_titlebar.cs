@@ -64,7 +64,7 @@ namespace WRelay.Desktop
             if (form.InvokeRequired) { form.BeginInvoke((Action)(() => SetLight(value))); return; }
             light = value;
             caption.BackColor = light ? Color.FromArgb(238, 241, 247) : Color.FromArgb(30, 34, 41);
-            caption.ForeColor = light ? Color.FromArgb(35, 39, 46) : Color.FromArgb(230, 232, 235);
+            caption.ForeColor = light ? Color.FromArgb(61, 77, 98) : Color.FromArgb(230, 232, 235);
             form.BackColor = caption.BackColor;
             caption.Refresh();
         }

@@ -5,8 +5,6 @@ const SVG_ORIGINAL_ON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="n
 const SVG_ORIGINAL_OFF = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 const SVG_TRASH = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>';
 const SVG_GRIP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>';
-const SVG_COPY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>';
-const SVG_CHECK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>';
 // 统一笔图标：空心笔、笔尖朝左下角（转发组重命名 / 频道名称编辑共用）
 const SVG_PEN = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>';
 const SVG_PAUSE = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>';
@@ -44,6 +42,7 @@ applyStatusSheenPreference(isStatusSheenEnabled());
 // 用户已保存的 dark/light 偏好始终照常恢复，不会被默认值覆盖
 const THEME_DEFAULT = THEME_DARK;
 function applyTheme(theme) {
+  document.documentElement.dataset.startupTheme = theme === THEME_LIGHT ? THEME_LIGHT : THEME_DARK;
   document.body.classList.toggle("theme-light", theme === THEME_LIGHT);
   const themeMode = document.getElementById("themeMode");
   if (themeMode) themeMode.value = theme === THEME_LIGHT ? THEME_LIGHT : THEME_DARK;
@@ -297,7 +296,8 @@ function enabledTotal(field) {
 }
 
 function renderOverviewCounts() {
-  const groups = enabledTotal("qq_group_openids");
+  const activeGroups = ((settings && settings.qq_group_openids) || []).filter(groupInActiveQQBotWorkspace);
+  const groups = {enabled: activeGroups.filter(function (item) { return item.enabled !== false; }).length, total: activeGroups.length};
   const users = enabledTotal("qq_user_openids");
   const routes = [
     ["overviewDiscordMeta", enabledTotal("discord_channels"), "频道"],
@@ -731,7 +731,7 @@ function renderStatus(st) {
   });
   const failedStat = document.getElementById("statsFailed");
   if (failedStat && Number(retry.pending_entries) > 0) {
-    failedStat.title += " · 待重试 " + Number(retry.pending_entries) + " 条";
+    failedStat.title += " · 所有账号待重试 " + Number(retry.pending_entries) + " 条";
   }
   const lvlEl = document.getElementById("logLevel");
   if (lvlEl && st.level) lvlEl.value = st.level;
@@ -791,7 +791,7 @@ function setOverviewRouteStatus(target, label, detail, state) {
 
 function renderTranslationRuntimeStatus(st) {
   const health = (st && st.health) || {};
-  const runtime = health.translation || {};
+  const runtime = currentQQBotId() ? ((health.translation_by_bot || {})[currentQQBotId()] || {}) : (health.translation || {});
   let text = st && st.running ? "当前工作模型：尚未成功翻译" : "当前工作模型：机器人未运行";
   if (runtime.provider === "ai" && runtime.model) {
     text = "当前工作模型：" + runtime.model;
@@ -807,8 +807,9 @@ function renderAutostart(btn, on) {
   if (!btn) return;
   btn.dataset.on = on ? "1" : "0";
   btn.innerHTML = '<span class="settings-switch-track" aria-hidden="true"></span>';
-  btn.title = "机器人随 Windows 启动：" + (on ? "已开启" : "已关闭");
-  btn.setAttribute("aria-label", btn.title);
+  btn.dataset.tooltip = "机器人随 Windows 启动：" + (on ? "已开启" : "已关闭");
+  btn.removeAttribute("title");
+  btn.setAttribute("aria-label", btn.dataset.tooltip);
   btn.setAttribute("aria-pressed", on ? "true" : "false");
   btn.disabled = false;
 }
@@ -1023,7 +1024,7 @@ function updateScheduledMessageEntryVisibility(entry) {
 
 function scheduledTargetSummary(message) {
   const mode = message.target_mode || "groups";
-  const qqGroups = (settings && Array.isArray(settings.qq_group_openids)) ? settings.qq_group_openids : [];
+  const qqGroups = (settings && Array.isArray(settings.qq_group_openids)) ? settings.qq_group_openids.filter(groupInActiveQQBotWorkspace) : [];
   const qqByOpenid = {};
   qqGroups.forEach(function (group) { qqByOpenid[String(group.openid || "")] = group; });
   const groupName = function (id) {
@@ -1131,7 +1132,7 @@ function openScheduledTargetPicker(index) {
   if (!message) return;
   const mode = message.target_mode || "groups";
   if (mode === "all") {
-    showAlert("发送目标", "「全部群」会发送到所有已启用的 QQ 群，无需选择。");
+    showAlert("发送目标", "「全部群」会发送到当前账号已启用的 QQ 群，无需选择。");
     return;
   }
   if (mode === "forward_group") {
@@ -1147,7 +1148,8 @@ function openScheduledTargetPicker(index) {
       forwardGroups,
       function (group) {
         const id = String(group.id || "");
-        const members = Array.isArray(group.groups) ? group.groups.length : 0;
+        const owned = new Set(((settings && settings.qq_group_openids) || []).filter(groupInActiveQQBotWorkspace).map(function (item) { return String(item.openid); }));
+        const members = Array.isArray(group.groups) ? group.groups.filter(function (id) { return owned.has(String(id)); }).length : 0;
         const state = group.enabled === false ? "（已暂停）" : "";
         return (group.name || id) + state + " · " + members + " 个群";
       },
@@ -1163,7 +1165,7 @@ function openScheduledTargetPicker(index) {
     return;
   }
   const groups = (settings && Array.isArray(settings.qq_group_openids))
-    ? settings.qq_group_openids.filter(function (group) { return group && group.openid; })
+    ? settings.qq_group_openids.filter(groupInActiveQQBotWorkspace)
     : [];
   if (!groups.length) {
     showAlert("发送目标", "当前没有已审核的 QQ 群");
@@ -1640,6 +1642,7 @@ function openFgAddPicker(ctx, kind) {
     },
     {
       defaultChecked: false,
+      onRowEdit: kind === "group" ? function (item) { editGroupDetails(item); } : null,
       labelLinkFn: kind === "source"
         ? function (item) { return xSourceProfileUrl(item.source); }
         : kind === "youtubeSource"
@@ -1929,6 +1932,7 @@ let qqBotStatusKnown = false;
 let qqAggregateStatusKnown = false;
 let qqAggregateConnected = false;
 const QQ_BOT_WORKSPACE_KEY = "wrelay_active_qq_bot";
+let workspaceEpoch = 0;
 let activeQQBotId = "";
 try { activeQQBotId = localStorage.getItem(QQ_BOT_WORKSPACE_KEY) || ""; } catch (e) {}
 
@@ -1966,10 +1970,22 @@ function renderQQBotWorkspace() {
     const state = !statusKnown ? "状态未知" : connected ? "已连接" : "未连接";
     const personal = personalQQConnections.find(item => "personal:" + item.uin === botId);
     const label = personal ? (personal.name || "个人 QQ") + " · " + personal.uin + (personal.enabled ? "" : " · 已停用") : botId;
-    return '<option value="' + escapeHtml(botId) + '">' + escapeHtml(label) + " · " + state + '</option>';
+    return '<option value="' + escapeHtml(botId) + '"' + (botId === active ? ' hidden' : '') + '>' + escapeHtml(label) + " · " + state + '</option>';
   }).join("");
   select.value = active;
   select.disabled = qqBotIds.length < 2;
+}
+
+function beginPanelLoading(message, hideText) {
+  const loading = document.getElementById("panelLoading");
+  const loadingText = document.getElementById("panelLoadingText");
+  loadingText.textContent = message;
+  loadingText.classList.toggle("panel-loading-text-hidden", Boolean(hideText));
+  loading.hidden = false;
+}
+
+function endPanelLoading() {
+  document.getElementById("panelLoading").hidden = true;
 }
 
 const qqBotWorkspace = document.getElementById("qqBotWorkspace");
@@ -1977,17 +1993,41 @@ if (qqBotWorkspace) {
   qqBotWorkspace.addEventListener("change", async function (event) {
     const previous = settings?._profile_bot || activeQQBotId;
     activeQQBotId = String(event.target.value || "");
+    workspaceEpoch += 1;
+    document.body.classList.add("workspace-switching");
+    beginPanelLoading("正在切换账号…", true);
     qqBotWorkspace.disabled = true;
     try {
+      latestStatus = null;
+      renderMessageTrace(null);
+      ["statsToday", "statsTotal", "statsFailed"].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = "—"; el.title = "正在读取当前账号"; }
+      });
       const loaded = await jget("/api/settings");
       if (loaded.ok === false) throw new Error(loaded.msg || "无法读取配置");
       settings = loaded;
       try { localStorage.setItem(QQ_BOT_WORKSPACE_KEY, activeQQBotId); } catch (e) {}
+      const api = window.pywebview && window.pywebview.api;
+      if (IS_DESKTOP_HOST && api && api.set_last_qq_bot) {
+        try {
+          const saved = await api.set_last_qq_bot(activeQQBotId);
+          if (!saved || saved.ok === false) throw new Error((saved && saved.msg) || "无法保存账号选择");
+        } catch (error) {
+          showAlert("账号选择未保存", "当前账号已切换，但下次启动可能无法恢复：" + error.message);
+        }
+      }
       renderSettings();
+      renderOverviewCounts();
+      await Promise.all([refreshStatus(), refreshXStatus(), refreshBilibiliStatus(), refreshYoutubeStatus(), refreshBackfill(), refreshMessageTrace()]);
     } catch (error) {
       activeQQBotId = previous;
+      workspaceEpoch += 1;
+      await Promise.all([refreshStatus(), refreshXStatus(), refreshBilibiliStatus(), refreshYoutubeStatus(), refreshBackfill(), refreshMessageTrace()]);
       showAlert("切换失败", error.message);
     } finally {
+      endPanelLoading();
+      document.body.classList.remove("workspace-switching");
       renderQQBotWorkspace();
     }
   });
@@ -2027,7 +2067,7 @@ function renderSettings() {
       '</td>' +
       '<td style="font-size:12px;">' + escapeHtml(gacc) + '</td>' +
       '<td>' + renderIdCell(g.openid) + '</td>' +
-      '<td style="text-align:right"><button class="danger rowicon" title="移出当前转发组" aria-label="移出当前转发组" data-kind="fgGroupRemove" data-id="' + escapeHtml(String(g.openid)) + '">' + SVG_TRASH + '</button></td>';
+      '<td style="text-align:right"><div class="table-actions"><button class="sec rowicon" data-kind="groupEdit" data-id="' + escapeHtml(String(g.openid)) + '" title="编辑群资料" aria-label="编辑群资料">' + SVG_PEN + '</button><button class="danger rowicon" title="移出当前转发组" aria-label="移出当前转发组" data-kind="fgGroupRemove" data-id="' + escapeHtml(String(g.openid)) + '">' + SVG_TRASH + '</button></div></td>';
     gb.appendChild(tr);
   });
   const cb = document.getElementById("chanBody");
@@ -2092,6 +2132,7 @@ function renderSettings() {
         '<td style="font-size:12px;">' + escapeHtml(uacc) + '</td>' +
       '<td>' + renderIdCell(u.openid) + '</td>' +
       '<td><div class="table-actions">' +
+        '<button class="sec rowicon" title="编辑用户资料" aria-label="编辑用户资料" data-kind="userEdit" data-i="' + ui + '">' + SVG_PEN + '</button>' +
         '<button class="sec rowicon' + (u.failure_notification ? ' filter-active' : '') + '" title="接收失败通知" aria-label="接收失败通知" data-kind="failureRecipient" data-i="' + ui + '">' + SVG_WARNING + '</button>' +
         '<button class="danger rowicon" title="删除用户" aria-label="删除用户" data-kind="userDel" data-i="' + ui + '">' + SVG_TRASH + '</button>' +
         '</div></td>';
@@ -2249,7 +2290,7 @@ function renderQQPage() {
       '<td>' + (name ? '<div style="color:var(--fg);font-size:12px;word-break:break-all;">' + escapeHtml(name) + '</div>' : '') + '</td>' +
       '<td style="font-size:12px;">' + escapeHtml(account) + '</td>' +
       '<td>' + renderIdCell(group.openid) + '</td>' +
-      '<td style="text-align:right"><button class="danger rowicon" data-kind="qqFgGroupRemove" data-id="' + escapeHtml(String(group.openid)) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></td>';
+      '<td style="text-align:right"><div class="table-actions"><button class="sec rowicon" data-kind="groupEdit" data-id="' + escapeHtml(String(group.openid)) + '" title="编辑群资料" aria-label="编辑群资料">' + SVG_PEN + '</button><button class="danger rowicon" data-kind="qqFgGroupRemove" data-id="' + escapeHtml(String(group.openid)) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
     groupBody.appendChild(tr);
   });
   syncHeaderAll("qqGroupAllEnabled", groupRows, "enabled");
@@ -2336,7 +2377,7 @@ function renderXPage() {
       '</td>' +
       '<td style="font-size:12px;">' + escapeHtml(gacc) + '</td>' +
       '<td>' + renderIdCell(g.openid) + '</td>' +
-      '<td style="text-align:right"><button class="danger rowicon" data-kind="xFgGroupRemove" data-id="' + escapeHtml(String(g.openid)) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></td>';
+      '<td style="text-align:right"><div class="table-actions"><button class="sec rowicon" data-kind="groupEdit" data-id="' + escapeHtml(String(g.openid)) + '" title="编辑群资料" aria-label="编辑群资料">' + SVG_PEN + '</button><button class="danger rowicon" data-kind="xFgGroupRemove" data-id="' + escapeHtml(String(g.openid)) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
     xgBody.appendChild(tr);
   });
   syncHeaderAll("xGroupAllEnabled", grpRows, "enabled");
@@ -2363,7 +2404,7 @@ function renderXPage() {
         '</td>' +
         '<td style="font-size:12px;">' + escapeHtml(uacc) + '</td>' +
         '<td>' + renderIdCell(u.openid) + '</td>' +
-        '<td style="text-align:right"><button class="danger rowicon" data-kind="xUserDel" data-i="' + ui + '" title="删除用户" aria-label="删除用户">' + SVG_TRASH + '</button></td>';
+        '<td style="text-align:right"><div class="table-actions"><button class="sec rowicon" data-kind="userEdit" data-i="' + ui + '" title="编辑用户资料" aria-label="编辑用户资料">' + SVG_PEN + '</button><button class="danger rowicon" data-kind="xUserDel" data-i="' + ui + '" title="删除用户" aria-label="删除用户">' + SVG_TRASH + '</button></div></td>';
       xb.appendChild(tr);
     });
     syncHeaderAll("xUserAllEnabled", settings.qq_user_openids || [], "enabled");
@@ -2443,7 +2484,7 @@ function renderBilibiliPage() {
       '<td>' + (name ? '<div style="color:var(--fg);font-size:12px;word-break:break-all;">' + escapeHtml(name) + '</div>' : '') + '</td>' +
       '<td style="font-size:12px;">' + escapeHtml(account) + '</td>' +
       '<td>' + renderIdCell(group.openid) + '</td>' +
-      '<td style="text-align:right"><button class="danger rowicon" data-kind="biliFgGroupRemove" data-id="' + escapeHtml(String(group.openid)) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></td>';
+      '<td style="text-align:right"><div class="table-actions"><button class="sec rowicon" data-kind="groupEdit" data-id="' + escapeHtml(String(group.openid)) + '" title="编辑群资料" aria-label="编辑群资料">' + SVG_PEN + '</button><button class="danger rowicon" data-kind="biliFgGroupRemove" data-id="' + escapeHtml(String(group.openid)) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
     groupBody.appendChild(tr);
   });
   syncHeaderAll("bilibiliGroupAllEnabled", groupRows, "enabled");
@@ -2591,7 +2632,7 @@ function renderYoutubePage() {
       '<td>' + (name ? '<div style="color:var(--fg);font-size:12px;word-break:break-all;">' + escapeHtml(name) + '</div>' : '') + '</td>' +
       '<td style="font-size:12px;">' + escapeHtml(account) + '</td>' +
       '<td>' + renderIdCell(group.openid) + '</td>' +
-      '<td style="text-align:right"><button class="danger rowicon" data-kind="youtubeFgGroupRemove" data-id="' + escapeHtml(String(group.openid)) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></td>';
+      '<td style="text-align:right"><div class="table-actions"><button class="sec rowicon" data-kind="groupEdit" data-id="' + escapeHtml(String(group.openid)) + '" title="编辑群资料" aria-label="编辑群资料">' + SVG_PEN + '</button><button class="danger rowicon" data-kind="youtubeFgGroupRemove" data-id="' + escapeHtml(String(group.openid)) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
     groupBody.appendChild(tr);
   });
   syncHeaderAll("youtubeGroupAllEnabled", groupRows, "enabled");
@@ -2661,8 +2702,10 @@ function renderXStatus(st) {
     badgeText = "未运行";
     badgeCls = "badge neutral";
   } else if (st.ok === false) {
-    badgeText = localizeUserError(st.msg, "检测中…");
-    badgeCls = "badge warn";
+    const configFailed = !!st.config_error || st.last_result === "config_failed";
+    badgeText = configFailed ? "账号配置读取失败" : localizeUserError(st.msg, "检测中…");
+    badgeCls = configFailed ? "badge off" : "badge warn";
+    failed = configFailed;
   } else if (!st.running) {
     // 轮询任务在应用启动时创建；此分支表示任务尚未运行
     badgeText = "等待 QQ 连接";
@@ -2695,7 +2738,7 @@ function renderXStatus(st) {
   }
   badge.textContent = badgeText;
   badge.className = badgeCls;
-  badge.title = st.protection_error || st.last_error || st.msg || badgeText;
+  badge.title = st.config_error || st.protection_error || st.last_error || st.msg || badgeText;
   setStatusCardAmbient(badge, badgeCls === "badge on");
   const overviewX = document.getElementById("overviewX");
   setOverviewRouteStatus(overviewX, badgeText, "X RSS",
@@ -2715,9 +2758,10 @@ function renderXStatus(st) {
     if (!botUp) {
       summary.textContent = "—";
     } else if (failed) {
-      const errorLabel = st.protection_error ? "投递保护异常"
+      const errorLabel = (st.config_error || st.last_result === "config_failed") ? "账号配置读取失败" : st.protection_error ? "投递保护异常"
         : st.last_result === "parse_failed" ? "解析异常" : "请求异常";
-      summary.innerHTML = '<strong>' + errorLabel + '</strong><span>请稍后重试</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
+      const advice = (st.config_error || st.last_result === "config_failed") ? "请检查配置并重启机器人" : "请稍后重试";
+      summary.innerHTML = '<strong>' + errorLabel + '</strong><span>' + advice + '</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
     } else if (st.ok === false) {
       summary.title = localizeUserError(st.msg, "请求异常");
       summary.innerHTML = '<strong>请求异常</strong><span>请稍后重试</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
@@ -2734,8 +2778,11 @@ function renderXStatus(st) {
 }
 
 async function refreshXStatus() {
+  const owner = activeQQBotId;
+  const epoch = workspaceEpoch;
   try {
-    renderXStatus(await jget("/api/xrss/status"));
+    const data = await jget("/api/xrss/status");
+    if (owner === activeQQBotId && epoch === workspaceEpoch) renderXStatus(data);
   } catch (err) { /* 面板瞬断：保留当前显示，下一轮覆盖 */ }
 }
 
@@ -2758,8 +2805,10 @@ function renderBilibiliStatus(st) {
     badgeText = "未运行";
     badgeCls = "badge neutral";
   } else if (st.ok === false) {
-    badgeText = localizeUserError(st.msg, "检测中…");
-    badgeCls = "badge warn";
+    const configFailed = !!st.config_error || st.last_result === "config_failed";
+    badgeText = configFailed ? "账号配置读取失败" : localizeUserError(st.msg, "检测中…");
+    badgeCls = configFailed ? "badge off" : "badge warn";
+    failed = configFailed;
   } else if (!st.running) {
     badgeText = "等待 QQ 连接";
     badgeCls = "badge warn";
@@ -2791,7 +2840,7 @@ function renderBilibiliStatus(st) {
   }
   badge.textContent = badgeText;
   badge.className = badgeCls;
-  badge.title = st.protection_error || st.last_error || st.msg || badgeText;
+  badge.title = st.config_error || st.protection_error || st.last_error || st.msg || badgeText;
   setStatusCardAmbient(badge, badgeCls === "badge on");
   const overviewBilibili = document.getElementById("overviewBilibili");
   setOverviewRouteStatus(overviewBilibili, badgeText, "Bilibili RSS",
@@ -2805,9 +2854,10 @@ function renderBilibiliStatus(st) {
     if (!botUp) {
       summary.textContent = "—";
     } else if (failed) {
-      const protectionFailed = !!st.protection_error || st.last_result === "protection_failed";
-      const errorLabel = protectionFailed ? "投递保护异常" : (st.last_result === "parse_failed" ? "解析异常" : "请求异常");
-      const advice = protectionFailed ? "请恢复积压队列文件" : "请稍后重试";
+      const configFailed = !!st.config_error || st.last_result === "config_failed";
+      const protectionFailed = !configFailed && (!!st.protection_error || st.last_result === "protection_failed");
+      const errorLabel = configFailed ? "账号配置读取失败" : protectionFailed ? "投递保护异常" : (st.last_result === "parse_failed" ? "解析异常" : "请求异常");
+      const advice = configFailed ? "请检查配置并重启机器人" : protectionFailed ? "请恢复积压队列文件" : "请稍后重试";
       summary.innerHTML = '<strong>' + errorLabel + '</strong><span>' + advice + '</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
     } else if (st.ok === false) {
       summary.title = localizeUserError(st.msg, "请求异常");
@@ -2825,8 +2875,11 @@ function renderBilibiliStatus(st) {
 }
 
 async function refreshBilibiliStatus() {
+  const owner = activeQQBotId;
+  const epoch = workspaceEpoch;
   try {
-    renderBilibiliStatus(await jget("/api/bilibili/status"));
+    const data = await jget("/api/bilibili/status");
+    if (owner === activeQQBotId && epoch === workspaceEpoch) renderBilibiliStatus(data);
   } catch (err) { /* 面板瞬断：保留当前显示，下一轮覆盖 */ }
 }
 
@@ -2849,8 +2902,10 @@ function renderYoutubeStatus(st) {
     badgeText = "未运行";
     badgeCls = "badge neutral";
   } else if (st.ok === false) {
-    badgeText = localizeUserError(st.msg, "检测中…");
-    badgeCls = "badge warn";
+    const configFailed = !!st.config_error || st.last_result === "config_failed";
+    badgeText = configFailed ? "账号配置读取失败" : localizeUserError(st.msg, "检测中…");
+    badgeCls = configFailed ? "badge off" : "badge warn";
+    failed = configFailed;
   } else if (!st.running) {
     badgeText = "等待轮询启动";
     badgeCls = "badge warn";
@@ -2877,7 +2932,7 @@ function renderYoutubeStatus(st) {
   }
   badge.textContent = badgeText;
   badge.className = badgeCls;
-  badge.title = st.protection_error || st.last_error || st.msg || badgeText;
+  badge.title = st.config_error || st.protection_error || st.last_error || st.msg || badgeText;
   setStatusCardAmbient(badge, badgeCls === "badge on");
   const overviewYoutube = document.getElementById("overviewYoutube");
   setOverviewRouteStatus(overviewYoutube, badgeText, "YouTube RSS",
@@ -2891,9 +2946,10 @@ function renderYoutubeStatus(st) {
     if (!botUp) {
       summary.textContent = "—";
     } else if (failed) {
-      const protectionFailed = !!st.protection_error || st.last_result === "protection_failed";
-      const errorLabel = protectionFailed ? "投递保护异常" : (st.last_result === "parse_failed" ? "解析异常" : "请求异常");
-      const advice = protectionFailed ? "请恢复积压队列文件" : "请稍后重试";
+      const configFailed = !!st.config_error || st.last_result === "config_failed";
+      const protectionFailed = !configFailed && (!!st.protection_error || st.last_result === "protection_failed");
+      const errorLabel = configFailed ? "账号配置读取失败" : protectionFailed ? "投递保护异常" : (st.last_result === "parse_failed" ? "解析异常" : "请求异常");
+      const advice = configFailed ? "请检查配置并重启机器人" : protectionFailed ? "请恢复积压队列文件" : "请稍后重试";
       summary.innerHTML = '<strong>' + errorLabel + '</strong><span>' + advice + '</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
     } else if (st.ok === false) {
       summary.title = localizeUserError(st.msg, "请求异常");
@@ -2911,8 +2967,11 @@ function renderYoutubeStatus(st) {
 }
 
 async function refreshYoutubeStatus() {
+  const owner = activeQQBotId;
+  const epoch = workspaceEpoch;
   try {
-    renderYoutubeStatus(await jget("/api/youtube/status"));
+    const data = await jget("/api/youtube/status");
+    if (owner === activeQQBotId && epoch === workspaceEpoch) renderYoutubeStatus(data);
   } catch (err) { /* 面板瞬断：保留当前显示，下一轮覆盖 */ }
 }
 
@@ -3076,8 +3135,11 @@ function closeMessageTraceModal() {
 }
 
 async function refreshMessageTrace() {
+  const owner = activeQQBotId;
+  const epoch = workspaceEpoch;
   try {
-    renderMessageTrace(await jget("/api/message-trace?limit=50"));
+    const data = await jget("/api/message-trace?limit=50");
+    if (owner === activeQQBotId && epoch === workspaceEpoch) renderMessageTrace(data);
   } catch (err) { /* 面板瞬断：保留上一份追踪 */ }
 }
 
@@ -3316,10 +3378,12 @@ function escapeHtml(s) {
 function renderIdCell(value) {
   const id = String(value || "");
   const safe = escapeHtml(id);
-  const visible = escapeHtml(id.length > 18 ? id.slice(0, 10) + "…" + id.slice(-4) : id);
-  return '<div class="id-cell" title="' + safe + '">' +
-    '<span class="mono id-value" tabindex="0" aria-label="完整 ID，按 Ctrl+C 复制">' + visible + '</span>' +
-    '<button type="button" class="sec rowicon copy-id" data-copy-value="' + safe + '" title="复制完整 ID" aria-label="复制完整 ID">' + SVG_COPY + '</button>' +
+  const characters = Array.from(id);
+  const tailLength = characters.length > 4 ? 4 : 1;
+  const prefix = escapeHtml(characters.slice(0, -tailLength).join(""));
+  const suffix = escapeHtml(characters.slice(-tailLength).join(""));
+  return '<div class="id-cell">' +
+    '<span class="mono id-value" role="button" tabindex="0" data-copy-value="' + safe + '" aria-label="' + safe + '，点击复制"><span class="middle-value-prefix">' + prefix + '</span><span class="middle-value-suffix">' + suffix + '</span></span>' +
     '</div>';
 }
 
@@ -3329,15 +3393,42 @@ async function copyTextToClipboard(value) {
     await navigator.clipboard.writeText(text);
     return;
   }
+  const previousFocus = document.activeElement;
   const field = document.createElement("textarea");
   field.value = text;
   field.style.position = "fixed";
   field.style.opacity = "0";
   document.body.appendChild(field);
-  field.select();
-  const copied = document.execCommand("copy");
-  field.remove();
+  let copied = false;
+  try {
+    field.select();
+    copied = document.execCommand("copy");
+  } finally {
+    field.remove();
+    if (previousFocus && previousFocus.isConnected && previousFocus !== document.body) {
+      previousFocus.focus({preventScroll: true});
+    }
+  }
   if (!copied) throw new Error("复制失败");
+}
+
+async function copyForwardingValue(control) {
+  const previous = Number(control.dataset.copyFeedbackTimer) || 0;
+  if (previous) clearTimeout(previous);
+  try {
+    await copyTextToClipboard(control.dataset.copyValue);
+    control.classList.add("copied");
+    if (window.showWRelayCopyFeedback) window.showWRelayCopyFeedback(control, "已复制");
+  } catch (error) {
+    control.classList.remove("copied");
+    if (window.showWRelayCopyFeedback) window.showWRelayCopyFeedback(control, "复制失败");
+  }
+  control.dataset.copyFeedbackTimer = String(setTimeout(function () {
+    if (control.isConnected) {
+      control.classList.remove("copied");
+      delete control.dataset.copyFeedbackTimer;
+    }
+  }, 1100));
 }
 
 // ---------------- 表格行拖拽排序（鼠标事件实现 + 数据数组持久化） ----------------
@@ -3654,11 +3745,13 @@ function renderBackfill(data) {
 }
 
 async function refreshBackfill() {
+  const owner = activeQQBotId;
+  const epoch = workspaceEpoch;
   try {
     const r = await jget("/api/backfill/pending");
-    renderBackfill(r);
+    if (owner === activeQQBotId && epoch === workspaceEpoch) renderBackfill(r);
   } catch (err) {
-    renderBackfill(null);
+    if (owner === activeQQBotId && epoch === workspaceEpoch) renderBackfill(null);
   }
 }
 
@@ -3714,6 +3807,49 @@ function showConfirmDlg(title, message, onOk, okText) {
   if (alreadyOpen) document.getElementById("confirmCancel").focus();
 }
 
+function editUserDetails(user) { editQQDetails(user, false); }
+function editGroupDetails(group) { editQQDetails(group, true); }
+function editQQDetails(user, isGroup) {
+  const openid = String(user.openid);
+  document.getElementById("confirmTitle").textContent = isGroup ? "编辑群资料" : "编辑用户资料";
+  const body = document.getElementById("confirmBody");
+  body.innerHTML = "";
+  function field(labelText, value, maxLength, inputMode) {
+    const label = document.createElement("label");
+    label.textContent = labelText;
+    label.style.display = "block";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = value || "";
+    input.maxLength = maxLength;
+    input.style.width = "100%";
+    if (inputMode) input.inputMode = inputMode;
+    label.appendChild(input);
+    body.appendChild(label);
+    return input;
+  }
+  const name = field("名称", user.name, 100);
+  const account = field(isGroup ? "QQ群号" : "QQ 账号", user.qq_id, 20, "numeric");
+  setConfirmButtons("保存", true);
+  confirmAction = async function () {
+    const value = account.value.trim();
+    if (value && !/^[0-9]+$/.test(value)) {
+      showAlert("保存失败", (isGroup ? "QQ群号" : "QQ 账号") + "请填写数字，或留空。");
+      return;
+    }
+    const current = (settings[isGroup ? "qq_group_openids" : "qq_user_openids"] || []).find(function (item) { return String(item.openid) === openid; });
+    if (!current) {
+      showAlert("保存失败", "该用户已不存在，请刷新后重试。");
+      return;
+    }
+    current.name = name.value.trim();
+    current.qq_id = value;
+    await saveAndReload();
+  };
+  document.getElementById("confirmModal").style.display = "flex";
+  name.focus();
+}
+
 function showConfirmSelect(title, items, labelFn, onOkSelected, opts) {
   opts = opts || {};
   const defaultChecked = opts.defaultChecked;
@@ -3754,6 +3890,16 @@ function showConfirmSelect(title, items, labelFn, onOkSelected, opts) {
     }
     row.appendChild(cb);
     row.appendChild(span);
+    if (opts.onRowEdit) {
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.innerHTML = SVG_PEN;
+      edit.className = "sec rowicon";
+      edit.title = "编辑群资料";
+      edit.setAttribute("aria-label", "编辑群资料");
+      edit.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); opts.onRowEdit(it); });
+      row.appendChild(edit);
+    }
     if (opts.onRowDelete) {
       // 「×」删除按钮：贴近窗口右边缘，删除该条目的注册记录
       const del = document.createElement("button");
@@ -4165,7 +4311,7 @@ function renderRegistrationReview(data) {
     const info = document.createElement("div");
     info.style.cssText = "flex:1;min-width:0;";
     info.innerHTML =
-      '<div>' + escapeHtml(label) + '</div>' +
+      '<div>' + escapeHtml(label) + (it.bot_id ? '' : ' · 历史申请，归属未知，审核将加入当前账号') + '</div>' +
       '<div style="font-size:12px;color:var(--name-green);">申请识别码：' + escapeHtml(it.application_code || "旧申请需重新提交") + '</div>' +
       '<div class="mono" style="font-size:11px;color:var(--muted);word-break:break-all;">' + escapeHtml(it.openid) + '</div>';
     row.appendChild(info);
@@ -4646,6 +4792,28 @@ function closeTranslationChainsModal() {
   document.getElementById("translationChainsModal").style.display = "none";
 }
 
+const FORWARDING_PANE_PAIRS = [
+  ["discordChannelContent", "discordGroupContent"],
+  ["xSourceContent", "xGroupContent"],
+  ["bilibiliSourceContent", "bilibiliGroupContent"],
+  ["youtubeSourceContent", "youtubeGroupContent"],
+  ["qqFgGroupContent", "userContent"],
+];
+
+function setForwardingPaneFold(id, collapsed) {
+  const pair = FORWARDING_PANE_PAIRS.find(items => items.includes(id));
+  if (!pair) return false;
+  for (const item of pair) {
+    const pane = document.getElementById(item);
+    const button = document.querySelector('.foldbtn[data-fold="' + item + '"]');
+    if (!pane || !button) continue;
+    pane.style.display = collapsed ? "none" : "";
+    button.classList.toggle("folded", collapsed);
+    button.setAttribute("aria-expanded", String(!collapsed));
+  }
+  return true;
+}
+
 function openQQWhitelistModal() {
   // 兼容旧入口/外部调用：白名单已迁到「QQ → QQ」页转发组的工作区分栏，
   // 不再使用独立弹窗，直接切到该页面。
@@ -4657,6 +4825,7 @@ function openQQWhitelistPane() {
   const pane = document.getElementById("userContent");
   const section = pane && pane.closest(".fgsection");
   if (section && section.style.display === "none") section.style.display = "";
+  setForwardingPaneFold("userContent", false);
   if (section) section.scrollIntoView({block: "nearest"});
 }
 
@@ -5486,6 +5655,13 @@ async function saveDiscordConfig() {
 }
 
 document.addEventListener("click", async function (e) {
+  const value = e.target.closest(".fgsection :is(.middle-value, .id-value)[data-copy-value]");
+  if (value && !(e.ctrlKey || e.metaKey || e.altKey || e.shiftKey)) {
+    e.preventDefault();
+    e.stopPropagation();
+    await copyForwardingValue(value);
+    return;
+  }
   const btn = e.target.closest("button");
   if (!btn) return;
   if (btn.id === "btnStatusSheenToggle") {
@@ -5493,34 +5669,6 @@ document.addEventListener("click", async function (e) {
     try { localStorage.setItem(STATUS_SHEEN_KEY, enabled ? "1" : "0"); } catch (err) {}
     applyStatusSheenPreference(enabled);
     renderStatusSheenToggle(enabled);
-    return;
-  }
-  if (btn.classList.contains("copy-id")) {
-    const originalTitle = btn.title;
-    const originalMarkup = btn.dataset.copyOriginalMarkup || btn.innerHTML;
-    const priorTimer = Number(btn.dataset.copyTimer) || 0;
-    if (priorTimer) clearTimeout(priorTimer);
-    btn.dataset.copyOriginalMarkup = originalMarkup;
-    btn.disabled = true;
-    try {
-      await copyTextToClipboard(btn.dataset.copyValue || "");
-      btn.title = "已复制";
-      btn.innerHTML = SVG_CHECK;
-      btn.classList.add("copied");
-    } catch (err) {
-      btn.title = "复制失败";
-    } finally {
-      btn.disabled = false;
-      btn.dataset.copyTimer = String(setTimeout(function () {
-        if (btn.isConnected) {
-          btn.innerHTML = originalMarkup;
-          btn.classList.remove("copied");
-          btn.title = originalTitle;
-          delete btn.dataset.copyOriginalMarkup;
-          delete btn.dataset.copyTimer;
-        }
-      }, 1100));
-    }
     return;
   }
   if (btn.dataset.scrollTarget) {
@@ -5730,9 +5878,11 @@ document.addEventListener("click", async function (e) {
   if (btn.dataset.fold) {
     const el = document.getElementById(btn.dataset.fold);
     const folded = el.style.display === "none";
-    el.style.display = folded ? "" : "none";
-    btn.classList.toggle("folded", !folded);
-    btn.setAttribute("aria-expanded", String(folded));
+    if (!setForwardingPaneFold(btn.dataset.fold, !folded)) {
+      el.style.display = folded ? "" : "none";
+      btn.classList.toggle("folded", !folded);
+      btn.setAttribute("aria-expanded", String(folded));
+    }
     return;
   }
   const k = btn.dataset.kind;
@@ -5954,12 +6104,20 @@ document.addEventListener("click", async function (e) {
   if (k === "fgGroupRemove") {
     removeFgMember(FG_DISCORD, btn.dataset.id, "groups");
     return;
+  } else if (k === "groupEdit") {
+    const group = (settings.qq_group_openids || []).find(function (item) { return String(item.openid) === btn.dataset.id; });
+    if (group) editGroupDetails(group);
+    return;
   } else if (k === "failureRecipient") {
     const u = settings.qq_user_openids[Number(btn.dataset.i)];
     if (u) {
       u.failure_notification = !u.failure_notification;
       await saveAndReload();
     }
+    return;
+  } else if (k === "userEdit") {
+    const u = settings.qq_user_openids[Number(btn.dataset.i)];
+    if (u) editUserDetails(u);
     return;
   } else if (k === "userDel") {
     const idx = Number(btn.dataset.i);
@@ -6211,10 +6369,11 @@ document.addEventListener("keydown", async function (event) {
       })) {
     event.preventDefault(); focused.click(); return;
   }
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c" &&
-      focused?.matches(".id-value, .copy-id") && !window.getSelection()?.toString()) {
-    const copy = focused.closest(".id-cell")?.querySelector(".copy-id");
-    if (copy && !copy.disabled) { event.preventDefault(); copy.click(); }
+  if (focused?.matches(".fgsection :is(.middle-value, .id-value)[data-copy-value]") &&
+      (((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c" && !window.getSelection()?.toString()) ||
+       (!event.ctrlKey && !event.metaKey && !event.altKey && (event.key === "Enter" || event.key === " ")))) {
+    event.preventDefault();
+    copyForwardingValue(focused);
     return;
   }
   if ((event.key === "Enter" || event.key === " ") && focused?.matches(".chan-name-edit")) {
@@ -6604,8 +6763,11 @@ function closeDiagnosticModal() {
 }
 
 async function refreshStatus() {
+  const owner = activeQQBotId;
+  const epoch = workspaceEpoch;
   try {
     const st = await jget("/api/status");
+    if (owner !== activeQQBotId || epoch !== workspaceEpoch || (settings && settings._profile_bot && settings._profile_bot !== owner)) return;
     latestStatus = st;
     renderStatus(st);
     // 同步补发开关/上限（QQ 私聊指令可能改动 settings.json）；
@@ -6638,6 +6800,58 @@ async function refreshStatus() {
   }
 }
 
+// Keep the complete value in the DOM while showing both ends in narrow cells.
+function setupForwardingValueClipping() {
+  const tableIds = [
+    "chanList", "groupList", "userList", "xSourceList", "xGroupList", "xUserList",
+    "bilibiliSourceList", "bilibiliGroupList", "youtubeSourceList",
+    "youtubeGroupList", "qqFgGroupList",
+  ];
+  const bodies = tableIds.map(id => document.querySelector("#" + id + " tbody")).filter(Boolean);
+  const observer = new MutationObserver(formatValues);
+
+  function formatValues() {
+    observer.disconnect();
+    for (const body of bodies) {
+      for (const row of body.querySelectorAll("tr:not(.fgempty-row)")) {
+        const cells = Array.from(row.cells).slice(2, -1);
+        for (const cell of cells) {
+          const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+          const nodes = [];
+          while (walker.nextNode()) nodes.push(walker.currentNode);
+          for (const node of nodes) {
+            const value = node.nodeValue;
+            const parent = node.parentElement;
+            if (!parent || !value.trim() ||
+                parent.closest(".middle-value, .id-cell, button, select, textarea, svg, .chan-name-edit")) continue;
+            const characters = Array.from(value);
+            const tailLength = characters.length > 12 ? 4 : characters.length > 4 ? 2 : 1;
+            const wrapper = document.createElement("span");
+            const prefix = document.createElement("span");
+            const suffix = document.createElement("span");
+            wrapper.className = "middle-value";
+            wrapper.dataset.copyValue = value;
+            wrapper.setAttribute("role", "button");
+            wrapper.setAttribute("tabindex", "0");
+            wrapper.setAttribute("aria-label", value + "，点击复制");
+            prefix.className = "middle-value-prefix";
+            suffix.className = "middle-value-suffix";
+            prefix.textContent = characters.slice(0, -tailLength).join("");
+            suffix.textContent = characters.slice(-tailLength).join("");
+            wrapper.append(prefix, suffix);
+            node.replaceWith(wrapper);
+          }
+        }
+      }
+    }
+    for (const body of bodies) observer.observe(body, {childList: true, subtree: true});
+  }
+
+  formatValues();
+}
+
+setupForwardingValueClipping();
+
 let pollingStarted = false;
 
 async function init() {
@@ -6645,15 +6859,26 @@ async function init() {
   // 轮询定时器只创建一套，避免 /api/status → /api/health 出现多重轮询。
   if (pollingStarted) return;
   pollingStarted = true;
-  // 桌面端默认总览，并记忆页面选择。
-  setActivePage(activePage);
+  document.body.classList.add("panel-initializing");
+  beginPanelLoading("正在加载配置…");
   try {
+    // 桌面端默认总览，并记忆页面选择。
+    setActivePage(activePage);
     const qqConfig = await jget("/api/bot/qq-config");
     qqBotIds = qqConfig && qqConfig.ok && Array.isArray(qqConfig.bot_ids) ? qqConfig.bot_ids.map(String) : [];
     const personalConfig = await jget("/api/personal-qq/config");
     if (personalConfig.ok) {
       personalQQConnections = personalConfig.connections || [];
       qqBotIds.push(...personalQQConnections.map(item => "personal:" + item.uin));
+    }
+    const api = window.pywebview && window.pywebview.api;
+    if (IS_DESKTOP_HOST && api && api.get_desktop_preferences) {
+      try {
+        const preferences = await api.get_desktop_preferences();
+        if (preferences && qqBotIds.includes(preferences.last_qq_bot)) {
+          activeQQBotId = preferences.last_qq_bot;
+        }
+      } catch (error) { /* fall back to the browser selection */ }
     }
     currentQQBotId();
     renderQQBotWorkspace();
@@ -6663,6 +6888,10 @@ async function init() {
     renderOverviewCounts();
     if (settings._profile_warnings?.length) showAlert("配置迁移提示", settings._profile_warnings.join("\n"));
   } catch (err) { showAlert("配置读取失败", err.message); }
+  finally {
+    endPanelLoading();
+    document.body.classList.remove("panel-initializing");
+  }
   await loadAppInfo();
   // 启动后自动检查一次（默认开启，可在设置页关闭）；只提示，不自动安装
   if (isAutoUpdateCheckEnabled()) await checkForUpdates();

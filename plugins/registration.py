@@ -84,7 +84,7 @@ def load_registrations():
     return data
 
 
-def register_user(user_openid, qq_id="", nickname=""):
+def register_user(user_openid, qq_id="", nickname="", bot_id=""):
     """提交/更新用户注册申请，绑定当前 User OpenID，返回申请识别码。"""
     openid = str(user_openid or "").strip()
     if not openid:
@@ -103,6 +103,7 @@ def register_user(user_openid, qq_id="", nickname=""):
         data["users"][openid] = {
             "qq_id": str(qq_id).strip() or str(previous.get("qq_id") or "").strip(),
             "nickname": str(nickname).strip() or str(previous.get("nickname") or "").strip(),
+            "bot_id": str(bot_id or previous.get("bot_id") or "").strip(),
             "application_code": code,
             "time": int(time.time()),
         }
@@ -207,6 +208,12 @@ async def handle_register(
     if is_consumed(event):
         return
 
+    from plugins.bot_profiles import scope
+    with scope(_qq_bot_id(bot)):
+        await _handle_register_scoped(bot, event)
+
+
+async def _handle_register_scoped(bot, event):
     message = event.get_plaintext().strip()
 
     if message == "/注册" or message.startswith("/注册 "):
@@ -277,7 +284,7 @@ async def _handle_user_register(bot: QQBot, event: C2CMessageCreateEvent, messag
             return
 
     application_code = await run_in_thread_to_completion(
-        register_user, openid, qq_id, nickname
+        register_user, openid, qq_id, nickname, _qq_bot_id(bot)
     )
 
     logger.info(

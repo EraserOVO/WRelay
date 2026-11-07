@@ -1,4 +1,4 @@
-"""Account-owned routing storage. Credentials and authorization remain global."""
+"""Account-owned routing, authorization and card configuration storage."""
 import hashlib
 import json
 import os
@@ -18,9 +18,17 @@ LIST_KEYS = ("discord_channels", "x_rss_sources", "bilibili_sources", "youtube_s
 GROUP_KEYS = LIST_KEYS[4:]
 VALUE_KEYS = ("x_rss_poll_interval", "x_rsshub_base", "x_protection", "bilibili_poll_interval",
               "bilibili_rsshub_base", "bilibili_protection", "youtube_poll_interval", "youtube_protection",
-              "backfill_enabled", "backfill_limit", "bilibili_auto_resolve")
-OWNED = (*LIST_KEYS, *VALUE_KEYS)
+              "backfill_enabled", "backfill_limit", "bilibili_auto_resolve",
+              "qq_c2c_relay_filter", "x_c2c_relay_filter", "bilibili_c2c_relay_filter",
+              "scheduled_message", "translation", "x_translation")
+USER_KEY = "qq_user_openids"
+OWNED = (*LIST_KEYS, *VALUE_KEYS, USER_KEY)
 INDEX = "bot_profile_ids"
+USER_MIGRATION = "bot_profile_users_migrated"
+FILTER_MIGRATION = "bot_profile_manual_filters_migrated"
+CARD_MIGRATION = "bot_profile_cards_migrated"
+CARD_KEYS = ("scheduled_message", "translation", "x_translation")
+MANUAL_FILTERS = ("qq_c2c_relay_filter", "x_c2c_relay_filter", "bilibili_c2c_relay_filter")
 
 
 @contextmanager
@@ -113,7 +121,7 @@ def read(settings_file, bot_id=None):
             raise ValueError("该账号尚未创建独立配置")
         for key in OWNED:
             data.pop(key, None)
-        for key in LIST_KEYS:
+        for key in (*LIST_KEYS, USER_KEY):
             data[key] = []
         for owner in owners:
             if selected and owner != selected:
@@ -132,13 +140,17 @@ def read(settings_file, bot_id=None):
             for key in GROUP_KEYS[:-1]:
                 for group in config.get(key, []):
                     group["groups"] = [g for g in group.get("groups", []) if g in own_groups]
-            for key in LIST_KEYS:
+            for key in (*LIST_KEYS, USER_KEY):
                 data[key].extend(config.get(key, []))
             for key in VALUE_KEYS:
                 if key in config and (selected or key not in data):
                     data[key] = config[key]
         # Global summaries and scheduled references deduplicate equal legacy group ids.
         if not selected:
+            users = {}
+            for user in data[USER_KEY]:
+                users.setdefault(str(user.get("openid", "")), user)
+            data[USER_KEY] = list(users.values())
             for key in GROUP_KEYS:
                 merged = {}
                 for group in data[key]:
@@ -193,6 +205,23 @@ def save(settings_file, data, expected_revision=None):
             raise
 
 
+
+def _schedule_for_owner(value, raw, owner):
+    """Copy legacy plans while retaining only this account's explicit targets."""
+    value = deepcopy(value)
+    if not isinstance(value, dict):
+        return value
+    allowed = {str(group.get("openid") or "") for group in raw.get("qq_group_openids", [])
+               if isinstance(group, dict) and str(group.get("bot_id") or "") == owner}
+    def restrict(entry):
+        if isinstance(entry, dict) and isinstance(entry.get("target_groups"), list):
+            entry["target_groups"] = [item for item in entry["target_groups"] if str(item) in allowed]
+    restrict(value)
+    for message in value.get("messages", []):
+        restrict(message)
+    return value
+
+
 def migrate(settings_file, configured_ids):
     """Preserve legacy ids/state. Commit index only after all validated files exist."""
     with json_file_lock(settings_file):
@@ -200,6 +229,59 @@ def migrate(settings_file, configured_ids):
         if raw.get(INDEX):
             from plugins.settings_model import SettingsModel
             changed = False
+            if not all(raw.get(key) for key in (USER_MIGRATION, FILTER_MIGRATION, CARD_MIGRATION)):
+                backup = str(settings_file) + ".before-account-cards.json"
+                if not os.path.exists(backup):
+                    shutil.copyfile(settings_file, backup)
+            if not raw.get(USER_MIGRATION):
+                # Do not remove the legacy list until every profile has been updated.
+                # Retrying after interruption completes the same migration safely.
+                legacy_users = deepcopy(raw.get(USER_KEY, []))
+                if not isinstance(legacy_users, list):
+                    raise ValueError("旧授权用户列表损坏，无法迁移")
+                for owner in raw[INDEX]:
+                    path = profile_path(settings_file, owner)
+                    profile = validate_profile(strict_read(path), owner)
+                    if USER_KEY not in profile["config"]:
+                        profile["config"][USER_KEY] = deepcopy(legacy_users)
+                        validate_profile(profile, owner)
+                        shutil.copyfile(path, path + ".before-users-migration.bak")
+                        _atomic_write_json_unlocked(path, profile, indent=2)
+                raw[USER_MIGRATION] = True
+                raw.pop(USER_KEY, None)
+                changed = True
+            if not raw.get(FILTER_MIGRATION):
+                defaults = SettingsModel.default().to_dict()
+                for owner in raw[INDEX]:
+                    path = profile_path(settings_file, owner)
+                    profile = validate_profile(strict_read(path), owner)
+                    for key in MANUAL_FILTERS:
+                        if key not in profile["config"]:
+                            profile["config"][key] = deepcopy(raw.get(key, defaults[key]))
+                    validate_profile(profile, owner)
+                    shutil.copyfile(path, path + ".before-filters-migration.bak")
+                    _atomic_write_json_unlocked(path, profile, indent=2)
+                for key in MANUAL_FILTERS:
+                    raw.pop(key, None)
+                raw[FILTER_MIGRATION] = True
+                changed = True
+            if not raw.get(CARD_MIGRATION):
+                defaults = SettingsModel.default().to_dict()
+                for owner in raw[INDEX]:
+                    path = profile_path(settings_file, owner)
+                    profile = validate_profile(strict_read(path), owner)
+                    for key in CARD_KEYS:
+                        if key not in profile["config"]:
+                            value = raw.get(key, defaults[key])
+                            profile["config"][key] = (_schedule_for_owner(value, raw, owner)
+                                if key == "scheduled_message" else deepcopy(value))
+                    validate_profile(profile, owner)
+                    shutil.copyfile(path, path + ".before-cards-migration.bak")
+                    _atomic_write_json_unlocked(path, profile, indent=2)
+                for key in CARD_KEYS:
+                    raw.pop(key, None)
+                raw[CARD_MIGRATION] = True
+                changed = True
             for owner in configured_ids:
                 filename(owner)
                 if owner not in raw[INDEX]:
@@ -241,6 +323,9 @@ def migrate(settings_file, configured_ids):
             own_groups = {str(g["openid"]) for g in groups
                           if (g.get("bot_id") or default) == owner}
             config = {key: deepcopy(legacy[key]) for key in OWNED if key in legacy}
+            # Legacy unbound groups belong to the default owner.
+            schedule_raw = dict(raw, qq_group_openids=[dict(g, bot_id=g.get("bot_id") or default) for g in groups])
+            config["scheduled_message"] = _schedule_for_owner(config["scheduled_message"], schedule_raw, owner)
             for key in GROUP_KEYS:
                 if key == "qq_forwarding_groups":
                     config[key] = [g for g in config.get(key, []) if own_groups.intersection(g.get("groups", []))]
@@ -274,6 +359,9 @@ def migrate(settings_file, configured_ids):
         for key in OWNED:
             raw.pop(key, None)
         raw[INDEX] = owners
+        raw[USER_MIGRATION] = True
+        raw[FILTER_MIGRATION] = True
+        raw[CARD_MIGRATION] = True
         _atomic_write_json_unlocked(settings_file, raw, indent=2)
         return {"migrated": True, "bot_ids": owners,
                 "warnings": ["无账号归属的配置保留在 unassigned，暂停自动投递"] if "unassigned" in owners else []}

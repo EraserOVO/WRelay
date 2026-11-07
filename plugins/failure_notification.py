@@ -72,7 +72,10 @@ async def _notify_recipient(qq_bot, openid, key, message, cooldown_seconds):
 
 async def notify_delivery_failure(qq_bot, failed_groups, channel_id="", message_id=""):
     """仅在最终投递失败后通知；同一失败在冷却期内只提醒一次。"""
-    config, recipients = await asyncio.to_thread(get_failure_notification_snapshot)
+    from plugins.bot_profiles import scope
+    bot_id = str(getattr(qq_bot, "self_id", "") or getattr(qq_bot, "id", "") or "")
+    with scope(bot_id):
+        config, recipients = await asyncio.to_thread(get_failure_notification_snapshot)
     if not config["enabled"] or not recipients or not failed_groups:
         return
 
@@ -104,7 +107,10 @@ async def notify_delivery_failure(qq_bot, failed_groups, channel_id="", message_
 
 async def notify_maintenance_failure(qq_bot, alert_id, message):
     """Use the existing authorized recipients and cooldown for maintenance faults."""
-    config, recipients = await asyncio.to_thread(get_failure_notification_snapshot)
+    from plugins.bot_profiles import scope
+    bot_id = str(getattr(qq_bot, "self_id", "") or getattr(qq_bot, "id", "") or "")
+    with scope(bot_id):
+        config, recipients = await asyncio.to_thread(get_failure_notification_snapshot)
     if not config["enabled"] or not recipients:
         return 0
     _prune_recent_failures(time.monotonic(), config["cooldown_seconds"])

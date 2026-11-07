@@ -831,6 +831,9 @@ def get_active_user_openids():
 
     设置文件中存在用户列表时，按勾选状态返回；缺失/损坏时返回空列表
     （默认所有人不可用，需在管理面板勾选放行）。"""
+    from plugins import bot_profiles
+    if bot_profiles.ids(SETTINGS_FILE) and not bot_profiles.CURRENT.get():
+        return []
     data = _load_settings()
     items = data.get("qq_user_openids")
     if isinstance(items, list):
@@ -874,6 +877,9 @@ def is_user_registered(user_openid):
     与群注册的 is_group_registered 对应：登记来源只有 settings.json 的
     qq_user_openids，不看勾选状态，也不把 data/qq_registrations.json 的待审核
     申请当作已登记。"""
+    from plugins import bot_profiles
+    if bot_profiles.ids(SETTINGS_FILE) and not bot_profiles.CURRENT.get():
+        return False
     openid = str(user_openid or "").strip()
     if not openid:
         return False

@@ -598,7 +598,7 @@ def check_registration_review_does_not_block_event_loop():
                 patch.object(panel, "_read_discovered", return_value=["user-1"]),
                 patch.object(panel, "save_settings", side_effect=lambda data, expected_revision=None: saved_settings.append((data, expected_revision))),
                 patch.object(panel, "_write_registrations", side_effect=lambda data, expected_revision=None: saved_registrations.append((data, expected_revision))),
-                patch.object(panel, "load_settings", return_value={"reloaded": True}),
+                patch.object(panel, "_settings_payload", return_value={"reloaded": True, "_revision": "new-revision"}),
                 patch.object(panel, "_log"),
             ):
                 task = asyncio.create_task(panel.api_registrations_review(JsonRequest()))
@@ -614,7 +614,7 @@ def check_registration_review_does_not_block_event_loop():
                 assert await task == {
                     "ok": True,
                     "added": 1,
-                    "settings": {"reloaded": True},
+                    "settings": {"reloaded": True, "_revision": "new-revision"},
                 }
         finally:
             release_load.set()
@@ -658,6 +658,12 @@ def check_registration_without_profile_keeps_existing_metadata():
         "qq_id": "12345",
         "enabled": True,
     }
+    for key in ("qq_user_openids", "qq_group_openids"):
+        records = {key: [{"openid": "new"}, {"openid": "existing", "name": "原名称"}]}
+        panel._fill_registration_info(records, key, "new", {"application_code": "ABCD-1234"})
+        panel._fill_registration_info(records, key, "existing", {"application_code": "EFGH-5678"})
+        assert records[key][0]["name"] == "ABCD-1234"
+        assert records[key][1]["name"] == "原名称"
     print("PASS - 无资料注册审核不会覆盖已有 QQ 名称和账号")
 
 

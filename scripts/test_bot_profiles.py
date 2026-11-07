@@ -133,6 +133,13 @@ async def main():
             pass
         assert store.read(path, "222")["x_rss_sources"]
         assert store.read(path)["_profile_errors"] == ["111"]
+        with mock.patch.object(config, "SETTINGS_FILE", path):
+            runtime_check = RSSProfiles({"_runtime_status": {}, "logger": logger}, "x")
+            result = await runtime_check.status("111")
+            assert result["last_result"] == "config_failed" and result["config_error"]
+            assert not result["protection_error"]
+            all_status = await runtime_check.status_all()
+            assert "111" in all_status["config_error"] and not all_status["protection_error"]
         broken.write_bytes(valid)
         print("PASS - empty account stays unrouted; broken account fails closed without blocking others")
 

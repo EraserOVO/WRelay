@@ -121,6 +121,17 @@ def main():
         name=maintenance.backup_now()
         maintenance.check_once()
         assert not maintenance.status()['alerts']
+        rss.update(last_result='config_failed', protection_error='该账号配置损坏，已暂停来源')
+        maintenance.check_once()
+        alerts = maintenance.status()['alerts']
+        assert any(a['id'] == 'config:X' for a in alerts)
+        assert not any(a['id'] == 'protection:X' for a in alerts)
+        rss['config_error'] = '配置读取失败'
+        rss['protection_error'] = '积压队列损坏'
+        maintenance.check_once()
+        assert any(a['id'] == 'protection:X' for a in maintenance.status()['alerts'])
+        rss.pop('config_error'); rss.pop('last_result'); rss.pop('protection_error')
+        notifications.clear()
         rss['source_health'][0]['consecutive_failures']=3
         maintenance.check_once();maintenance.check_once()
         assert len(notifications)==3 # X、Bilibili、YouTube 各一次，重复检查不重复通知。

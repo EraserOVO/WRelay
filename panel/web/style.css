@@ -56,7 +56,7 @@
   }
   /* 日间模式：整体浅色低饱和，文字/卡片/边框/输入框/按钮同步调整 */
   body.theme-light {
-    --success: #16703c;
+    --success: #087f4d;
     --warning: #8a5a00;
     --error: #b3261e;
     --disabled: #858c98;
@@ -64,8 +64,8 @@
     --fg: #23272e;
     --muted: #5a6270;
     --card-bg: #ffffff;
-    --card-heading: #333b47;
-    --fgh3: #5b6573;
+    --card-heading: #3d4d62;
+    --fgh3: #3d4d62;
     --field-bg: #ffffff;
     --field-border: #c2c8d1;
     --field-fg: #23272e;
@@ -88,7 +88,7 @@
     --fgtab-fg: #23272e;
     --fgtab-active-fg: #3349b8;
     /* 日间：彩色状态元素整体调浅、降饱和（浅底深字，保持清晰可读） */
-    --badge-on-bg: #d5f0df; --badge-on-fg: #16703c;
+    --badge-on-bg: #ecf9ef; --badge-on-fg: #087f4d;
     --badge-off-bg: #fde3e0; --badge-off-fg: #b3261e;
     --badge-warn-bg: #fdeeda; --badge-warn-fg: #7c5200;
     --danger-bg: #ffdcd8; --danger-fg: #b3261e; --danger-icon: #a74642;
@@ -122,7 +122,8 @@
   }
   body.theme-light :is(.overview-status-card, #xrssCard, #bilibiliCard, #youtubeCard) {
     --status-ambient-color: #7e9fb9;
-    --status-sheen-color: color-mix(in srgb, var(--status-ambient-color) 10%, transparent);
+    /* White cards need a little more contrast for the moving band to remain visible. */
+    --status-sheen-color: color-mix(in srgb, var(--status-ambient-color) 22%, transparent);
   }
   :is(.overview-status-card, #xrssCard, #bilibiliCard, #youtubeCard).status-ambient-active::before {
     content: "";
@@ -1324,11 +1325,11 @@
   .overview-route-arrow { color: #9eadd8; font-size: 25px; line-height: 1; }
   body.theme-light .overview-kicker { color: #5869bd; }
   body.theme-light .overview-route-copy b { color: #5869bd; }
-  body.theme-light .overview-route-icon { background: #e9edff; color: #4f5fb5; }
-  body.theme-light .overview-route-icon.x-icon { background: #e9edf3; color: #263244; }
-  body.theme-light .overview-route-icon.bili-icon { background: #f4e9fb; color: #9146b0; }
-  body.theme-light .overview-route-icon.youtube-icon { background: #fde9ea; color: #c4303b; }
-  body.theme-light .overview-route-icon.qq-icon { background: #e4f2fb; color: #26769f; }
+  body.theme-light .overview-route-icon { background: #eef1ff; color: #788bd0; }
+  body.theme-light .overview-route-icon.x-icon { background: #eff2f6; color: #77879a; }
+  body.theme-light .overview-route-icon.bili-icon { background: #f7effb; color: #b17ac8; }
+  body.theme-light .overview-route-icon.youtube-icon { background: #fdf0f1; color: #dc7886; }
+  body.theme-light .overview-route-icon.qq-icon { background: #ebf6fb; color: #65a6c2; }
   .recent-message-row { display: flex; align-items: center; gap: 18px; min-height: 44px; }
   #recentMessageText { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
   #recentMessageTime { flex: none; color: var(--muted); font-size: 13px; }
@@ -1510,11 +1511,11 @@
   :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList) th:nth-child(3) { width: 20% !important; }
   :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList) th:nth-child(4) { width: 16% !important; }
   :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList) th:nth-child(5) { width: 34% !important; }
-  :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList) th:nth-child(6) { width: 48px !important; }
+  :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList) th:nth-child(6) { width: 84px !important; }
   :is(#userList, #xUserList) th:nth-child(3) { width: 22% !important; }
   :is(#userList, #xUserList) th:nth-child(4) { width: 18% !important; }
   :is(#userList, #xUserList) th:nth-child(5) { width: auto !important; }
-  :is(#userList, #xUserList) th:nth-child(6) { width: 84px !important; }
+  :is(#userList, #xUserList) th:nth-child(6) { width: 120px !important; }
   #xSourceList th:nth-child(3) { width: 23% !important; }
   #xSourceList th:nth-child(4) { width: auto !important; }
   #xSourceList th:nth-child(5) { width: 112px !important; }
@@ -1528,8 +1529,6 @@
   td .mono { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .id-cell { display: flex; align-items: center; gap: 4px; min-width: 0; }
   .id-cell .id-value { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .id-cell .copy-id { flex: 0 0 var(--row-icon-size); opacity: .72; }
-  .id-cell .copy-id:hover, .id-cell .copy-id:focus-visible { opacity: 1; }
   .table-cell-clip { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .table-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; white-space: nowrap; }
   .table-actions > .rowicon { flex: 0 0 var(--row-icon-size); }
@@ -1799,9 +1798,6 @@
   button.danger.rowicon:hover, button.danger.rowicon:focus-visible {
     background: var(--danger-bg); border-color: var(--danger-bg); color: var(--danger-fg); opacity: 1;
   }
-  .id-cell .copy-id { opacity: .52; background: transparent; border-color: transparent; color: var(--muted); }
-  .id-cell:hover .copy-id, .id-cell .copy-id:focus-visible { opacity: 1; background: var(--sec-bg); border-color: var(--field-border); }
-  .id-cell .copy-id.copied { color: var(--success); opacity: 1; }
   #btnBackfillClear { background: transparent; border-color: transparent; color: var(--danger-icon); }
   #btnBackfillClear:hover, #btnBackfillClear:focus-visible { background: var(--danger-bg); border-color: var(--danger-bg); color: var(--danger-fg); }
 
@@ -2518,7 +2514,6 @@ body.desktop-host :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) td .rowicon.
 body.desktop-host :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) td .rowicon.danger:is(:hover, :focus-visible, :active):not(:disabled) {
   color: var(--badge-off-fg); background: var(--badge-off-bg); border-color: var(--danger-icon); opacity: 1;
 }
-body.desktop-host :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) td .copy-id.copied { color: var(--success); opacity: 1; }
 body.desktop-host :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) :is(td .rowicon, .iconbtn):disabled { opacity: .4; }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"]) :is(#fgBody, #xFgBody, #bilibiliFgBody) > .fgsection { min-height: 0; padding-block: 10px; }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"]) :is(#fgBody, #xFgBody, #bilibiliFgBody) .fgh3 { margin-bottom: 8px; }
@@ -2840,6 +2835,57 @@ body.desktop-host[data-active-page="settings"] .page-header-actions { display: n
 #pageSettings select { width: 130px; height: var(--control-height); border: 1px solid var(--field-border); border-radius: var(--radius-control); padding: 0 12px; font: inherit; }
 body.theme-light #pageSettings :is(select, option) { color-scheme: light; }
 
+/* Use Chromium's customizable select picker so every native select keeps its
+   existing value/events while its open menu can follow the panel's rounded UI. */
+body select { border-radius: var(--radius-control); }
+@supports (appearance: base-select) {
+  body select:not([multiple]):not([size]) {
+    appearance: base-select;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    text-align: start;
+  }
+  body select:not([multiple]):not([size]) > selectedcontent {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  body select:not([multiple]):not([size])::picker-icon {
+    flex: none;
+    align-self: center;
+    margin-inline: auto 0;
+    color: var(--muted);
+  }
+  body select:not([multiple]):not([size])::picker(select) {
+    appearance: base-select;
+    margin-block: 4px;
+    padding: 2px;
+    overflow: hidden;
+    border: 1px solid var(--field-border);
+    border-radius: 10px;
+    background: var(--field-bg);
+    color: var(--field-fg);
+    box-shadow: 0 10px 26px rgb(16 24 40 / 18%);
+  }
+  body select:not([multiple]):not([size]) option {
+    min-height: 30px;
+    width: 100%;
+    padding: 6px 12px;
+    border-radius: 6px;
+    background: var(--field-bg);
+    color: var(--field-fg);
+  }
+  body select:not([multiple]):not([size])::picker(select) option:hover,
+  body select:not([multiple]):not([size])::picker(select) option:focus,
+  body select:not([multiple]):not([size]) option:hover,
+  body select:not([multiple]):not([size]) option:focus {
+    background: color-mix(in srgb, var(--primary) 68%, var(--field-bg));
+  }
+}
+
 /* Keep immediate actions, logs and low-frequency maintenance in distinct groups. */
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) #logCard .log-actions {
   flex-wrap: nowrap; justify-content: space-between; gap: 24px;
@@ -2942,6 +2988,10 @@ body.desktop-host:is([data-active-page="discord"], [data-active-page="bilibili"]
 }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="bilibili"], [data-active-page="qq"])
   :is(#pageDiscord, #pageBilibili, #pageQQ) .func-cards > .card > h2 {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-height);
+  box-sizing: border-box;
   margin: 0;
   align-self: flex-start;
 }
@@ -2988,7 +3038,7 @@ body.desktop-host:is([data-active-page="discord"], [data-active-page="bilibili"]
   :is(#pageDiscord, #pageBilibili, #pageQQ) .func-cards > .card > :is(.relay-link-actions, .scheduled-message-actions, .backfill-actions) > button { flex: 0 0 auto; white-space: nowrap; }
 /* 「自动翻译」卡：首选/次选服务在窄格内换行，链路开关在二级窗口里批量设置。
    分区只留出上方间距，保证卡片高度与同排其他小卡片一致。 */
-body.desktop-host[data-active-page="qq"] #pageQQ .func-cards > #autoTranslationCard .auto-translation-section { padding: 10px 0 0; }
+body.desktop-host[data-active-page="qq"] #pageQQ .func-cards > #autoTranslationCard .auto-translation-section { border-top: 0; padding: 10px 0 0; }
 body.desktop-host[data-active-page="qq"] #pageQQ .func-cards > #autoTranslationCard .auto-translation-fields { flex-wrap: wrap; }
 body.desktop-host[data-active-page="qq"] #pageQQ .func-cards > #autoTranslationCard .auto-translation-field { min-width: 0; flex: 1 1 150px; }
 
@@ -3121,3 +3171,94 @@ body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"]
 .maintenance-banner-text { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .maintenance-banner .maintenance-banner-actions { display: flex; justify-content: flex-start; }
 body.theme-light .maintenance-banner { box-shadow: 0 10px 28px rgba(15, 23, 42, .18); }
+
+/* Keep the previous account out of view while the new workspace loads. */
+body:is(.workspace-switching, .panel-initializing) :is(.page-header, .page-content) { visibility: hidden; pointer-events: none; }
+.panel-loading {
+  position: fixed;
+  inset: 0 0 0 var(--sidebar-width, 0px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 13px;
+  pointer-events: none;
+}
+.panel-loading[hidden] { display: none; }
+.panel-loading img {
+  display: block;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 76px;
+  height: 64px;
+}
+.panel-loading > span:not(.panel-loading-text-hidden) {
+  position: absolute;
+  top: calc(50% + 46px);
+}
+body:not(.theme-light) .panel-loading img { filter: brightness(1.35); }
+body.theme-light .panel-loading img { filter: brightness(2.4) saturate(0.95); opacity: 0.24; }
+body.theme-light :is(.page-header h1, .card h2, .card h3, .fgh3, .overview-route-copy strong, .overview-kicker, .modal-shell h3, .settings-item-copy strong) {
+  color: #3d4d62;
+}
+body.theme-light.desktop-host :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #qqFgBody) .fgh3 {
+  color: #3d4d62;
+}
+body.theme-light .sidebar-brand,
+body.theme-light #pageTabs .nav-item,
+body.theme-light #pageTabs .nav-item.active { color: #3d4d62; }
+body.theme-light #pageTabs .nav-item.active .nav-icon { color: #3349b8; }
+body.theme-light .overview-state[data-state="on"] { color: #087f4d; }
+body.theme-light.desktop-host :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #qqFgBody) > .fgsection {
+  background: #f3f5fa;
+  border: 1px solid #dfe4ef;
+  border-radius: var(--radius-control);
+}
+.fgsection .middle-value {
+  display: inline-flex;
+  vertical-align: bottom;
+  max-width: 100%;
+  min-width: 0;
+  white-space: nowrap;
+}
+.fgsection .chan-name { max-width: 100%; }
+.fgsection .chan-name-text { min-width: 0; overflow: hidden; }
+.id-cell .id-value { display: flex; }
+.fgsection .middle-value-prefix, .id-cell .middle-value-prefix {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fgsection .middle-value-suffix, .id-cell .middle-value-suffix { flex: none; white-space: nowrap; }
+.fgsection :is(.middle-value, .id-value)[data-copy-value] { cursor: copy; }
+.fgsection :is(.middle-value, .id-value)[data-copy-value]:focus-visible {
+  outline: 2px solid var(--primary-border);
+  outline-offset: 2px;
+}
+.fgsection :is(.middle-value, .id-value).copied { color: var(--success); }
+body.theme-light :is(.overview-status-card, #xrssCard, #bilibiliCard, #youtubeCard) .badge.on {
+  color: #087f4d;
+  background: #ecf9ef;
+}
+body.theme-light .overview-status-card #btnRestart:not(:hover):not(:focus-visible):not(:disabled) {
+  color: #7187a2;
+}
+body.theme-light.desktop-host[data-active-page="overview"] .overview-status-card #btnStop:not(:hover):not(:focus-visible):not(:disabled) {
+  color: #c7818d;
+}
+.panel-loading-text-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@media (max-width: 1120px) {
+  .panel-loading { left: var(--sidebar-compact-width); }
+}

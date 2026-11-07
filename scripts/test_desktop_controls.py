@@ -41,6 +41,24 @@ class DesktopTests(unittest.TestCase):
         Path(self.path).write_text("invalid json", encoding="utf-8")
         self.assertEqual(DesktopPreferences(self.path).get()["close_behavior"], "tray")
 
+    def test_last_bot_survives_restart_and_close_preference_changes(self):
+        self.preferences.set_close_behavior("exit")
+        self.preferences.set_last_qq_bot("1905881914")
+        restored = DesktopPreferences(self.path)
+        self.assertEqual(restored.get()["last_qq_bot"], "1905881914")
+        self.assertEqual(restored.get()["close_behavior"], "exit")
+        restored.set_close_behavior("ask")
+        self.assertEqual(DesktopPreferences(self.path).get()["last_qq_bot"], "1905881914")
+        restored.set_last_qq_bot("personal:12345")
+        self.assertEqual(DesktopPreferences(self.path).get()["last_qq_bot"], "personal:12345")
+        with self.assertRaises(ValueError):
+            restored.set_last_qq_bot("../invalid")
+        with patch("desktop_controls.os.replace", side_effect=OSError("disk unavailable")):
+            with self.assertRaises(OSError):
+                restored.set_last_qq_bot("12345")
+        self.assertEqual(restored.get()["last_qq_bot"], "personal:12345")
+        self.assertEqual(DesktopPreferences(self.path).get()["close_behavior"], "ask")
+
     def test_failed_save_keeps_previous_value(self):
         with patch("desktop_controls.os.replace", side_effect=OSError("disk unavailable")):
             with self.assertRaises(OSError):
@@ -139,6 +157,61 @@ class DesktopTests(unittest.TestCase):
         items["设置"](None)
         self.assertEqual(self.show.call_args_list[0].args, ("overview",))
         self.assertEqual(self.show.call_args_list[1].args, ("settings",))
+
+    def test_explicit_restart_shows_window_without_changing_autostart(self):
+        desktop = ast.parse((ROOT / "panel" / "desktop_app.pyw").read_text(encoding="utf-8-sig"))
+        hidden = next(node for node in desktop.body if isinstance(node, ast.FunctionDef) and node.name == "_start_hidden")
+        namespace = {}
+        exec(compile(ast.Module(body=[hidden], type_ignores=[]), "<desktop start>", "exec"), namespace)
+        start_hidden = namespace["_start_hidden"]
+        self.assertTrue(start_hidden(["--autostart"], "--autostart"))
+        self.assertTrue(start_hidden(["--autostart", "--restart", "--recover-desktop"], "--autostart"))
+        self.assertFalse(start_hidden(["--autostart", "--restart", "--show-window"], "--autostart"))
+        self.assertFalse(start_hidden(["--restart", "--show-window"], "--autostart"))
+
+        worker = ast.parse((ROOT / "panel" / "restart_worker.pyw").read_text(encoding="utf-8-sig"))
+        main = next(node for node in worker.body if isinstance(node, ast.FunctionDef) and node.name == "main")
+        for compiled in (False, True):
+            popen = Mock()
+            import os
+            fake_subprocess = SimpleNamespace(Popen=popen, CREATE_NO_WINDOW=0)
+            env = {"os": os, "sys": SimpleNamespace(executable="pythonw"),
+                   "BASE": "panel", "PROJECT_ROOT": "root", "COMPILED": compiled,
+                   "AUTOSTART": True, "AUTOSTART_FLAG": "--autostart",
+                   "RESTART_FLAG": "--restart", "SHOW_WINDOW": True,
+                   "SHOW_WINDOW_FLAG": "--show-window", "subprocess": fake_subprocess,
+                   "_log": Mock()}
+            exec(compile(ast.Module(body=[main], type_ignores=[]), "<restart worker>", "exec"), env)
+            env["main"]()
+            command = popen.call_args.args[0]
+            self.assertIn("--restart", command)
+            self.assertIn("--show-window", command)
+            if compiled:
+                self.assertIn("--autostart", command)
+            else:
+                self.assertTrue(command[1].endswith("autostart.pyw"))
+
+    def test_restart_api_requests_visible_replacement(self):
+        import os
+        tree = ast.parse((ROOT / "panel" / "管理面板.pyw").read_text(encoding="utf-8-sig"))
+        function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "api_panel_restart")
+        function.decorator_list = []
+        for compiled in (False, True):
+            popen, timer = Mock(), Mock()
+            fake_os = SimpleNamespace(path=SimpleNamespace(join=os.path.join, exists=lambda path: True),
+                                      environ={}, name="posix", _exit=Mock())
+            env = {"os": fake_os, "sys": SimpleNamespace(executable="pythonw", argv=["panel", "--autostart"]),
+                   "BASE_DIR": "panel", "PROJECT_ROOT": "root", "COMPILED": compiled,
+                   "AUTOSTART_FLAG": "--autostart", "DESKTOP_RESTART_CALLBACK": Mock(),
+                   "subprocess": SimpleNamespace(Popen=popen, CREATE_NO_WINDOW=0),
+                   "threading": SimpleNamespace(Timer=timer), "_log": Mock(),
+                   "localize_user_error": lambda text, fallback: text}
+            exec(compile(ast.Module(body=[function], type_ignores=[]), "<restart api>", "exec"), env)
+            self.assertTrue(env["api_panel_restart"]()["ok"])
+            args = popen.call_args.args[0]
+            self.assertIn("--show-window", args)
+            self.assertIn("--autostart", args)
+            timer.assert_called_once()
 
     def test_autostart_desktop_restart_does_not_start_stopped_bot(self):
         # Execute only main() with all services replaced, never import config/.env.

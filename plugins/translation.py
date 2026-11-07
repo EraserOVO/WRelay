@@ -24,6 +24,11 @@ _last_successful_provider = None
 _last_successful_at = None
 _last_successful_profile = None
 _last_successful_model = None
+_successful_by_owner = {}
+
+
+def get_translation_statuses():
+    return {owner: dict(status) for owner, status in _successful_by_owner.items()}
 
 
 def get_translation_status():
@@ -87,15 +92,19 @@ async def _translate_with_providers(text, cache_key, config, providers):
             else:
                 continue
             if translated:
-                _last_successful_provider = provider
-                _last_successful_at = int(time.time())
+                profile = model = None
                 if provider == "ai":
                     ai_config = await asyncio.to_thread(get_ai_config)
-                    _last_successful_profile = ai_config.get("_profile_name") or None
-                    _last_successful_model = get_last_used_model() or ai_config.get("model") or None
-                else:
-                    _last_successful_profile = None
-                    _last_successful_model = None
+                    profile = ai_config.get("_profile_name") or None
+                    model = get_last_used_model() or ai_config.get("model") or None
+                _last_successful_provider = provider
+                _last_successful_at = int(time.time())
+                _last_successful_profile = profile
+                _last_successful_model = model
+                from plugins.bot_profiles import CURRENT
+                owner = CURRENT.get()
+                if owner:
+                    _successful_by_owner[owner] = get_translation_status()
             if cache_key is not None:
                 _cache[cache_key] = translated
                 if len(_cache) > _CACHE_LIMIT:
@@ -124,7 +133,9 @@ async def translate_for_relay(text, cache_key, config=None):
             provider_identities.append(
                 await asyncio.to_thread(_provider_cache_identity, provider)
             )
+        from plugins.bot_profiles import CURRENT
         cache_key = (
+            CURRENT.get(),
             cache_key,
             text_identity,
             config.get("provider"),

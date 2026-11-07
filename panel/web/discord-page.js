@@ -130,10 +130,12 @@
   tooltip.id = "uiTooltip";
   tooltip.className = "ui-tooltip";
   tooltip.setAttribute("role", "tooltip");
+  tooltip.setAttribute("aria-live", "polite");
   tooltip.hidden = true;
   document.body.append(tooltip);
   let owner = null;
   let description = null;
+  let feedbackTimer = null;
   let suppressedTitles = [];
   const textTitles = new WeakMap();
   function labelText(control) {
@@ -146,13 +148,15 @@
     const title = control.getAttribute("title");
     if (title === null) return;
     if (control.disabled && title !== labelText(control)) return;
-    if (control.matches(".id-cell") || (!control.matches(".hintbtn") && labelText(control))) {
+    if (control.matches(".id-cell") || (!control.matches(".hintbtn") && (labelText(control) || control.getAttribute("aria-label")))) {
       // Keep the full label for clipped text, without a second native tooltip.
       textTitles.set(control, title);
       control.removeAttribute("title");
     }
   }
   function hide() {
+    clearTimeout(feedbackTimer);
+    feedbackTimer = null;
     const visible = !tooltip.hidden;
     tooltip.hidden = true;
     if (owner) {
@@ -197,26 +201,24 @@
     });
   }).observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ["title"]});
   function show(target) {
-    const control = target.closest("button, .rowicon, .iconbtn, .linkbtn, .chan-name-edit, .id-value, [data-fold]");
+    const control = target.closest("button, .rowicon, .iconbtn, .linkbtn, .chan-name-edit, .middle-value, .id-value, [data-fold]");
     if (control === owner) return;
     if (!control || control.disabled) { if (!tooltip.contains(target)) hide(); return; }
     hide();
-    if (control.matches(".settings-switch")) return;
     const label = labelText(control);
     const iconOnly = !label || control.matches(".iconbtn, .rowicon, .panel-action-icon, .foldbtn, .chan-name-edit, .modal-x") ||
       (control.matches(".nav-item") && parseFloat(getComputedStyle(control).fontSize) === 0);
     const clipped = [control, ...control.querySelectorAll(".fgtab-name, .table-cell-clip")]
       .some(node => node.scrollWidth > node.clientWidth + 1);
-    const fullId = control.matches(".id-value")
-      ? textTitles.get(control.closest(".id-cell")) || control.closest(".id-cell").title : "";
-    if (!control.matches(".hintbtn") && !iconOnly && !clipped && !(fullId && fullId !== label)) return;
-    let text = control.dataset.hint
+    const copyValue = control.dataset.copyValue;
+    if (!control.matches(".hintbtn") && !iconOnly && !clipped && copyValue === undefined) return;
+    let text = control.dataset.tooltip || (control.dataset.hint
       ? document.getElementById(control.dataset.hint)?.textContent.trim()
-      : control.title || textTitles.get(control) || control.getAttribute("aria-label") || label;
-    if (control.matches(".id-value")) text = fullId;
+      : control.title || textTitles.get(control) || control.getAttribute("aria-label") || label);
+    if (copyValue !== undefined) text = copyValue;
     if (!text) return;
     owner = control;
-    [control, control.closest(".id-cell")].filter(Boolean).forEach(node => {
+    [control, control.closest(".id-cell"), control.closest("a[title]")].filter(Boolean).forEach(node => {
       if (node.hasAttribute("title")) {
         suppressedTitles.push([node, node.title]); node.removeAttribute("title");
       }
@@ -231,6 +233,13 @@
     tooltip.style.top = Math.max(8, rect.bottom + box.height + 8 <= innerHeight
       ? rect.bottom + 6 : rect.top - box.height - 6) + "px";
   }
+  window.showWRelayCopyFeedback = function (control, message) {
+    hide();
+    show(control);
+    if (owner !== control) return;
+    tooltip.textContent = message;
+    feedbackTimer = setTimeout(function () { if (owner === control) hide(); }, 1100);
+  };
   document.addEventListener("pointerover", event => show(event.target));
   document.addEventListener("pointerout", event => {
     if (owner && !owner.contains(event.relatedTarget) && !tooltip.contains(event.relatedTarget)) hide();

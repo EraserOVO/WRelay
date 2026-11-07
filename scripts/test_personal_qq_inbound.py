@@ -136,7 +136,7 @@ async def main():
             raise asyncio.CancelledError()
         with mock.patch.object(timer.asyncio, "sleep", side_effect=stop):
             try:
-                await timer._scheduled_message_loop()
+                await timer._scheduled_owner_loop()
             except asyncio.CancelledError:
                 pass
         assert send.await_args.kwargs["channel_id"] == "scheduled:timer-test"

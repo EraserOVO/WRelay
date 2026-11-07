@@ -27,9 +27,9 @@
     profileImportModal: {size: "medium", footer: "profileImportSave", grid: true, backdrop: true},
     translationConfigModal: {size: "large", footer: "translationConfigSave", backdrop: true},
     backupRestoreModal: {size: "medium", footer: "btnBackupRestoreConfirm", heading: ".backup-title", grid: true, backdrop: true},
-    diagnosticModal: {size: "small", heading: ".diagnostic-toolbar", tools: ["btnDiagnosticRefresh"]},
-    messageTraceModal: {size: "large", heading: ".message-trace-toolbar", tools: ["messageTraceSummary", "btnMessageTraceRefresh"]},
-    confirmModal: {size: "small", footer: "confirmOk"},
+    diagnosticModal: {size: "small", heading: ".diagnostic-toolbar", tools: ["btnDiagnosticRefresh"], backdrop: true},
+    messageTraceModal: {size: "large", heading: ".message-trace-toolbar", tools: ["messageTraceSummary", "btnMessageTraceRefresh"], backdrop: true},
+    confirmModal: {size: "small", footer: "confirmOk", backdrop: true},
     bilibiliSourceModal: {size: "medium", footer: "bilibiliSourceSave", heading: ".bilibili-source-heading", backdrop: true},
     youtubeSourceModal: {size: "medium", footer: "youtubeSourceSave", heading: ".bilibili-source-heading", backdrop: true},
     filterModal: {size: "medium", footer: "filterSave", backdrop: true},
@@ -101,6 +101,43 @@
     });
   }
   Object.entries(specs).forEach(([id, spec]) => modalShell(id, spec));
+
+  function hideCurrentSelectOption(select) {
+    if (!(select instanceof HTMLSelectElement) || select.multiple || select.size > 1) return;
+    const selected = select.selectedOptions[0] || null;
+    Array.from(select.options).forEach(option => { option.hidden = option === selected; });
+  }
+  window.refreshWRelaySelectOptions = hideCurrentSelectOption;
+  document.querySelectorAll("select").forEach(hideCurrentSelectOption);
+  document.addEventListener("change", event => {
+    if (event.target instanceof HTMLSelectElement) hideCurrentSelectOption(event.target);
+  }, true);
+  document.addEventListener("pointerdown", event => {
+    if (event.target instanceof HTMLSelectElement) hideCurrentSelectOption(event.target);
+  }, true);
+  document.addEventListener("keydown", event => {
+    if (event.target instanceof HTMLSelectElement && ["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) {
+      hideCurrentSelectOption(event.target);
+    }
+  }, true);
+  new MutationObserver(records => {
+    const changedSelects = new Set();
+    records.forEach(record => {
+      const target = record.target;
+      if (target instanceof HTMLSelectElement) changedSelects.add(target);
+      else if (target instanceof Element) {
+        const parent = target.closest("select");
+        if (parent) changedSelects.add(parent);
+      }
+      record.addedNodes.forEach(node => {
+        if (!(node instanceof Element)) return;
+        if (node instanceof HTMLSelectElement) changedSelects.add(node);
+        node.querySelectorAll("select").forEach(select => changedSelects.add(select));
+      });
+    });
+    changedSelects.forEach(hideCurrentSelectOption);
+  }).observe(document.body, {childList: true, subtree: true});
+
   const autoScroll = document.getElementById("btnLogAutoScroll");
   function decorateLogToggle() {
     autoScroll.setAttribute("role", "switch");

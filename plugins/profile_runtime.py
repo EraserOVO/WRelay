@@ -119,8 +119,9 @@ class RSSProfiles:
                 protection_error=state.get("_protection_load_error", "") or state.get("_protection_runtime_error", ""),
                 qq_connected=owner in (set(get_qq_bots()) | set(connected_bots())))
         except Exception:
-            data.update(ok=False, last_result="config_failed", last_error="该账号配置损坏，已暂停来源",
-                        protection_error="该账号配置损坏，已暂停来源")
+            message = "账号配置读取失败，请检查配置，并确认机器人和面板已更新及重启"
+            data.update(ok=False, last_result="config_failed", last_error=message,
+                        config_error=message, protection_error="")
         return data
 
     async def status_all(self):
@@ -132,7 +133,10 @@ class RSSProfiles:
         result["last_poll_ts"] = max((value.get("last_poll_ts", 0) for _, value in values), default=0)
         result["qq_connected"] = any(value.get("qq_connected") for _, value in values)
         failures = []
+        config_errors = []
         for owner, value in values:
+            if value.get("config_error"):
+                config_errors.append(owner + "：" + value["config_error"])
             for item in value.get("source_health", []):
                 result["source_health"].append(dict(item, key=owner + ":" + str(item.get("key", "")),
                     id=owner + ":" + str(item.get("id", item.get("key", ""))),
@@ -142,5 +146,6 @@ class RSSProfiles:
         failure_result = next((value.get("last_result") or "protection_failed" for _, value in values
                                if value.get("last_error") or value.get("protection_error")), "ok")
         result.update(last_result=failure_result, last_error="；".join(failures),
+                      config_error="；".join(config_errors),
                       protection_error="；".join(value["protection_error"] for _, value in values if value.get("protection_error")))
         return result

@@ -3,7 +3,7 @@
 面板重启中转脚本。
 
 由桌面管理程序以独立进程方式拉起。新桌面进程通过单实例锁
-等待旧进程退出，再沿用当前启动方式（后台自启或普通窗口）。
+等待旧进程退出，保留后台自启标记，并按请求显示窗口。
 """
 
 import os
@@ -24,6 +24,8 @@ if COMPILED:
 AUTOSTART_FLAG = "--autostart"
 RESTART_FLAG = "--restart"
 AUTOSTART = AUTOSTART_FLAG in sys.argv
+SHOW_WINDOW_FLAG = "--show-window"
+SHOW_WINDOW = SHOW_WINDOW_FLAG in sys.argv
 
 
 def _log(msg):
@@ -51,6 +53,8 @@ def main():
                 args.append(AUTOSTART_FLAG)
         else:
             args = [sys.executable, entry, RESTART_FLAG]
+        if SHOW_WINDOW:
+            args.append(SHOW_WINDOW_FLAG)
         subprocess.Popen(
             args,
             cwd=PROJECT_ROOT,

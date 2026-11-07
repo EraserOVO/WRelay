@@ -50,6 +50,9 @@ spec_block = specs.group(1) if specs else ""
 for modal in CARD_MODALS:
     line = re.search(r"^\s*" + modal + r":\s*\{([^}]*)\}", spec_block, re.M)
     check(modal + " 声明 grid: true", bool(line) and "grid: true" in line.group(1))
+for modal in ("diagnosticModal", "messageTraceModal", "confirmModal"):
+    line = re.search(r"^\s*" + modal + r":\s*\{([^}]*)\}", spec_block, re.M)
+    check(modal + " 支持遮罩关闭", bool(line) and "backdrop: true" in line.group(1))
 check("modalShell 按 spec 给正文加 .modal-grid",
       'spec.grid ? "modal-body modal-grid" : "modal-body"' in UI_JS)
 check("共享规则含 .modal-grid 单列网格",
@@ -70,6 +73,13 @@ check("胶囊键盘焦点框缩到轨道",
       and ".pill-switch:focus-visible .settings-switch-track" in UI_CSS)
 check("胶囊轨道沿用「启用补发」32×18",
       re.search(r"\.pill-switch > \.settings-switch-track \{ flex: 0 0 32px; width: 32px; height: 18px", UI_CSS) is not None)
+check("二级窗口胶囊按内容宽度且文字靠近轨道",
+      re.search(r"button\.pill-switch \{[^}]*justify-content: flex-start; gap: 8px; width: auto;", UI_CSS) is not None)
+check("二级窗口正文按钮按内容宽度起排",
+      'body .modal-shell .modal-split > button { justify-self: start; width: auto; max-width: 100%; }' in UI_CSS)
+check("运行日志工具栏紧凑排列且可换行",
+      '#runtimeLogModal .log-toolbar-left { display: flex; align-items: center; flex-wrap: wrap;' in UI_CSS
+      and 'log-toolbar-group log-toolbar-left modal-split' not in HTML)
 card_pill = re.search(
     r":is\(#btnBackfillToggle, #btnScheduledMessageToggle, #btnBilibiliAutoResolveToggle\) \{\s*"
     r"flex: 0 0 auto; width: auto; min-width: 0; max-width: 100%;\s*justify-content: flex-start;",
@@ -112,6 +122,20 @@ discord_fc_grid = re.search(
     STYLE_CSS,
 )
 check("小卡片两列网格覆盖 Discord", discord_fc_grid is not None)
+small_card_heading = re.search(
+    r':is\(#pageDiscord, #pageBilibili, #pageQQ\) \.func-cards > \.card > h2 \{([^}]*)\}',
+    STYLE_CSS,
+)
+check("功能页小卡片标题行统一高度与垂直对齐",
+      bool(small_card_heading)
+      and all(rule in small_card_heading.group(1) for rule in
+              ("display: flex", "align-items: center", "min-height: var(--control-height)", "margin: 0")))
+translation_card_section = re.search(
+    r'#pageQQ \.func-cards > #autoTranslationCard \.auto-translation-section \{([^}]*)\}',
+    STYLE_CSS,
+)
+check("共享自动翻译卡内部不绘制分隔线",
+      bool(translation_card_section) and "border-top: 0" in translation_card_section.group(1))
 backfill_actions = re.search(
     r'<div class="row backfill-actions">(.*?)</div>', HTML, re.S
 )

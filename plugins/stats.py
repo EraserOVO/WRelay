@@ -91,7 +91,10 @@ def get_stats():
 async def record(ok):
     """转发一条消息后记录统计（ok = 至少一个群送达）"""
     async with _stats_lock:
-        data = await run_in_thread_to_completion(_load)
+        root = await run_in_thread_to_completion(_load)
+        from plugins.bot_profiles import CURRENT
+        owner = CURRENT.get()
+        data = root.setdefault("bot_stats", {}).setdefault(owner, {}) if owner else root
 
         today = time.strftime("%Y-%m-%d")
         data["total_forwarded"] = _safe_counter(data.get("total_forwarded"))
@@ -112,5 +115,6 @@ async def record(ok):
             data["total_failed"] += 1
             data["today_failed"] += 1
 
-        snapshot = dict(data)
+        from copy import deepcopy
+        snapshot = deepcopy(root)
         await _persist_snapshot(snapshot)

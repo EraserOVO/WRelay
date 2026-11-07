@@ -1167,7 +1167,9 @@ def read_stats():
         with open(STATS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
-            return data
+            from plugins.bot_profiles import CURRENT
+            owner = CURRENT.get()
+            return data.get("bot_stats", {}).get(owner, {}) if owner else data
     except Exception:
         pass
     return {}
@@ -2106,6 +2108,11 @@ def api_registrations():
         data = _read_registrations()
         users = _registration_items("users", data)
         groups = _registration_items("groups", data)
+        from plugins.bot_profiles import CURRENT
+        owner = CURRENT.get()
+        if owner:
+            users = [item for item in users if not item.get("bot_id") or item.get("bot_id") == owner]
+            groups = [item for item in groups if not item.get("bot_id") or item.get("bot_id") == owner]
     except RegistrationStoreError as exc:
         _log("注册申请列表读取失败: {}".format(exc))
         return JSONResponse(
@@ -2164,6 +2171,8 @@ def _fill_registration_info(data, list_key, openid, reg_entry):
         if isinstance(item, dict) and str(item.get("openid")) == str(openid):
             if name:
                 item["name"] = name
+            elif not str(item.get("name") or "").strip():
+                item["name"] = str(reg_entry.get("application_code") or "").strip()
             if qq_id:
                 item["qq_id"] = qq_id
             if list_key == "qq_group_openids" and str(reg_entry.get("bot_id") or "").strip():
@@ -2176,7 +2185,12 @@ def _review_registration(kind, openid, action):
     registrations_revision = file_revision(REGISTRATIONS_FILE)
     regs = _read_registrations()
     store = regs.get(kind)
-    entry = store.pop(openid, None) if isinstance(store, dict) else None
+    entry = store.get(openid) if isinstance(store, dict) else None
+    from plugins.bot_profiles import CURRENT
+    if entry is not None and CURRENT.get() and entry.get("bot_id") and entry.get("bot_id") != CURRENT.get():
+        return JSONResponse({"ok": False, "msg": "注册申请不属于当前账号"}, status_code=403)
+    if entry is not None:
+        store.pop(openid)
     if entry is None:
         return JSONResponse(
             {"ok": False, "msg": "注册申请不存在或已处理"}, status_code=404
@@ -2215,7 +2229,7 @@ def _review_registration(kind, openid, action):
             status_code=409,
         )
     _log("注册审核 kind=%s action=%s openid=%s 加入settings=%s" % (kind, action, openid, added))
-    return {"ok": True, "added": added, "settings": load_settings()}
+    return {"ok": True, "added": added, "settings": _settings_payload()}
 
 
 @app.post("/api/registrations/review")
@@ -3237,10 +3251,18 @@ def api_panel_restart():
         return {"ok": False, "msg": "缺少重启组件，请重新安装 WRelay"}
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     env = os.environ.copy()
-    args = [worker] if COMPILED else [sys.executable, worker]
+    args = ([worker] if COMPILED else [sys.executable, worker]) + ["--show-window"]
     if AUTOSTART_FLAG in sys.argv:
         args.append(AUTOSTART_FLAG)
     try:
+        if os.name == "nt":
+            # Let the replacement request foreground while this user-initiated
+            # desktop process still owns the foreground window.
+            try:
+                import ctypes
+                ctypes.windll.user32.AllowSetForegroundWindow(0xFFFFFFFF)
+            except (AttributeError, OSError):
+                pass
         subprocess.Popen(
             args,
             cwd=PROJECT_ROOT,
@@ -3254,7 +3276,7 @@ def api_panel_restart():
     # Let the desktop bridge return before closing the current process.
     callback = DESKTOP_RESTART_CALLBACK or (lambda: os._exit(0))
     threading.Timer(2.0, callback).start()
-    return {"ok": True, "msg": "面板正在重启，请稍候重新打开窗口"}
+    return {"ok": True, "msg": "面板正在重启，请稍候"}
 
 
 @app.get("/api/bot/loglevel")

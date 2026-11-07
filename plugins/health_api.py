@@ -10,7 +10,7 @@ from nonebot.adapters.qq import Bot as QQBot
 
 from plugins.retry import get_retry_status
 from plugins.message_trace import get_delivery_traces
-from plugins.translation import get_translation_status
+from plugins.translation import get_translation_status, get_translation_statuses
 from plugins.json_io import load_json
 from plugins.paths import data_path
 from plugins import personal_qq
@@ -81,6 +81,7 @@ async def api_health():
         "personal_qq": personal_qq.connection_status(),
         "retry": get_retry_status(),
         "translation": get_translation_status(),
+        "translation_by_bot": get_translation_statuses(),
     }
 
 
@@ -119,11 +120,11 @@ async def personal_qq_resolve(key: str, action: str):
 
 
 @app.get("/api/message-trace")
-async def api_message_trace(limit: int = 50):
+async def api_message_trace(limit: int = 50, bot_id: str = ""):
     """返回管理面板所需的近期消息投递追踪。"""
     return {
         "ok": True,
-        "entries": await asyncio.to_thread(get_delivery_traces, limit),
+        "entries": await asyncio.to_thread(get_delivery_traces, limit, bot_id or None),
     }
 
 

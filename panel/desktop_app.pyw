@@ -37,6 +37,7 @@ if EDITION == "test":
 ICON_PATH = os.path.join(BASE_DIR, "wrelay_panel.ico")
 WINDOW_STATE_PATH = os.path.join(PROJECT_ROOT, "data", "desktop_window.json")
 PREFERENCES_PATH = os.path.join(PROJECT_ROOT, "data", "desktop_preferences.json")
+WEBVIEW_STORAGE_PATH = os.path.join(PROJECT_ROOT, "data", "webview")
 WINDOW_MIN_SIZE = (960, 640)
 WINDOW_DEFAULT_SIZE = (1360, 880)
 
@@ -103,6 +104,10 @@ def _single_instance_handle():
             return None
         time.sleep(0.25)
     raise RuntimeError("旧桌面窗口尚未退出，无法完成重启")
+
+
+def _start_hidden(arguments, autostart_flag):
+    return autostart_flag in arguments and "--show-window" not in arguments
 
 
 def _read_saved_window_state():
@@ -307,6 +312,12 @@ class DesktopApi:
         except (OSError, ValueError, IndexError, TypeError) as exc:
             return {"ok": False, "msg": str(exc)}
 
+    def set_last_qq_bot(self, value):
+        try:
+            return {"ok": True, **self._preferences.set_last_qq_bot(value)}
+        except (OSError, ValueError) as exc:
+            return {"ok": False, "msg": "无法保存机器人账号选择：%s" % exc}
+
     def set_close_behavior(self, value):
         try:
             return {"ok": True, **self._preferences.set_close_behavior(value)}
@@ -318,6 +329,11 @@ class DesktopApi:
             return False
         if self._chrome is not None:
             self._chrome.SetLight(theme == "light")
+        try:
+            self._preferences.set_window_theme(theme)
+        except (OSError, ValueError):
+            _log_error()
+            return False
         return True
 
     @staticmethod
@@ -367,7 +383,7 @@ def main():
                         return
         if panel.DESKTOP_FLAG not in sys.argv:
             sys.argv.append(panel.DESKTOP_FLAG)
-        autostart = panel.AUTOSTART_FLAG in sys.argv
+        show_after_restart = "--show-window" in sys.argv
         pipe_server = ManagerPipeServer(panel.app, panel.PANEL_TOKEN)
         pipe_server.start()
         panel.main()
@@ -386,12 +402,12 @@ def main():
             x=window_options.get("x"),
             y=window_options.get("y"),
             min_size=WINDOW_MIN_SIZE,
-            hidden=autostart,
+            hidden=_start_hidden(sys.argv, panel.AUTOSTART_FLAG),
             resizable=True,
             maximized=window_options["maximized"],
             frameless=False,
             easy_drag=False,
-            background_color="#1b2434",
+            background_color="#f3f5f9" if api._preferences.get_window_theme() == "light" else "#171f2e",
             js_api=api,
         )
         api._maximized = window_options["maximized"]
@@ -405,6 +421,8 @@ def main():
                 _log_error()
 
         window.events.before_show += attach_window_chrome
+        if show_after_restart:
+            window.events.shown += lambda *_args: _focus_existing_window()
         exiting = False
         save_timer = None
         save_lock = threading.Lock()
@@ -493,7 +511,9 @@ def main():
         panel.DESKTOP_RESTART_CALLBACK = restart_desktop
         tray.run_detached()
         threading.Thread(target=controls.poll, name="wrelay-tray-status", daemon=True).start()
-        webview.start(gui="edgechromium", icon=ICON_PATH)
+        os.makedirs(WEBVIEW_STORAGE_PATH, exist_ok=True)
+        webview.start(gui="edgechromium", icon=ICON_PATH,
+                      private_mode=False, storage_path=WEBVIEW_STORAGE_PATH)
         if exiting and guardian is not None:
             guardian.stop()
     except Exception as exc:
