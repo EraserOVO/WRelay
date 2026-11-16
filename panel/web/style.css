@@ -36,6 +36,7 @@
     --btn-fg: #ffffff;
     --primary: #5865F2;
     --primary-border: #aeb6ff;
+    --source-link-fg: #aeb6ff;
     --modal-bg: #1e2330;
     --modal-border: #3a4150;
     --tip: #ffd479;
@@ -77,6 +78,7 @@
     --btn-fg: #3349b8;
     --primary: #dbe4ff;
     --primary-border: #b9c9f7;
+    --source-link-fg: #4a5fd4;
     --modal-bg: #ffffff;
     --modal-border: #c2c8d1;
     --tip: #8a5a00;
@@ -1317,12 +1319,12 @@
     display: inline-flex; align-items: center; justify-content: center;
   }
   .chan-name .chan-name-edit:hover { color: var(--hover-fg); }
-  .discord-channel-link { color: inherit; text-decoration: none; }
-  .discord-channel-link:hover { color: var(--hover-fg); text-decoration: underline; }
-  .x-account-link { color: var(--card-heading); text-decoration: none; }
-  .x-account-link:hover { color: var(--hover-fg); text-decoration: underline; }
-  .steam-source-link { color: var(--card-heading); text-decoration: none; }
-  .steam-source-link:hover { color: var(--hover-fg); text-decoration: underline; }
+  .source-link { color: var(--source-link-fg); text-decoration: none; }
+  .source-link:hover { color: var(--hover-fg); text-decoration: underline; }
+  .discord-channel-link, .x-account-link, .bilibili-source-link,
+  .youtube-source-link, .steam-source-link { color: var(--source-link-fg); text-decoration: none; }
+  .discord-channel-link:hover, .x-account-link:hover, .bilibili-source-link:hover,
+  .youtube-source-link:hover, .steam-source-link:hover { color: var(--hover-fg); text-decoration: underline; }
   .tablewrap { overflow-x: auto; }
   .tablewrap table { min-width: 540px; }
   /* 「启用」表头弱化 */
@@ -1819,8 +1821,8 @@
   .overview-kicker, .diagnostic-toolbar h3, .backup-title h3,
   .relay-channels-dialog h3 { color: var(--card-heading); }
   .overview-kicker { letter-spacing: .04em; }
-  .x-account-link { color: var(--primary-border); }
-  body.theme-light .x-account-link { color: #4a5fd4; }
+  .x-account-link { color: var(--source-link-fg); }
+  body.theme-light .x-account-link { color: var(--source-link-fg); }
 
   /* Selected forwarding groups remain distinct from idle and paused groups. */
   .fgtab.active {
@@ -2801,6 +2803,12 @@ body.desktop-host :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) td .rowicon.
   color: var(--badge-off-fg); background: var(--badge-off-bg); border-color: var(--danger-icon); opacity: 1;
 }
 body.desktop-host :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) :is(td .rowicon, .iconbtn):disabled { opacity: .4; }
+body.desktop-host[data-active-page="steam"] #pageSteam td .rowicon:not(.filter-active):not(.danger) {
+  color: var(--muted); background: transparent; border-color: transparent; opacity: .88;
+}
+body.desktop-host[data-active-page="steam"] #pageSteam td .rowicon:not(.filter-active):not(.danger):is(:hover, :focus-visible, :active):not(:disabled) {
+  color: var(--fg); background: var(--sec-bg); border-color: var(--field-border); opacity: 1;
+}
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"]) :is(#fgBody, #xFgBody, #bilibiliFgBody) > .fgsection { min-height: 0; padding-block: 10px; }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"]) :is(#fgBody, #xFgBody, #bilibiliFgBody) .fgh3 { margin-bottom: 8px; }
 
@@ -3435,7 +3443,7 @@ body.desktop-host[data-active-page="youtube"] #youtubeFgBody .fgtab-list > butto
 body.desktop-host[data-active-page="youtube"] #youtubeFgBody > .fgsection {
   display: flex; flex-direction: column; min-width: 0; min-height: 0;
   padding: 0 14px 10px; margin: 0; border: 0; border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--field-bg) 45%, var(--card-bg));
+  background: var(--field-bg);
 }
 body.desktop-host[data-active-page="youtube"] #youtubeFgBody .fgh3 {
   display: flex; align-items: center; margin: 0; padding: 16px 0 13px;

@@ -18,8 +18,8 @@
   html.panel-styles-ready body { visibility: visible; }
 </style>
 <link rel="icon" type="image/svg+xml" href="./wrelay-logo.svg">
-<link rel="stylesheet" href="./style.css?v=20261116-youtube-key-modal-r2">
-<link rel="stylesheet" href="./ui-components.css?v=20261116-youtube-key-modal-r1">
+<link rel="stylesheet" href="./style.css?v=20261116-source-links-r1">
+<link rel="stylesheet" href="./ui-components.css?v=20261116-secondary-checkbox-switch-r1">
 <link rel="stylesheet" href="./onboarding.css?v=20261107-restart">
 <link rel="stylesheet" href="./personal-qq.css">
 </head>
@@ -322,7 +322,7 @@
                 <thead><tr>
                   <th style="width:34px"></th>
                   <th style="width:38px;text-align:center" class="col-muted" title="启用 = 是否允许该源参与轮询与发送"><input type="checkbox" id="xSourceAllEnabled"></th>
-                  <th style="width:23%">名称</th><th style="width:auto">X 账号</th><th style="width:120px"></th>
+                  <th style="width:23%">名称</th><th style="width:auto">来源</th><th style="width:120px"></th>
                 </tr></thead>
                 <tbody id="xSourceBody"></tbody>
               </table>
@@ -451,7 +451,7 @@
                 <thead><tr>
                   <th style="width:34px"></th>
                   <th style="width:38px;text-align:center" class="col-muted" title="启用 = 是否允许该频道参与轮询与发送"><input type="checkbox" id="youtubeSourceAllEnabled"></th>
-                  <th style="width:28%">名称</th><th>频道</th><th style="width:120px"></th>
+                  <th style="width:28%">名称</th><th>来源</th><th style="width:120px"></th>
                 </tr></thead>
                 <tbody id="youtubeSourceBody"></tbody>
               </table>
@@ -645,7 +645,7 @@
     </div>
     <div class="card" id="autoTranslationCard">
       <h2 style="display:flex;align-items:center;gap:6px;">自动翻译 <button class="hintbtn" data-hint="hint-auto-translation" data-title="自动翻译"><svg class="help-icon" data-mingcute-icon="question" data-mingcute-size="16"></svg></button></h2>
-      <div class="hint" id="hint-auto-translation" style="display:none">设置四条链路共用的首选 / 次选翻译服务。点「翻译链路」可批量开关某条链路的翻译；单个频道或账号仍可在来源表格里单独设置。</div>
+      <div class="hint" id="hint-auto-translation" style="display:none">设置自动转发链路和 QQ → QQ 手动转发共用的首选 / 次选翻译服务。点「翻译链路」可批量开关；单个来源仍可在内容筛选中单独设置。</div>
       <div class="auto-translation-section">
         <div class="row auto-translation-fields">
           <label class="auto-translation-field"><span>首选方式</span><select id="translationProvider"><option value="tencent_tmt">腾讯 TMT</option><option value="ai">AI API</option></select></label>
@@ -968,6 +968,7 @@
       <button id="btnTranslationX" class="sec translation-toggle pill-switch" type="button" role="switch" aria-checked="false" title="启用或关闭 X→QQ 翻译"><span class="pill-switch-label">X → QQ 翻译</span><span class="settings-switch-track" aria-hidden="true"></span></button>
       <button id="btnTranslationBilibili" class="sec translation-toggle pill-switch" type="button" role="switch" aria-checked="false" title="启用或关闭 Bilibili→QQ 翻译"><span class="pill-switch-label">Bilibili → QQ 翻译</span><span class="settings-switch-track" aria-hidden="true"></span></button>
       <button id="btnTranslationYoutube" class="sec translation-toggle pill-switch" type="button" role="switch" aria-checked="false" title="启用或关闭 YouTube→QQ 翻译"><span class="pill-switch-label">YouTube → QQ 翻译</span><span class="settings-switch-track" aria-hidden="true"></span></button>
+      <button id="btnTranslationSteam" class="sec translation-toggle pill-switch" type="button" role="switch" aria-checked="false" title="启用或关闭 Steam→QQ 翻译"><span class="pill-switch-label">Steam → QQ 翻译</span><span class="settings-switch-track" aria-hidden="true"></span></button>
       <button id="btnTranslationManual" class="sec translation-toggle pill-switch" type="button" role="switch" aria-checked="false" title="启用或关闭 QQ→QQ 手动转发翻译"><span class="pill-switch-label">QQ → QQ 手动转发翻译</span><span class="settings-switch-track" aria-hidden="true"></span></button>
     </div>
   </div>
@@ -1108,13 +1109,13 @@
 </div>
   <script src="./local-api.js"></script>
 <script src="./mingcute-icons.js?v=20261116-youtube-key-visibility-r1"></script>
-<script src="./app.js?v=20261116-youtube-key-modal-r2"></script>
+<script src="./app.js?v=20261116-source-links-r1"></script>
 <script src="./desktop.js?v=20261107-select-sheen"></script>
 <script src="./ui-components.js?v=20261116-youtube-key-modal-r1"></script>
 <script src="./personal-qq.js"></script>
   <script src="./bot-profiles.js"></script>
 <script src="./discord-page.js?v=20261114-steam-workspace"></script>
 <script src="./onboarding.js?v=20261114-mingcute-buttons"></script>
-<script src="./steam-page.js?v=20261116-steam-both-groups-r1"></script>
+<script src="./steam-page.js?v=20261116-source-links-r1"></script>
 </body>
 </html>

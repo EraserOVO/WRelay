@@ -101,7 +101,7 @@
         id: id(isGame ? "game" : "creator"), kind: kind.value, value,
         name: nameInput.value.trim(), enabled: true,
         events: isGame ? ["announcements", "news", "discount"] : ["discount", "new_listing", "early_access", "release", "full_release"],
-        news_feeds: [],
+        news_feeds: [], translation_enabled: false, translation_append_original: true,
       };
       draft.sources.push(source);
       markDraftDirty(0); renderSources(); renderGroups();
@@ -132,11 +132,36 @@
     $("confirmModal").style.display = "flex";
     nameInput.focus();
   }
+  function steamSourceUrl(source) {
+    const value = String(source && source.value || "").trim();
+    if (source && source.kind === "game") {
+      let appId = /^\d+$/.test(value) ? value.replace(/^0+(?=\d)/, "") : "";
+      if (!appId) {
+        try {
+          const parsed = new URL(value);
+          if (["http:", "https:"].includes(parsed.protocol) && ["store.steampowered.com", "steamcommunity.com"].includes(parsed.hostname)) {
+            const match = parsed.pathname.match(/^\/(?:app|games)\/(\d+)(?:\/|$)/i);
+            appId = match ? match[1].replace(/^0+(?=\d)/, "") : "";
+          }
+        } catch (_) {}
+      }
+      return appId && appId !== "0" ? "https://store.steampowered.com/app/" + encodeURIComponent(appId) + "/" : "";
+    }
+    try {
+      const parsed = new URL(value);
+      if (!["http:", "https:"].includes(parsed.protocol) || parsed.hostname !== "store.steampowered.com") return "";
+      const match = parsed.pathname.match(/^\/(?:developer|publisher|dev|pub)\/([A-Za-z0-9_-]+)\/?$/i);
+      return match ? "https://store.steampowered.com" + parsed.pathname.replace(/\/$/, "") : "";
+    } catch (_) {
+      return "";
+    }
+  }
   function sourceFilterActive(source) {
     const supportedEvents = eventsFor(source);
     const selectedEvents = Array.isArray(source.events) ? source.events : supportedEvents;
     return selectedEvents.length < supportedEvents.length || !!source.include_dlc || !!source.include_bundles ||
-      (Array.isArray(source.news_feeds) && source.news_feeds.length > 0);
+      (Array.isArray(source.news_feeds) && source.news_feeds.length > 0) ||
+      source.translation_enabled === true || source.translation_append_original === false;
   }
   function editSourceFilter(source) {
     const edited = clone(source), body = $("confirmBody"); body.replaceChildren();
@@ -160,6 +185,20 @@
     option("折扣包含 DLC", "include_dlc"); option("折扣包含捆绑包", "include_bundles");
     const extraTitle = node("div", "折扣附加条件", "steam-field-label");
     body.append(eventTitle, eventList, extraTitle, extras);
+    const translationTitle = node("div", "翻译", "steam-field-label");
+    const translationOptions = node("div", null, "content-filter-checks");
+    function translationOption(title, key, defaultValue) {
+      const label = node("label", null, "content-filter-check");
+      const input = node("input");
+      input.type = "checkbox";
+      input.checked = edited[key] === undefined ? defaultValue : edited[key] === true;
+      input.addEventListener("change", () => { edited[key] = input.checked; });
+      label.append(input, document.createTextNode(title));
+      translationOptions.append(label);
+    }
+    translationOption("启用翻译", "translation_enabled", false);
+    translationOption("保留原文", "translation_append_original", true);
+    body.append(translationTitle, translationOptions);
     let feedsInput = null;
     if (edited.kind === "game") {
       const field = node("label", null, "steam-field");
@@ -293,18 +332,21 @@
       enabledCell.append(enabled); row.append(enabledCell);
       row.append(node("td", source.kind === "game" ? "游戏" : "开发商 / 发行商"));
       const sourceName = node("td");
-      sourceName.append(node("div", source.name || "未命名来源"));
+      const sourceUrl = steamSourceUrl(source);
+      if (sourceUrl) {
+        const nameLink = node("a", source.name || "未命名来源", "source-link steam-source-link table-cell-clip");
+        nameLink.href = sourceUrl; nameLink.target = "_blank"; nameLink.rel = "noopener noreferrer";
+        nameLink.title = "打开 Steam 来源";
+        sourceName.append(nameLink);
+      } else {
+        sourceName.append(node("div", source.name || "未命名来源"));
+      }
       row.append(sourceName);
       const sourceLink = node("td", null, "mono");
       const sourceValue = String(source.value || "");
-      let safeUrl = "";
-      try {
-        const parsedUrl = new URL(sourceValue);
-        if (parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:") safeUrl = parsedUrl.href;
-      } catch (_) {}
-      if (safeUrl) {
-        const link = node("a", sourceValue, "steam-source-link table-cell-clip");
-        link.href = safeUrl; link.target = "_blank"; link.rel = "noopener noreferrer"; link.title = "打开 Steam 来源";
+      if (sourceUrl) {
+        const link = node("a", sourceValue, "source-link steam-source-link table-cell-clip");
+        link.href = sourceUrl; link.target = "_blank"; link.rel = "noopener noreferrer"; link.title = "打开 Steam 来源";
         sourceLink.append(link);
       } else {
         sourceLink.append(node("span", sourceValue, "table-cell-clip"));

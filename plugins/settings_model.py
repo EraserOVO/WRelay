@@ -655,6 +655,9 @@ def _validate_steam(data):
             return "Steam 游戏或开发商、发行商主页地址无效"
         if not isinstance(item.get("name", ""), str) or len(item.get("name", "")) > 200 or not isinstance(item.get("enabled", True), bool):
             return "Steam 来源名称或启用状态无效"
+        for key in ("translation_enabled", "translation_append_original"):
+            if key in item and not isinstance(item[key], bool):
+                return "Steam 来源翻译选项必须是布尔值"
         for key in ("include_dlc", "include_bundles"):
             if not isinstance(item.get(key, False), bool):
                 return "Steam 附加内容选项必须是布尔值"

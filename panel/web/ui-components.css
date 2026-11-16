@@ -140,9 +140,8 @@ body .modal-shell button.rowicon {
       标题下方的每一行（直接子 label / .modal-split / 列表）左缘与正文内边距对齐。
    2. 底栏左右分区：主要动作（保存 / 确定）贴右下角，其余按钮（取消、清空、
       上下文入口）贴左下角；由 DOM 顺序决定，第一个按钮左贴、最后一个右贴。
-   3. 开关一律胶囊式：加 .pill-switch 的按钮沿用「启用补发」的轨道 + 圆点外观，
-      文字在左、开关在右；按钮外围没有边框和底色，只在悬停时显示浅色圆角底，
-      开启态只点亮轨道。 */
+   3. 二级窗口内的开关使用勾选式：保留圆角选项底，方框勾选状态在左、文字在右；
+      一级桌面页面的开关使用胶囊轨道，转发组复选框与机器人状态卡片按钮不受此规则影响。 */
 body .modal-shell .modal-body.modal-grid { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; justify-items: stretch; gap: 14px; }
 body .modal-shell .modal-body.modal-grid > label { min-width: 0; }
 body .modal-shell .modal-body.modal-grid > label.form-field { display: flex; flex-direction: column; gap: 6px; }
@@ -182,6 +181,29 @@ button.pill-switch[data-on="1"] .settings-switch-track { background: var(--toggl
 body .modal-shell .pill-switch[data-on="1"] .settings-switch-track::after,
 button.pill-switch[data-on="1"] .settings-switch-track::after { transform: translateX(14px); }
 body .modal-shell .pill-switch:disabled { opacity: .45; cursor: not-allowed; }
+/* Secondary-window switches match the checkbox chips used by content filters. */
+body .modal-shell .pill-switch {
+  min-height: 32px; padding: 5px 9px; gap: 7px;
+  border: 1px solid var(--panel-border); border-radius: 999px; background: var(--card-bg);
+}
+body .modal-shell .pill-switch > .settings-switch-track {
+  flex: 0 0 18px; width: 18px; height: 18px;
+  box-sizing: border-box; border: 1px solid var(--panel-border); border-radius: 4px;
+  background: var(--field-bg); transition: background-color .14s ease, border-color .14s ease;
+}
+body .modal-shell .pill-switch > .settings-switch-track::after {
+  left: 5px; top: 1px; width: 5px; height: 9px;
+  border: 0 solid #fff; border-right-width: 2px; border-bottom-width: 2px;
+  border-radius: 0; background: transparent; opacity: 0;
+  transform: rotate(45deg); transition: opacity .12s ease;
+}
+body .modal-shell .pill-switch:is([data-on="1"], [aria-checked="true"]) > .settings-switch-track {
+  border-color: var(--primary); background: var(--primary);
+}
+body .modal-shell .pill-switch:is([data-on="1"], [aria-checked="true"]) > .settings-switch-track::after {
+  opacity: 1; transform: rotate(45deg);
+}
+body .modal-shell .pill-switch:not(:disabled):hover { background: var(--sec-bg); }
 /* 「翻译链路」窗口里的开关各占一行，按钮按内容宽度起排。 */
 body .modal-shell .modal-grid > .translation-chain-toggles { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 body .modal-shell .translation-chain-toggles > .pill-switch { justify-self: start; }

@@ -2068,6 +2068,16 @@ def get_youtube_source_delivery_config(source_id):
     }
 
 
+def get_steam_source_delivery_config(source_id):
+    """读取 Steam 来源的自动翻译路由与来源级选项。"""
+    data = _load_settings()
+    return {
+        "translation": _translation_config_for_item_data(
+            data, "translation", "steam_sources", source_id
+        ),
+    }
+
+
 def get_youtube_protection():
     """返回 YouTube → QQ 全局限速与积压保护配置。"""
     return normalize_protection_config(_load_settings().get("youtube_protection"))

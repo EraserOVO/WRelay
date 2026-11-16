@@ -121,6 +121,8 @@ WRelay/
 
 `steam_state.py` 按来源、目标群和事件分别建立基线，比较公告时间、价格及发行阶段。每个账号的 `steam.json` 保存快照、递增序号、待发送队列和发送时间窗：入队和快照更新在一次原子写中完成，队列满时不推进该项。投递沿用 QQ sender、游标和跨来源幂等记录；个人 QQ 继续遵守未知发送结果待确认机制。停用或移除路由的队列项保留为暂停状态，只有通过面板明确清理才删除；清理与发送使用账号级锁。文件损坏会暂停该账号的 Steam 处理并保留原文件。账号运行状态目录和高级运行状态备份均包含该文件。
 
+Steam 队列出队时按当前账号的共享翻译服务路由和来源级选项调用统一翻译流程；开启后翻译整条 Steam 通知，并按来源设置保留原文。服务未配置或翻译失败时继续发送原文。
+
 ## 2. 各模块职责总览
 
 | 模块 | 职责 |
@@ -400,16 +402,16 @@ YouTube 没有 QQ 手动转发。投递复用 `send_and_record` 的 `youtube:<vi
 
 ## 4.4 统一翻译路由与 AI 模型轮换
 
-Discord、X RSS、Bilibili RSS、YouTube RSS 和 QQ 手动转发在完成消息渲染后，统一通过 `plugins/translation.py`
+Discord、X RSS、Bilibili RSS、YouTube RSS、Steam 和 QQ 手动转发在完成消息渲染后，统一通过 `plugins/translation.py`
 按当前链路配置尝试首选服务和后备服务：
 
 服务路由保存在 `settings.translation`，管理面板只在「QQ → QQ」页显示一张共享「自动翻译」卡片；
-卡片只放首选/次选服务与左下角的「翻译链路」入口，五个链路开关在该按钮打开的 `#translationChainsModal`
-二级窗口内（五个整行胶囊开关，链路名在左、轨道在右）：Discord、X、Bilibili、YouTube 开关分别批量写入对应来源的 `translation_enabled`，
+卡片只放首选/次选服务与左下角的「翻译链路」入口，六个链路开关在该按钮打开的 `#translationChainsModal`
+二级窗口内（六个整行胶囊开关，链路名在左、轨道在右）：Discord、X、Bilibili、YouTube、Steam 开关分别批量写入对应来源的 `translation_enabled`，
 「手动转发」开关写入 `settings.translation.enabled`。自动转发仍按来源条目决定是否翻译；
 Discord/X 手动转发通过 `manual=True` 读取配置，`enabled` 只看共享手动开关，而
 `append_original` / `show_datetime` 仍沿用来源设置；纯 QQ 与 Bilibili 手动转发回退到
-`translation` 全局配置。YouTube 自动投递翻译时跳过来源头（`skip_leading_parts=1`），只翻译标题和链接所在正文。
+`translation` 全局配置。YouTube 自动投递翻译时跳过来源头（`skip_leading_parts=1`），只翻译标题和链接所在正文；Steam 翻译整条已渲染通知。
 
 Discord 实时转发、启动补发和失败重试共用 `plugins/forward_service.py`；频道筛选与翻译配置读取都在线程池执行，避免 settings 文件版本检查占用事件循环。
 统一翻译路由及 AI/TMT 适配器读取服务配置、生成缓存身份和记录 AI 档案状态时也在线程池读取 settings，避免翻译请求中的文件版本检查占用事件循环。

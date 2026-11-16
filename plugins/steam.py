@@ -22,6 +22,7 @@ from plugins.sender import get_qq_bots
 from plugins.stats import record
 from plugins.steam_data import (app_id, bundle_details, bundle_ids, creator_app_ids, creator_clan_id,
                                 creator_url, game_details, parse_announcements, parse_news, store_items)
+from plugins.translation import translate_text_parts
 from plugins import steam_state as logic
 
 _states = {}
@@ -442,7 +443,15 @@ async def _dispatch_locked(owner, settings):
         targets = select_target_groups(normalize_channel_map(last, channel), [chosen["group"]], msg_id)
         if targets:
             try:
-                result = await send_and_record(channel, msg_id, [make_text(chosen["text"])], [], targets,
+                delivery_config = await asyncio.to_thread(
+                    config.get_steam_source_delivery_config, chosen["source"]
+                )
+                text_parts = await translate_text_parts(
+                    [make_text(chosen["text"])],
+                    ("steam", chosen["source"], chosen["identity"]),
+                    config=delivery_config["translation"],
+                )
+                result = await send_and_record(channel, msg_id, text_parts, [], targets,
                                                idempotency_key=chosen["identity"])
             except Exception:
                 _retry_after[(owner, chosen["seq"])] = now + 60

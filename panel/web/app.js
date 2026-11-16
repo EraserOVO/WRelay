@@ -2579,10 +2579,10 @@ function renderSettings() {
     const tr = document.createElement("tr");
     tr.setAttribute("data-id", String(c.id));
     const gi = settings.discord_channels.indexOf(c);
-    const realName = channelNames[c.id] || "";
+    const realName = channelNames[c.id] || c.name || String(c.id);
     const channelUrl = discordChannelUrl(c.id);
     const realNameHtml = channelUrl
-      ? '<a class="discord-channel-link" href="' + escapeHtml(channelUrl) + '" target="_blank" rel="noopener noreferrer" title="打开 Discord 频道">' + escapeHtml(realName) + '</a>'
+      ? '<a class="source-link discord-channel-link" href="' + escapeHtml(channelUrl) + '" target="_blank" rel="noopener noreferrer" title="打开 Discord 频道">' + escapeHtml(realName) + '</a>'
       : escapeHtml(realName);
     tr.innerHTML =
       '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
@@ -2662,6 +2662,7 @@ function renderAIControls() {
   renderTranslationToggleFor("btnTranslationX", allEnabled(settings.x_rss_sources), "X → QQ 翻译");
   renderTranslationToggleFor("btnTranslationBilibili", allEnabled(settings.bilibili_sources), "Bilibili → QQ 翻译");
   renderTranslationToggleFor("btnTranslationYoutube", allEnabled(settings.youtube_sources), "YouTube → QQ 翻译");
+  renderTranslationToggleFor("btnTranslationSteam", allEnabled(settings.steam_sources), "Steam → QQ 翻译");
   renderTranslationToggleFor("btnTranslationManual", translation.enabled === true, "QQ → QQ 手动转发翻译");
 }
 
@@ -2830,7 +2831,7 @@ function renderXPage() {
       '<td><span class="chan-name-text">' + escapeHtml(name) + '</span></td>' +
       '<td class="mono">' +
         (profileUrl
-          ? '<a class="x-account-link" href="' + escapeHtml(profileUrl) + '" target="_blank" rel="noopener noreferrer" title="打开 X 主页">@' + escapeHtml(handle) + '</a>'
+          ? '<a class="source-link x-account-link" href="' + escapeHtml(profileUrl) + '" target="_blank" rel="noopener noreferrer" title="打开 X 主页">@' + escapeHtml(handle) + '</a>'
           : '@' + escapeHtml(handle)) +
       '</td>' +
       '<td style="text-align:right"><div class="table-actions">' +
@@ -2916,7 +2917,18 @@ function renderXPage() {
 // Bilibili 使用独立的来源和转发组；来源条目本身携带 kind/value/filter 字段，
 // 因此不复用 X 的账号字段，避免保存时互相覆盖。
 function bilibiliKindText(source) {
-  return source && source.kind === "up" ? "UP主" : source && source.kind === "tag" ? "标签" : "关键词";
+  const kind = String(source && source.kind || "up").toLowerCase();
+  return kind === "up" ? "UP主" : kind === "tag" ? "标签" : "关键词";
+}
+
+function bilibiliSourceUrl(source) {
+  const value = String(source && (source.value || source.uid) || "").trim();
+  if (!value) return "";
+  const kind = String(source && source.kind || "up").toLowerCase();
+  if (kind === "up" && /^\d+$/.test(value)) {
+    return "https://space.bilibili.com/" + encodeURIComponent(value);
+  }
+  return "https://search.bilibili.com/all?keyword=" + encodeURIComponent(value);
 }
 
 function renderBilibiliPage() {
@@ -2936,6 +2948,7 @@ function renderBilibiliPage() {
   sourceRows.forEach(function (source) {
     const index = allSources.indexOf(source);
     const sourceId = String(source.id || bilibiliSourceId(source.kind || "up", source.value || ""));
+    const sourceUrl = bilibiliSourceUrl(source);
     const tr = document.createElement("tr");
     tr.setAttribute("data-id", sourceId);
     tr.innerHTML =
@@ -2943,7 +2956,9 @@ function renderBilibiliPage() {
       '<td style="text-align:center"><input type="checkbox" data-kind="biliSource" data-i="' + index + '"' + (source.enabled ? " checked" : "") + '></td>' +
       '<td>' + escapeHtml(bilibiliKindText(source)) + '</td>' +
       '<td><span class="chan-name-text">' + escapeHtml(source.name || "") + '</span></td>' +
-      '<td class="mono" title="' + escapeHtml(source.value || "") + '">' + escapeHtml(source.value || "") + '</td>' +
+      '<td class="mono" title="' + escapeHtml(source.value || "") + '">' + (sourceUrl
+        ? '<a class="source-link bilibili-source-link" href="' + escapeHtml(sourceUrl) + '" target="_blank" rel="noopener noreferrer" title="打开 Bilibili 来源">' + escapeHtml(source.value || source.uid || "") + '</a>'
+        : escapeHtml(source.value || source.uid || "")) + '</td>' +
       '<td style="text-align:right"><div class="table-actions"><button class="sec rowicon' + (bilibiliSourceFilterActive(source) ? ' filter-active' : '') + '" data-kind="biliSourceFilterEdit" data-i="' + index + '" title="内容筛选" aria-label="内容筛选">' + SVG_FUNNEL + '</button><button class="sec rowicon" data-kind="biliSourceEdit" data-i="' + index + '" title="编辑名称与来源地址" aria-label="编辑名称与来源地址">' + SVG_PEN + '</button><button class="danger rowicon" data-kind="biliFgSourceRemove" data-id="' + escapeHtml(sourceId) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
     sourceBody.appendChild(tr);
   });
@@ -3080,7 +3095,7 @@ function renderYoutubePage() {
       '<td style="text-align:center"><input type="checkbox" data-kind="youtubeSource" data-i="' + index + '"' + (source.enabled ? " checked" : "") + '></td>' +
       '<td><span class="chan-name-text">' + escapeHtml(source.name || source.value || "") + '</span></td>' +
       '<td class="mono">' + (channelUrl
-        ? '<a class="x-account-link" href="' + escapeHtml(channelUrl) + '" target="_blank" rel="noopener noreferrer" title="打开 YouTube 频道">' + escapeHtml(source.value || "") + '</a>'
+        ? '<a class="source-link youtube-source-link" href="' + escapeHtml(channelUrl) + '" target="_blank" rel="noopener noreferrer" title="打开 YouTube 频道">' + escapeHtml(source.value || "") + '</a>'
         : escapeHtml(source.value || "")) + '</td>' +
       '<td style="text-align:right"><div class="table-actions">' +
         '<button class="sec rowicon' + (youtubeSourceFilterActive(source) ? ' filter-active' : '') + '" title="内容筛选" aria-label="内容筛选" data-kind="youtubeSourceFilterEdit" data-i="' + index + '">' + SVG_FUNNEL + '</button>' +
@@ -7092,6 +7107,12 @@ document.addEventListener("click", async function (e) {
   } else if (btn.id === "btnTranslationYoutube") {
     const enabled = btn.dataset.on !== "1";
     (settings.youtube_sources || []).forEach(function (source) {
+      source.translation_enabled = enabled;
+    });
+    await saveAndReload();
+  } else if (btn.id === "btnTranslationSteam") {
+    const enabled = btn.dataset.on !== "1";
+    (settings.steam_sources || []).forEach(function (source) {
       source.translation_enabled = enabled;
     });
     await saveAndReload();
