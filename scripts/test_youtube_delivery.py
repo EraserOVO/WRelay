@@ -40,7 +40,7 @@ async def test_render():
     rendered, fetch = await render(POST, SOURCE, None, {POST["thumbnail"]: b"image"})
     text_parts, media_items = rendered
     assert len(text_parts) == 2
-    assert "自动转发来自 YouTube 中[测试频道]的视频：" in text_parts[0].data["text"]
+    assert text_parts[0].data["text"] == "【YouTube · 视频】测试频道"
     assert text_parts[1].data["text"] == "\n测试视频\n" + POST["link"]
     assert len(media_items) == 1
     assert media_items[0]["kind"] == "图片"
@@ -63,7 +63,7 @@ async def test_render():
         POST, SOURCE, {"文字", "链接"}, {}
     )
     assert [part.data["text"] for part in rendered[0]] == [
-        "自动转发来自 YouTube 中[测试频道]的视频：",
+        "【YouTube · 视频】测试频道",
         "\n测试视频\n" + POST["link"],
     ]
     assert rendered[1] == []
@@ -72,7 +72,7 @@ async def test_render():
     rendered, fetch = await render(POST, SOURCE, {"图片"}, {})
     text_parts, media_items = rendered
     assert [part.data["text"] for part in text_parts] == [
-        "自动转发来自 YouTube 中[测试频道]的视频：",
+        "【YouTube · 视频】测试频道",
     ]
     assert len(media_items) == 1
     assert media_items[0]["segment"].type == "text"

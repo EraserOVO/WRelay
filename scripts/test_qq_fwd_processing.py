@@ -107,7 +107,7 @@ async def _check_source_text_precedes_images():
         part.data.get("text", "")
         for part in first_message
         if part.type == "text"
-    ) == "转发于「来源测试群」：\n\n转发正文"
+    ) == "【QQ 转发 · 来源测试群】\n转发正文"
     assert all(part.type != "file_image" for part in first_message)
     assert all(message[-1].type == "file_image" for _, message in sent[1:])
 
@@ -127,7 +127,7 @@ async def _check_source_text_precedes_images():
     first_message = sent[0][1]
     assert "".join(
         part.data.get("text", "") for part in first_message if part.type == "text"
-    ) == "转发于「来源测试群」：\n\n图片前图片后"
+    ) == "【QQ 转发 · 来源测试群】\n图片前图片后"
     assert all(part.type != "file_image" for part in first_message)
     image_message = sent[1][1]
     assert getattr(image_message, "type", "") == "file_image"

@@ -2,7 +2,7 @@
 
 ## 自动检查
 
-运行 `python scripts/run_tests.py`。统一入口检查测试脚本登记状态，然后执行自动回归。CI 在 Ubuntu/Windows 与 Python 3.11/3.12 组合运行这条入口，并在 Windows 上单独构建未签名正式安装包、执行安装冒烟检查。开发环境细节见 [构建指南](BUILDING.md)。
+运行 `python scripts/run_tests.py`。统一入口检查测试脚本登记状态，然后执行自动回归，并为子进程设置项目根目录导入路径，使未打包的面板模块也能被测试导入。CI 在 Ubuntu/Windows 与 Python 3.11/3.12 组合运行这条入口，并在 Windows 上单独构建未签名正式安装包、执行安装冒烟检查。开发环境细节见 [构建指南](BUILDING.md)。
 
 Ubuntu 上的面板源码检查显式加载 `.pyw` 文件，托盘菜单模型使用无界面后端；原生 Windows 窗口检查仍在 Windows 上进行。
 

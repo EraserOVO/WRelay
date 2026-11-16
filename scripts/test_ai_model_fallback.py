@@ -1,7 +1,6 @@
 """验证 AI API 模型不可用时会读取模型目录并自动切换。"""
 import asyncio
 import os
-import time
 from unittest.mock import patch
 
 import httpx
@@ -105,10 +104,8 @@ async def main():
             "_profile_id": "profile-" + label,
         }
         ai_client._model_cache.clear()
-        ai_client._model_overrides.clear()
-        ai_client._model_recheck_at.clear()
         with patch.object(ai_client, "_ai_client", client), patch.object(
-            ai_client, "get_ai_config", return_value=config
+            ai_client, "get_ai_configs", return_value=[config]
         ), patch.dict(os.environ, {"WRELAY_TEST_KEY": "test-key"}, clear=False):
             assert await ai_client.generate_text([{"role": "user", "content": "hello"}]) == "译文"
             assert client.post_models == [blocked_model, "DeepSeek-V4.1-Flash"]
@@ -117,8 +114,8 @@ async def main():
             client.post_models.clear()
             client.get_paths.clear()
             assert await ai_client.generate_text([{"role": "user", "content": "hello"}]) == "译文"
-            assert client.post_models == ["DeepSeek-V4.1-Flash"]
-            assert client.get_paths == []
+            assert client.post_models == [blocked_model, "DeepSeek-V4.1-Flash"]
+            assert client.get_paths == ["https://example.test/v1/models"]
 
     client = FakeClient(
         "configured-model",
@@ -138,10 +135,8 @@ async def main():
         "_profile_id": "profile-sequential",
     }
     ai_client._model_cache.clear()
-    ai_client._model_overrides.clear()
-    ai_client._model_recheck_at.clear()
     with patch.object(ai_client, "_ai_client", client), patch.object(
-        ai_client, "get_ai_config", return_value=config
+        ai_client, "get_ai_configs", return_value=[config]
     ), patch.dict(os.environ, {"WRELAY_TEST_KEY": "test-key"}, clear=False):
         assert await ai_client.generate_text([{"role": "user", "content": "hello"}]) == "译文"
         assert client.post_models == [
@@ -153,8 +148,12 @@ async def main():
         client.post_models.clear()
         client.get_paths.clear()
         assert await ai_client.generate_text([{"role": "user", "content": "hello"}]) == "译文"
-        assert client.post_models == ["DeepSeek-V4.1-Flash"]
-        assert client.get_paths == []
+        assert client.post_models == [
+            "configured-model",
+            "DeepSeek-V4-Flash",
+            "DeepSeek-V4.1-Flash",
+        ]
+        assert client.get_paths == ["https://example.test/v1/models"]
     client = FakeClient("quota-model", 429, "rate limit exceeded")
     config = {
         "base_url": "https://example.test/v1",
@@ -165,10 +164,8 @@ async def main():
         "_profile_id": "profile-quota",
     }
     ai_client._model_cache.clear()
-    ai_client._model_overrides.clear()
-    ai_client._model_recheck_at.clear()
     with patch.object(ai_client, "_ai_client", client), patch.object(
-        ai_client, "get_ai_config", return_value=config
+        ai_client, "get_ai_configs", return_value=[config]
     ), patch.dict(os.environ, {"WRELAY_TEST_KEY": "test-key"}, clear=False):
         try:
             await ai_client.generate_text([{"role": "user", "content": "hello"}])
@@ -191,10 +188,8 @@ async def main():
         "_profile_id": "profile-recovery",
     }
     ai_client._model_cache.clear()
-    ai_client._model_overrides.clear()
-    ai_client._model_recheck_at.clear()
     with patch.object(ai_client, "_ai_client", client), patch.object(
-        ai_client, "get_ai_config", return_value=config
+        ai_client, "get_ai_configs", return_value=[config]
     ), patch.dict(os.environ, {"WRELAY_TEST_KEY": "test-key"}, clear=False):
         assert await ai_client.generate_text([{"role": "user", "content": "hello"}]) == "译文"
         assert client.post_models == ["busy-model", "DeepSeek-V4.1-Flash"]
@@ -203,11 +198,9 @@ async def main():
         client.blocked_model = None
         client.blocked_models.pop("busy-model", None)
         client.models = ["busy-model", "DeepSeek-V4.1-Flash"]
-        ai_client._model_recheck_at.clear()
         assert await ai_client.generate_text([{"role": "user", "content": "hello"}]) == "译文"
-        assert client.get_paths == ["https://example.test/v1/models"]
+        assert client.get_paths == []
         assert client.post_models == ["busy-model"]
-        assert ai_client._model_overrides == {}
 
     client = FakeClient(
         "obsolete-model",
@@ -224,15 +217,13 @@ async def main():
         "_profile_id": "profile-model-list-error",
     }
     ai_client._model_cache.clear()
-    ai_client._model_overrides.clear()
-    ai_client._model_recheck_at.clear()
     with patch.object(ai_client, "_ai_client", client), patch.object(
-        ai_client, "get_ai_config", return_value=config
+        ai_client, "get_ai_configs", return_value=[config]
     ), patch.dict(os.environ, {"WRELAY_TEST_KEY": "test-key"}, clear=False):
         try:
             await ai_client.generate_text([{"role": "user", "content": "hello"}])
         except ai_client.AIClientError as exc:
-            assert "查询可用模型失败" in str(exc)
+            assert "AI 模型优先级链全部失败" in str(exc)
         else:
             raise AssertionError("模型目录请求失败应转换成 AIClientError")
     assert client.post_models == ["obsolete-model"]
@@ -248,7 +239,7 @@ async def main():
         "_profile_id": "profile-invalid-content",
     }
     with patch.object(ai_client, "_ai_client", client), patch.object(
-        ai_client, "get_ai_config", return_value=config
+        ai_client, "get_ai_configs", return_value=[config]
     ), patch.dict(os.environ, {"WRELAY_TEST_KEY": "test-key"}, clear=False):
         try:
             await ai_client.generate_text([{"role": "user", "content": "hello"}])
@@ -269,25 +260,6 @@ async def main():
     assert len(ai_client._model_cache) == ai_client._MODEL_CACHE_LIMIT
     assert "https://endpoint-0.test/v1" in ai_client._model_cache
     assert "https://endpoint-1.test/v1" not in ai_client._model_cache
-
-    ai_client._model_overrides.clear()
-    ai_client._model_recheck_at.clear()
-    future = time.monotonic() + 1000
-    for index in range(ai_client._MODEL_STATE_LIMIT):
-        key = "profile-" + str(index)
-        ai_client._remember_model_override(key, "fallback", future)
-    await ai_client._model_for_request(
-        {"base_url": "https://example.test/v1"},
-        "test-key",
-        5,
-        "configured",
-        "profile-0",
-    )
-    ai_client._remember_model_override("profile-new", "fallback", future)
-    assert len(ai_client._model_overrides) == ai_client._MODEL_STATE_LIMIT
-    assert "profile-0" in ai_client._model_overrides
-    assert "profile-1" not in ai_client._model_overrides
-    assert set(ai_client._model_overrides) == set(ai_client._model_recheck_at)
 
     assert ai_client.ollama_native_chat_endpoint("http://127.0.0.1:11434/v1") == "http://127.0.0.1:11434/api/chat"
     assert ai_client.ollama_native_chat_endpoint("http://localhost:11434/v1") == "http://localhost:11434/api/chat"
@@ -316,7 +288,7 @@ async def main():
         "_profile_id": "profile-local-ollama",
     }
     with patch.object(ai_client, "_ai_client", ollama_client), patch.object(
-        ai_client, "get_ai_config", return_value=ollama_config
+        ai_client, "get_ai_configs", return_value=[ollama_config]
     ), patch.dict(os.environ, {"WRELAY_TEST_KEY": "ollama"}, clear=False):
         assert await ai_client.generate_text([{"role": "user", "content": "Translate this."}]) == "这是译文"
     url, request_kwargs = ollama_client.calls[0]

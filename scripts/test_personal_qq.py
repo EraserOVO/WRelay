@@ -68,7 +68,7 @@ def check_config():
     namespace = {}
     exec(compile(ast.Module(body=functions, type_ignores=[]), "panel-account-check", "exec"), namespace)
     assert namespace["_prepare_qq_bots"]([], []) == []
-    assert namespace["_public_qq_bots"]([{"id": "你的AppID"}]) == []
+    assert namespace["_public_qq_bots"]([{"id": "你的AppID"}], names={}) == []
     print("PASS - private credentials, revisions, account validation and panel API")
 
 

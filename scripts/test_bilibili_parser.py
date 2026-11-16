@@ -37,11 +37,11 @@ def main():
     assert posts[0]["media"] == [{"kind": "图片", "url": "https://img.example/cover.jpg"}]
     tag_source = {"kind": "tag", "value": "空洞骑士", "name": "空洞骑士"}
     assert format_post_text(posts[0], tag_source) == (
-        "自动转发来自 Bilibili 中[测试 UP]的投稿：\n"
+        "【Bilibili · 投稿】测试 UP\n"
         "第一个视频\n"
         "https://www.bilibili.com/video/BV1AA411C7mD"
     )
-    assert format_post_text(posts[1], tag_source).startswith("自动转发来自 Bilibili 中[空洞骑士]的投稿：\n")
+    assert format_post_text(posts[1], tag_source).startswith("【Bilibili · 投稿】空洞骑士\n")
     assert "作者：" not in format_post_text(posts[0], tag_source)
     assert "#空洞骑士" not in format_post_text(posts[0], tag_source)
     up_text = format_post_text(posts[0], {"kind": "up", "value": "123"})

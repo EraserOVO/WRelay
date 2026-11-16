@@ -48,6 +48,19 @@ def game(appid="620", price=1000, percent=0, phase="upcoming"):
 
 
 class SteamStateTests(unittest.TestCase):
+    def test_queue_format_preserves_article_text_and_removes_only_legacy_headers(self):
+        self.assertEqual(
+            steam._format_queue_message({"event": "news", "text": "Steam notice"}),
+            "【Steam · 新闻】\nSteam notice",
+        )
+        self.assertEqual(
+            steam._format_queue_message({
+                "event": "news",
+                "text": "Steam 游戏新闻\n游戏标题\nhttps://example.test/news",
+            }),
+            "【Steam · 新闻】\n游戏标题\nhttps://example.test/news",
+        )
+
     @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
     def test_panel_draft_and_save(self):
         script = Path(__file__).with_name("test_steam_ui.js")

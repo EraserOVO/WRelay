@@ -41,12 +41,33 @@ _poll_jobs = {}
 _previous_connected = set()
 _poll_suspended = set()
 _stopping = False
+_LEGACY_QUEUE_HEADERS = frozenset({
+    "Steam 游戏公告", "Steam 游戏新闻", "Steam 游戏折扣", "Steam DLC折扣",
+    "Steam 捆绑包折扣", "Steam 新游戏商店页面",
+    "Steam 游戏抢先体验开售", "Steam 游戏正式发售",
+    "Steam 游戏抢先体验转正式版",
+})
+_EVENT_LABELS = {
+    "announcements": "公告", "news": "新闻", "discount": "折扣",
+    "new_listing": "新上架", "early_access": "抢先体验",
+    "release": "发售", "full_release": "正式发售",
+}
 
 
 def _path(owner):
     if owner:
         return bot_profiles.runtime_path(config.SETTINGS_FILE, owner, "steam.json")
     return data_path("steam.json")
+
+
+def _format_queue_message(item):
+    body_lines = str(item.get("text") or "").splitlines()
+    if body_lines and body_lines[0] in _LEGACY_QUEUE_HEADERS:
+        body_lines = body_lines[1:]
+    return "【Steam · %s】\n%s" % (
+        _EVENT_LABELS.get(item.get("event"), "动态"),
+        "\n".join(body_lines),
+    )
 
 
 def _load(owner):
@@ -446,18 +467,7 @@ async def _dispatch_locked(owner, settings):
                 delivery_config = await asyncio.to_thread(
                     config.get_steam_source_delivery_config, chosen["source"]
                 )
-                steam_labels = {
-                    "announcements": "公告", "news": "新闻", "discount": "折扣",
-                    "new_listing": "新上架", "early_access": "抢先体验",
-                    "release": "发售", "full_release": "正式发售",
-                }
-                body_lines = str(chosen["text"]).splitlines()
-                if body_lines and body_lines[0].startswith("Steam "):
-                    body_lines = body_lines[1:]
-                formatted = "【Steam · %s】\n%s" % (
-                    steam_labels.get(chosen.get("event"), "动态"),
-                    "\n".join(body_lines),
-                )
+                formatted = _format_queue_message(chosen)
                 text_parts = await translate_text_parts(
                     [make_text(formatted)],
                     ("steam", chosen["source"], chosen["identity"]),

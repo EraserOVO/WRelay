@@ -9,7 +9,7 @@
 
 另校验「状态卡统一」（见 docs/DESIGN.md「共用功能页模板」）：各页机器人状态卡与 X 页 RSS 状态卡
 采用同一套卡片表面，X / Bilibili / YouTube 的 RSS 状态卡与 X 同规格；
-总览页机器人状态卡保留启动、停止、重启按钮。
+总览页机器人状态卡保留启动、停止、重启按钮；链路页隐藏这些按钮但保留状态快捷入口。
 用法：.venv/Scripts/python.exe scripts/test_desktop_modal_grid.py
 """
 import re
@@ -106,9 +106,11 @@ check("定时消息动作栏：编辑按钮在前、胶囊在后",
       bool(scheduled_actions)
       and scheduled_actions.group(1).find("btnScheduledMessageEdit")
       < scheduled_actions.group(1).find("btnScheduledMessageToggle"))
-check("Discord 离线补发进入小卡片网格",
-      'group(byId("pageDiscord"), "relay-translation-row func-cards", [])' in DISCORD_JS
-      and 'move(byId("backfillCard"), lowerCards)' in DISCORD_JS)
+check("桌面端离线补发与 RSS 详情由状态栏入口打开",
+      "const showInlineChainDetails = !IS_DESKTOP_HOST;" in APP_JS
+      and 'discord: {kind: "backfill", target: "backfillCard"}' in APP_JS
+      and 'function openChainDetailModal(cardId)' in APP_JS
+      and 'if (target) openChainDetailModal(target);' in APP_JS)
 check("离线补发不再使用旧横向分组",
       "desktop-backfill-parameters" not in STYLE_CSS
       and "desktop-backfill-parameters" not in DISCORD_JS
@@ -157,11 +159,15 @@ check("设置页开关焦点框缩到轨道",
 check("设置页开关悬停不再绘制外围底",
       "#pageSettings .settings-switch:not(:disabled):is(:hover, :focus-visible)" not in UI_CSS)
 check("app.js 提供 pillSwitchMarkup", "function pillSwitchMarkup(" in APP_JS)
-for fn in ["renderTranslationToggleFor", "renderTranslationSettingButton", "renderBilibiliAutoResolveToggle",
+for fn in ["renderTranslationToggleFor", "renderBilibiliAutoResolveToggle",
            "renderScheduledMessageToggle", "renderBackfillToggle"]:
     body = re.search(r"function " + fn + r"\([^)]*\) \{(.*?)\n\}", APP_JS, re.S)
     check(fn + " 改用胶囊标记", bool(body) and "pillSwitchMarkup(" in body.group(1)
           and "<svg" not in body.group(1))
+translation_entry = re.search(r'<button[^>]*id="btnTranslationChains"[^>]*>', HTML)
+check("自动翻译卡的翻译链路入口保持普通按钮",
+      bool(translation_entry) and "pill-switch" not in translation_entry.group(0)
+      and 'role="switch"' not in translation_entry.group(0))
 for button in PILL_BUTTONS:
     tag = re.search(r"<button[^>]*id=\"" + button + r"\"[^>]*>", HTML)
     check(button + " 带 pill-switch 与 role=switch",
@@ -190,8 +196,9 @@ youtube_card_surface = re.search(
 check("YouTube 状态卡改用描边卡片，不再是扁平状态带", youtube_card_surface is not None)
 check("YouTube RSS 状态区与 X / Bilibili 同规格（标题与徽标各占一行）",
       "body.desktop-host :is(#xrssCard, #bilibiliCard, #youtubeCard) > :is(h2, .rss-status-line) { grid-column: 1 / -1; }" in UI_CSS)
-check("启停按钮只在总览显示，总览卡仍保留三个按钮",
-      'body:not([data-active-page="overview"]) .robot-status-actions { display: none; }' in STYLE_CSS
+check("启停和重启按钮只在总览显示，链路状态入口保留",
+      'body.desktop-host:not([data-active-page="overview"]) .robot-core-actions\n    :is(#btnStart, #btnStop, #btnRestart) { display: none !important; }' in STYLE_CSS
+      and 'id="chainStatusShortcut"' in HTML
       and all(button in HTML for button in ('id="btnStart"', 'id="btnStop"', 'id="btnRestart"')))
 check("YouTube 页机器人状态卡复用共享分组（与 X / Bilibili 一致）",
       'youtube: {workspace: "youtubeFgBody"}' in DISCORD_JS

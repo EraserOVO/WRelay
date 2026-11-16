@@ -204,7 +204,7 @@ async def main():
         async def render(message, channel_id, message_id, **kwargs):
             rendered_filters[store.CURRENT.get()] = kwargs["filter_config"]["filter_keywords"]
             return ["content"], []
-        async def send(channel_id, message_id, text, media, groups):
+        async def send(channel_id, message_id, text, media, groups, **kwargs):
             sent_groups.extend(groups)
             return retry.SendResult({g: True for g in groups})
         entry = mock.Mock(groups={"G1", "G2"}, message={}, source_label="test")

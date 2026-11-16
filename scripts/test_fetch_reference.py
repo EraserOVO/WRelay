@@ -141,7 +141,7 @@ async def test_malformed_message_author():
     msg["channel_name"] = "频道A"
     parts, _media, has_content = await fetch.build_parts(msg)
     text = text_parts_str(parts)
-    assert "[unknown]" in text, text
+    assert "【Discord】#频道A · unknown" in text, text
     assert "当前消息正文" in text, text
     assert has_content
     print("[OK] 主消息作者结构损坏 → unknown 降级，正文正常转发")
@@ -467,11 +467,7 @@ async def test_non_reply_unchanged():
     }
     parts, _media, has_content = await fetch.build_parts(msg)
     text = text_parts_str(parts)
-    expected = (
-        "自动转发来自\n"
-        "Discord [#频道A] 中 [alice]的消息：\n"
-        "普通消息"
-    )
+    expected = "【Discord】#频道A · alice\n普通消息"
     assert text == expected, repr(text)
     assert "↩︎" not in text
     assert has_content

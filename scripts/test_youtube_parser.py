@@ -159,14 +159,14 @@ def main():
         raise AssertionError("非 Atom Feed 根节点应被拒绝")
 
     assert format_forward_text(posts[1], {"name": "备用名称"}) == (
-        "自动转发来自 YouTube 中[测试频道]的视频：\n"
+        "【YouTube · 视频】测试频道\n"
         "更新的视频\n"
         "https://www.youtube.com/watch?v=NEWVIDEO01"
     )
     assert format_forward_text(
         {"title": "无作者", "link": "https://youtu.be/x"},
         {"name": "来源名称"},
-    ) == "自动转发来自 YouTube 中[来源名称]的视频：\n无作者\nhttps://youtu.be/x"
+    ) == "【YouTube · 视频】来源名称\n无作者\nhttps://youtu.be/x"
     assert format_forward_text({}, {}) == ""
     print("PASS - YouTube 频道解析、来源归一化和转发文本")
 

@@ -3844,6 +3844,8 @@ body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"]
   line-height: 1;
   white-space: nowrap;
 }
+body.desktop-host:not([data-active-page="overview"]) .robot-core-actions
+    :is(#btnStart, #btnStop, #btnRestart) { display: none !important; }
 .chain-status-shortcut[hidden], .page-key-shortcut[hidden] { display: none !important; }
 .chain-status-shortcut svg, .page-key-shortcut svg { width: 18px; height: 18px; flex: 0 0 18px; }
 .page-key-shortcut svg { width: 20px; height: 20px; flex-basis: 20px; }

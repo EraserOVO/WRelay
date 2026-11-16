@@ -173,6 +173,10 @@ def main():
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
+    current_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = str(ROOT) + (
+        os.pathsep + current_pythonpath if current_pythonpath else ""
+    )
     failures = []
 
     for name in TESTS:

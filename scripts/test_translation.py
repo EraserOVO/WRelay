@@ -146,6 +146,7 @@ async def main():
         mock.patch.object(translation, "get_translation_config", return_value=dict(
             config, enabled=True, append_original=False
         )),
+        mock.patch.object(translation, "get_ai_configs", side_effect=lambda: [dict(active_profile)]),
         mock.patch.object(translation, "get_ai_config", side_effect=lambda: dict(active_profile)),
         mock.patch.object(translation, "_translate_by_ai", side_effect=translate_profile),
     ):

@@ -1020,6 +1020,7 @@ def check_qq_bot_config_save_does_not_block_event_loop():
         try:
             with (
                 patch.object(panel, "_read_qq_bots", side_effect=slow_read_qq_bots),
+                patch.object(panel, "_read_qq_bot_names", return_value={}),
                 patch.object(panel, "_bound_qq_bot_ids", return_value=set()),
                 patch.object(panel, "_write_qq_bots", side_effect=lambda bots, lines, line_idx, end_idx: writes.append((bots, lines, line_idx, end_idx))),
                 patch.object(panel, "_log"),
@@ -1035,7 +1036,14 @@ def check_qq_bot_config_save_does_not_block_event_loop():
                 await asyncio.wait_for(loop_tick.wait(), timeout=0.2)
                 release_read.set()
                 result = await task
-                assert result == {"ok": True, "appid": "A", "bot_ids": ["A", "B"]}
+                assert result["ok"] is True
+                assert result["appid"] == "A"
+                assert result["bot_ids"] == ["A", "B"]
+                assert result["bots"] == [
+                    {"appid": "A", "name": ""},
+                    {"appid": "B", "name": ""},
+                ]
+                assert result["restart_required"] is True
                 assert "old-secret" not in json.dumps(result)
                 assert "new-secret" not in json.dumps(result)
         finally:
@@ -1468,7 +1476,10 @@ def main():
         raise AssertionError("新增 Bot 缺少 Secret 应被拒绝")
     except ValueError:
         pass
-    assert panel._public_qq_bots(updated_bots) == [{"appid": "A"}, {"appid": "B"}]
+    assert panel._public_qq_bots(updated_bots, names={}) == [
+        {"appid": "A", "name": ""},
+        {"appid": "B", "name": ""},
+    ]
     print("PASS - QQ Bot 多凭据保存保留旧 Secret 且不向前端泄露")
 
     with tempfile.TemporaryDirectory(prefix="wrelay_group_bot_test_") as tmp:

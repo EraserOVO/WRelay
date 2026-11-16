@@ -112,11 +112,11 @@ for attempt in range(4):
         capture_output=True, text=True, timeout=180, encoding="utf-8", errors="replace",
     )
     dom = result.stdout or ""
-    if re.search(r"PROBE::.*?::END", dom, re.S):
+    if re.search(r'<div id="probe">PROBE::.*?::END</div>', dom, re.S):
         break
     time.sleep(1.5)
 
-m = re.search(r"PROBE::(.*?)::END", dom, re.S)
+m = re.search(r'<div id="probe">PROBE::(.*?)::END</div>', dom, re.S)
 if not m:
     print("SKIP - 未取回探针结果（无头渲染未完成，非断言失败）")
     sys.exit(0)

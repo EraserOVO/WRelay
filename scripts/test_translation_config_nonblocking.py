@@ -40,8 +40,8 @@ async def main():
 
     with patch.object(
         ai_client,
-        "get_ai_config",
-        side_effect=lambda: _slow_getter(ai_config, ai_finished),
+        "get_ai_configs",
+        side_effect=lambda: [_slow_getter(ai_config, ai_finished)],
     ), patch.dict(os.environ, {"WRELAY_TRANSLATION_BLOCK_TEST_KEY": ""}):
         await _assert_nonblocking(check_ai_client, ai_finished, "AI 客户端")
 
@@ -91,6 +91,10 @@ async def main():
 
     translation._cache.clear()
     with patch.object(
+        translation,
+        "get_ai_configs",
+        side_effect=lambda: [slow_profile_config()],
+    ), patch.object(
         translation,
         "get_ai_config",
         side_effect=slow_profile_config,

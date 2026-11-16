@@ -557,7 +557,7 @@ async def _send_source_tagged_content(
         for part in body_parts
         if getattr(part, "type", "") == "text"
     ).strip()
-    heading = make_text(source_line + ("\n\n" if body_text else ""))
+    heading = make_text(source_line + ("\n" if body_text else ""))
     full_text_parts = [heading] + body_parts
     ok_map = {group: True for group in groups}
 
