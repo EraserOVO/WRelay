@@ -16,7 +16,7 @@ All project members who can submit or approve signatures must use multi-factor a
 
 ## Build and signing process
 
-1. A published GitHub Release triggers a build on a GitHub-hosted Windows runner from the release tag.
+1. The maintainer creates a draft GitHub Release and manually starts the workflow from the matching version tag. The build runs on a GitHub-hosted Windows runner from that tag.
 2. The workflow builds the unsigned installer from the checked-in source and submits that artifact through SignPath's GitHub trusted build integration.
 3. The project maintainer manually approves the signing request. SignPath applies an Authenticode signature with timestamping and returns the signed installer.
 4. The workflow verifies the Windows signature, computes SHA-256 after signing, and uploads the signed installer and checksum to that GitHub Release.

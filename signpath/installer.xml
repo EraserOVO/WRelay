@@ -2,7 +2,7 @@
   <parameters>
     <parameter name="version" required="true" />
   </parameters>
-  <pe-file product-name="WRelay" product-version="${version}" file-version="${version}">
+  <pe-file product-name="WRelay" product-version="${version}">
     <authenticode-sign description="WRelay Windows installer" />
   </pe-file>
 </artifact-configuration>
