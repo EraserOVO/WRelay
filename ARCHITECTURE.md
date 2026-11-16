@@ -43,7 +43,7 @@ RSS 缓存、队列和时间窗放在 `data/bot_profile_runtime/<配置名>/`，
 令牌存在 `data/personal_qq.json`，不进入普通备份；待确认文件进入高级运行状态备份并校验结构。
 
 `panel/personal_qq_api.py` 管理配置并代理已认证 Bot 接口；`panel/web/personal-qq.js` / `.css`
-提供连接、群发现和待确认界面。运行及编译依赖包含 `nonebot-adapter-onebot==2.4.6` 与 msgpack。
+提供连接、群发现和待确认界面。运行及编译依赖包含 `nonebot-adapter-onebot==2.4.6`；其 MessagePack 依赖固定为 `msgpack==1.2.3`，并由安装包构建检查确保使用修复版本。
 身份约束、接入步骤与隔离验证见 [docs/PERSONAL_QQ.md](docs/PERSONAL_QQ.md)。
 
 ```
