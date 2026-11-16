@@ -686,6 +686,17 @@ async def _cmd_list(kind, page=1):
     return "\n".join(lines)
 
 
+def _backfill_pending_text(data):
+    if not isinstance(data, dict) or not data.get("ok"):
+        return "未知"
+    count = int(data.get("total") or 0)
+    if data.get("unknown"):
+        return f"至少 {count} 条（部分状态未知）" if count else "未知"
+    if data.get("scanning") or data.get("capped"):
+        return f"至少 {count} 条（扫描中）" if data.get("scanning") else f"至少 {count} 条"
+    return f"{count} 条"
+
+
 async def _cmd_backfill(args):
     arg = args[0] if args else ""
 
@@ -701,10 +712,7 @@ async def _cmd_backfill(args):
             enabled = True
 
         pending = await _panel_get("/api/backfill/pending")
-        if isinstance(pending, dict) and pending.get("ok"):
-            pending_text = str(pending.get("total", 0))
-        else:
-            pending_text = "未知"
+        pending_text = _backfill_pending_text(pending)
 
         return (
             "离线补发状态\n"
@@ -739,7 +747,7 @@ async def _cmd_backfill(args):
     if arg == "执行":
         # 先查待补发缺口，无消息时直接告知，避免空触发
         pending = await _panel_get("/api/backfill/pending")
-        if pending.get("ok") and not pending.get("total"):
+        if pending.get("ok") and not pending.get("total") and not pending.get("unknown") and not pending.get("scanning"):
             return "当前无可补发的消息"
         data = await _panel_post("/api/backfill/run")
         if data.get("ok"):
@@ -767,14 +775,18 @@ async def _cmd_backfill(args):
             return pending.get("msg") or "刷新失败"
         lines = ["Discord 实时状态"]
         channels = pending.get("channels") or {}
-        lines.append("待补发合计：" + str(pending.get("total", 0)) + " 条")
+        lines.append("待补发合计：" + _backfill_pending_text(pending))
         for info in list(channels.values())[:15]:
             if not isinstance(info, dict):
                 continue
             count = info.get("count")
             name = info.get("name")
-            if count is None or count < 0:
+            if info.get("unknown") or count is None or count < 0:
                 lines.append(f"{name or '?'}：统计失败")
+            elif info.get("scanning"):
+                lines.append(f"{name or '?'}：扫描中，已登记 {count} 条")
+            elif info.get("capped"):
+                lines.append(f"{name or '?'}：至少 {count} 条")
             elif count:
                 lines.append(f"{name or '?'}：{count} 条")
         if len(channels) > 15:

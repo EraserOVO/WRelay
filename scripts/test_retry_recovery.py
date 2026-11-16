@@ -654,7 +654,7 @@ async def test_retry_send_exception_keeps_loop_alive():
     retry_mod._LOOP_AUTO_START = True
     calls = []
 
-    async def flaky_send(channel_id, message_id, text_parts, media_items, groups):
+    async def flaky_send(channel_id, message_id, text_parts, media_items, groups, **kwargs):
         calls.append(message_id)
         if len(calls) == 1:
             raise RuntimeError("temporary sender failure")

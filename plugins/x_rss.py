@@ -626,7 +626,7 @@ async def _render_post(
     def type_enabled(kind):
         return enabled_types is None or kind in enabled_types
 
-    header = f"{source_label} X 中 [{source_name}] 的消息："
+    header = f"【X · 消息】{source_name}"
     if show_datetime:
         post_time = format_message_datetime(post.get("pub_date"))
         if post_time:
@@ -637,7 +637,7 @@ async def _render_post(
 
     if post["is_retweet"] and post["rt_author"] and type_enabled("文字"):
         text_parts.append(
-            make_text(f"\n↻ RT {post['rt_author']}：")
+            make_text(f"\n↻ 转发 {post['rt_author']}：")
         )
         has_body = True
 

@@ -553,6 +553,21 @@ async def _fetch_discord_message_page(api, headers, channel_id):
         return None, False
 
 
+async def fetch_channel_scan_page(channel_id, before=None):
+    """Fetch one descending history page; None means failure, [] means empty."""
+    if before is not None and _pagination_message_id(before) is None:
+        raise ValueError("invalid Discord scan anchor")
+    api = f"https://discord.com/api/v10/channels/{channel_id}/messages?limit=100"
+    if before is not None:
+        api += f"&before={before}"
+    data, ok = await _fetch_discord_message_page(api, {"Authorization": f"Bot {get_discord_token()}"}, channel_id)
+    if not ok or not isinstance(data, list) or len(data) > 100:
+        return None
+    if any(not isinstance(message, dict) or _pagination_message_id(message.get("id")) is None for message in data):
+        return None
+    return [normalize_api_message(message) for message in data]
+
+
 async def fetch_channel_messages_after(channel_id, after_id, limit=10):
     """抓取频道中 after_id 之后的消息，返回最旧的 limit 条（时间正序 旧→新）
 
@@ -581,14 +596,14 @@ async def fetch_channel_messages_after(channel_id, after_id, limit=10):
 
     while True:
 
+        # Discord 的 after 与 before 互斥。首屏从 after 开始，后续仅用
+        # before 向旧处翻页，并在本地以 after_id 判断是否已到达缺口底部。
+        anchor = f"before={before}" if before else f"after={after_id}"
         api = (
             f"https://discord.com/api/v10/"
             f"channels/{channel_id}/messages"
-            f"?after={after_id}&limit={page_limit}"
+            f"?{anchor}&limit={page_limit}"
         )
-
-        if before:
-            api += f"&before={before}"
 
         data, page_ok = await _fetch_discord_message_page(
             api,
@@ -619,7 +634,22 @@ async def fetch_channel_messages_after(channel_id, after_id, limit=10):
                 return []
             page_message_ids.append(message_id)
 
-        collected.extend(data)
+        try:
+            base_number = int(after_id)
+            numeric_ids = [int(value) for value in page_message_ids]
+            if (any(a <= b for a, b in zip(numeric_ids, numeric_ids[1:]))
+                    or (before is not None and numeric_ids[0] >= int(before))
+                    or (before is None and numeric_ids[-1] <= base_number)):
+                logger.warning("补发分页顺序或锚点无效，本轮补发放弃: {}", channel_id)
+                return []
+        except (TypeError, ValueError, OverflowError):
+            logger.warning("补发分页游标无效，本轮补发放弃: {}", channel_id)
+            return []
+
+        collected.extend(message for message, msg_id in zip(data, numeric_ids) if msg_id > base_number)
+
+        if numeric_ids[-1] <= base_number:
+            break
 
         if len(data) < page_limit:
             # 短页 = 已翻到缺口底部，收集完整
@@ -750,14 +780,12 @@ async def fetch_channel_gap_count(channel_id, after_id, cap=1000):
 
     while True:
 
+        anchor = f"before={before}" if before else f"after={after_id}"
         api = (
             f"https://discord.com/api/v10/"
             f"channels/{channel_id}/messages"
-            f"?after={after_id}&limit={page_limit}"
+            f"?{anchor}&limit={page_limit}"
         )
-
-        if before:
-            api += f"&before={before}"
 
         try:
             response = await _discord_request(
@@ -780,23 +808,38 @@ async def fetch_channel_gap_count(channel_id, after_id, cap=1000):
             )
             return None
 
-        data = response.json()
+        try:
+            data = response.json()
+        except (TypeError, ValueError):
+            return None
 
-        if not isinstance(data, list) or not data:
+        if not isinstance(data, list):
+            return None
+        if not data:
             break
 
-        total += len(data)
+        ids = [_pagination_message_id(msg.get("id")) if isinstance(msg, dict) else None for msg in data]
+        if any(value is None for value in ids):
+            return None
+        try:
+            values = [int(value) for value in ids]
+            base = int(after_id)
+            if (any(a <= b for a, b in zip(values, values[1:]))
+                    or (before is not None and values[0] >= int(before))
+                    or (before is None and values[-1] <= base)):
+                return None
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+        total += sum(value > base for value in values)
 
         if total >= cap:
             return cap
 
-        if len(data) < page_limit:
+        if values[-1] <= base or len(data) < page_limit:
             break
 
-        before = str(data[-1].get("id") or "")
-
-        if not before:
-            break
+        before = ids[-1]
 
     return total
 
@@ -1257,10 +1300,7 @@ async def _append_message_context(
 
     channel_name = channel_name or channel_id or "?"
     username = message.get("username") or "unknown"
-    header = (
-        f"{source_label}\n"
-        f"Discord [#{channel_name}] 中 [{username}]的消息："
-    )
+    header = f"【Discord】#{channel_name} · {username}"
     if show_datetime:
         message_time = format_message_datetime(message.get("created_at"))
         if message_time:

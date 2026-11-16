@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 from nonebot import get_driver
 from nonebot import logger
@@ -16,9 +17,10 @@ from plugins.history import (
     load_last_messages_async,
     update_last_messages,
 )
-from plugins.fetch import fetch_channel_latest, fetch_channel_messages_after
+from plugins.fetch import fetch_channel_latest, fetch_channel_messages_after, fetch_channel_scan_page
 from plugins.forward_service import load_channel_filter, prepare_discord_message
 from plugins import personal_qq
+from plugins import discord_gaps
 from plugins.sender import log_partial_failure
 from plugins.retry import (
     send_and_record,
@@ -51,8 +53,44 @@ _backfill_running = False
 _backfill_rerun_requested = False
 _backfill_tasks = set()
 _backfill_stopping = False
+BACKFILL_CHECK_INTERVAL = 60.0
+BACKFILL_SEND_INTERVAL = 5.0
+_backfill_send_lock = asyncio.Lock()
+_backfill_last_send = None
+_backfill_scheduler_task = None
+_backfill_states = {}
+
+
+def get_backfill_status():
+    return dict(_backfill_states.get(discord_gaps.current_owner(), {}))
 
 driver = get_driver()
+
+
+@driver.on_startup
+async def _start_backfill_scheduler():
+    global _backfill_stopping, _backfill_scheduler_task
+    if _backfill_scheduler_task is not None and not _backfill_scheduler_task.done():
+        return
+    _backfill_stopping = False
+    task = asyncio.create_task(_backfill_scheduler())
+    _backfill_scheduler_task = task
+    _backfill_tasks.add(task)
+    task.add_done_callback(_on_backfill_task_done)
+
+
+async def _backfill_scheduler():
+    """Periodically retry outstanding gaps, with one bounded batch per round."""
+    while not _backfill_stopping:
+        await asyncio.sleep(BACKFILL_CHECK_INTERVAL)
+        if _backfill_stopping:
+            break
+        try:
+            await _backfill_missed()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("定期补发检查失败，下轮继续")
 
 
 @driver.on_bot_connect
@@ -75,7 +113,7 @@ def _on_backfill_task_done(task):
 @driver.on_shutdown
 async def _stop_backfill_tasks():
     """Stop and reap backfill work before the bot process shuts down."""
-    global _backfill_stopping, _backfill_running, _backfill_rerun_requested
+    global _backfill_stopping, _backfill_running, _backfill_rerun_requested, _backfill_scheduler_task
     _backfill_stopping = True
     current_task = asyncio.current_task()
     tasks = [
@@ -87,18 +125,23 @@ async def _stop_backfill_tasks():
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
     _backfill_tasks.clear()
+    _backfill_scheduler_task = None
     _backfill_running = False
     _backfill_rerun_requested = False
 
 
 _profile_backfill_lock = asyncio.Lock()
+backfill_operation_lock = asyncio.Lock()
 
 
 async def _backfill_missed():
     from plugins import bot_profiles, config
     owners = await asyncio.to_thread(bot_profiles.ids, config.SETTINGS_FILE)
     if not owners:
-        return await _backfill_missed_profile()
+        if _backfill_running:
+            return await _backfill_missed_profile()
+        async with backfill_operation_lock:
+            return await _backfill_missed_profile()
     selected = bot_profiles.CURRENT.get()
     async with _profile_backfill_lock:
         for owner in ([selected] if selected else owners):
@@ -106,7 +149,8 @@ async def _backfill_missed():
                 continue
             try:
                 with bot_profiles.scope(owner):
-                    await _backfill_missed_profile()
+                    async with backfill_operation_lock:
+                        await _backfill_missed_profile()
             except Exception:
                 logger.exception("Bot {} 补发配置异常，跳过该账号", owner)
 
@@ -121,12 +165,15 @@ async def _backfill_missed_profile():
 
     _backfill_running = True
     _backfill_rerun_requested = False
+    state = _backfill_states.setdefault(discord_gaps.current_owner(), {})
+    state.update(running=True, error="")
 
     try:
         snapshot = await asyncio.to_thread(get_backfill_runtime_snapshot)
+        state["enabled"] = snapshot["enabled"]
         while True:
             if not snapshot["enabled"]:
-                logger.info(
+                logger.debug(
                     "启动补发: 补发功能已关闭（backfill_enabled=false），跳过"
                 )
                 break
@@ -143,15 +190,17 @@ async def _backfill_missed_profile():
                         continue
 
                     try:
-                        await _backfill_channel(
-                            channel_id,
-                            channel_name,
-                            active_groups,
-                            limit,
-                        )
+                        await _scan_gaps_channel(channel_id, active_groups)
                     except Exception:
-                        logger.exception("启动补发失败: {}", channel_id)
+                        state["error"] = "部分频道检查失败，请查看运行日志"
+                        logger.exception("补发历史扫描失败: {}", channel_id)
+                    try:
+                        await _replay_gaps_channel(channel_id, channel_name, active_groups, limit)
+                    except Exception:
+                        state["error"] = "部分频道投递失败，请查看运行日志"
+                        logger.exception("补发欠账投递失败: {}", channel_id)
             except Exception:
+                state["error"] = "补发检查失败，请查看运行日志"
                 logger.exception("启动补发失败")
 
             if not _backfill_rerun_requested:
@@ -159,9 +208,14 @@ async def _backfill_missed_profile():
             _backfill_rerun_requested = False
             snapshot = await asyncio.to_thread(get_backfill_runtime_snapshot)
 
+    except Exception:
+        state["error"] = "读取补发配置失败，请查看运行日志"
+        raise
     finally:
 
         _backfill_running = False
+        state["running"] = False
+        state["last_check"] = time.time()
 
 
 async def _deliver_backfill_message(
@@ -170,17 +224,31 @@ async def _deliver_backfill_message(
     msg,
     target_groups,
     rendered,
+    only_pending=False,
 ):
     """Send a rendered message and record retries for groups that failed."""
+    global _backfill_last_send
     text_parts, media_items = rendered
-    ok_map = await send_and_record(
-        channel_id,
-        message_id,
-        text_parts,
-        media_items,
-        target_groups,
-    )
+    async with _backfill_send_lock:
+        if _backfill_last_send is not None:
+            delay = BACKFILL_SEND_INTERVAL - (time.monotonic() - _backfill_last_send)
+            if delay > 0:
+                await asyncio.sleep(delay)
+        snapshot = await asyncio.to_thread(get_backfill_runtime_snapshot)
+        if not snapshot["enabled"]:
+            return True
+        active = set(snapshot["groups_by_channel"].get(channel_id, []))
+        target_groups = [group for group in target_groups if group in active]
+        if not target_groups:
+            return True
+        _backfill_last_send = time.monotonic()
+        if only_pending:
+            ok_map = await send_and_record(channel_id, message_id, text_parts, media_items, target_groups, only_pending=True)
+        else:
+            ok_map = await send_and_record(channel_id, message_id, text_parts, media_items, target_groups)
     if not ok_map:
+        await discord_gaps.defer_async(channel_id, message_id, target_groups)
+        _backfill_states.setdefault(discord_gaps.current_owner(), {})["error"] = "QQ 未连接或发送未完成"
         # QQ Bot 未连接：本次消息未发送、不记录去重ID，停止补发。
         logger.warning(
             "启动补发: QQ未连接，补发中断: {} {}",
@@ -194,6 +262,10 @@ async def _deliver_backfill_message(
 
     failed_groups = [group for group, ok in ok_map.items() if not ok]
     if failed_groups:
+        busy_groups = set(getattr(ok_map, "busy_groups", ()))
+        await discord_gaps.defer_async(channel_id, message_id,
+                                       [group for group in failed_groups if group not in busy_groups])
+        _backfill_states.setdefault(discord_gaps.current_owner(), {})["error"] = "部分目标群发送失败，将继续重试"
         # 其他路径送达时会清除这条欠账。
         await schedule_retry_async(
             channel_id,
@@ -217,6 +289,83 @@ async def _deliver_backfill_message(
         )
 
     return False
+
+
+async def _scan_gaps_channel(channel_id, active_groups):
+    """Read a bounded number of descending pages per target, resuming on disk."""
+    from plugins.json_io import run_in_thread_to_completion
+    owner = discord_gaps.current_owner()
+    last = await load_last_messages_async(load_last_messages)
+    channel_map = normalize_channel_map(last, channel_id)
+    missing_baseline = [group for group in active_groups if not (channel_map.get(group) or channel_map.get("*"))]
+    latest = await fetch_channel_latest(channel_id) if missing_baseline else None
+    baselines = {group: str(channel_map.get(group) or channel_map.get("*") or latest)
+                 for group in active_groups if channel_map.get(group) or channel_map.get("*") or latest}
+    await run_in_thread_to_completion(discord_gaps.initialize_cursors, owner, str(channel_id), baselines)
+    for group in active_groups:
+        if group not in baselines:
+            continue
+        for page_index in range(10):
+            snapshot = await asyncio.to_thread(get_backfill_runtime_snapshot)
+            if not snapshot["enabled"]:
+                return
+            if group not in snapshot["groups_by_channel"].get(channel_id, []):
+                break
+            base, before = await run_in_thread_to_completion(discord_gaps.start_scan, owner, str(channel_id), group)
+            page = await fetch_channel_scan_page(channel_id, before)
+            if page is None:
+                raise RuntimeError("Discord 历史消息查询失败")
+            done = await run_in_thread_to_completion(
+                discord_gaps.append_scan_page, owner, str(channel_id), group, base, before, page,
+            )
+            if done:
+                break
+            if page_index < 9:
+                await asyncio.sleep(0.5)
+
+
+async def _replay_gaps_channel(channel_id, channel_name, active_groups, limit):
+    """Recover recorded targets without using the high-water delivery cursor."""
+    from plugins.json_io import run_in_thread_to_completion
+    rows = await run_in_thread_to_completion(
+        discord_gaps.pending_channel, discord_gaps.current_owner(), str(channel_id), active_groups, limit,
+    )
+    grouped = {}
+    for message_id, group, message in rows:
+        item = grouped.setdefault(message_id, (message, []))
+        item[1].append(group)
+    attempted = 0
+    for message_id, (message, groups) in grouped.items():
+        if is_processing(channel_id, message_id):
+            continue
+        snapshot = await asyncio.to_thread(get_backfill_runtime_snapshot)
+        if not snapshot["enabled"]:
+            break
+        current_groups = set(snapshot["groups_by_channel"].get(channel_id, []))
+        groups = [group for group in groups if group in current_groups]
+        if not groups:
+            continue
+        attempted += 1
+        filter_config = await load_channel_filter(channel_id)
+        if not check_message_filter(filter_config, message.get("author_username") or "",
+                                    message.get("content") or "", message.get("embeds")):
+            await discord_gaps.resolve_async(channel_id, message_id, groups)
+            continue
+        message["channel_name"] = channel_name
+        rendered = await prepare_discord_message(message, channel_id, message_id,
+                                                source_label="自动补发来自", filter_config=filter_config)
+        if rendered is None:
+            await discord_gaps.resolve_async(channel_id, message_id, groups)
+            continue
+        # Rendering can take time; honor route/enable changes before sending.
+        snapshot = await asyncio.to_thread(get_backfill_runtime_snapshot)
+        if not snapshot["enabled"]:
+            break
+        current_groups = set(snapshot["groups_by_channel"].get(channel_id, []))
+        groups = [group for group in groups if group in current_groups]
+        if groups and await _deliver_backfill_message(channel_id, message_id, message, groups, rendered, only_pending=True):
+            break
+    return attempted
 
 
 async def _backfill_message(channel_id, channel_name, active_groups, msg):
@@ -262,6 +411,7 @@ async def _backfill_message(channel_id, channel_name, active_groups, msg):
             message_id,
             msg_author_username,
         )
+        await discord_gaps.resolve_async(channel_id, message_id, target_groups)
         await update_last_messages(
             lambda last: apply_success(
                 normalize_channel_map(last, channel_id),
@@ -272,6 +422,19 @@ async def _backfill_message(channel_id, channel_name, active_groups, msg):
         return False
 
     msg["channel_name"] = channel_name
+    registered_groups = await discord_gaps.register_async(channel_id, message_id, target_groups, msg)
+    already_processed = set(target_groups) - registered_groups
+    if already_processed:
+        await update_last_messages(
+            lambda last: apply_success(
+                normalize_channel_map(last, channel_id),
+                {group: True for group in already_processed},
+                message_id,
+            )
+        )
+    target_groups = [group for group in target_groups if group in registered_groups]
+    if not target_groups:
+        return False
     rendered = await prepare_discord_message(
         msg,
         channel_id,
@@ -280,6 +443,7 @@ async def _backfill_message(channel_id, channel_name, active_groups, msg):
         filter_config=filter_config,
     )
     if rendered is None:
+        await discord_gaps.resolve_async(channel_id, message_id, target_groups)
         await update_last_messages(
             lambda last: apply_skipped(
                 normalize_channel_map(last, channel_id),

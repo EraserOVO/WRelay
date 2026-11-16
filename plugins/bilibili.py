@@ -1079,8 +1079,8 @@ async def _render_post(
                 or ""
             ).strip()
             header = (
-                "%s Bilibili 中[%s]的投稿："
-                % (source_label, source_name)
+                "【Bilibili · 投稿】%s"
+                % source_name
                 if source_name
                 else ""
             )

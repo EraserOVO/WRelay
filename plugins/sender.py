@@ -545,7 +545,7 @@ async def _send_source_tagged_content(
     channel_id="", message_id="",
 ):
     """QQ→QQ 群手动转发：图片消息先发送来源/正文，再单独发送图片。"""
-    source_line = "转发于「{}」：".format(
+    source_line = "【QQ 转发 · {}】".format(
         str(source_label or "未知群").replace("\r", " ").replace("\n", " ").strip()
     )
     body_parts = [

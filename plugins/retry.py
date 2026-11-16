@@ -24,6 +24,7 @@ from plugins.sender import send_relay_message
 from plugins.translation import translate_text_parts
 from plugins.json_io import atomic_write_json, run_in_thread_to_completion
 from plugins.paths import data_path
+from plugins import discord_gaps
 
 
 # =====================================================
@@ -306,6 +307,18 @@ async def _purge_delivered_async(channel_id, message_id, success_groups):
         await _save_pending_async()
 
 
+async def clear_retry_through(baselines):
+    """Discard matching retry targets up to each confirmed channel baseline."""
+    changed = False
+    for channel_id, groups, latest in baselines:
+        for message_id in list(_pending.get(channel_id, {})):
+            if int(message_id) <= int(latest):
+                changed = _purge_delivered_from_memory(channel_id, message_id, groups) or changed
+    if changed:
+        if not await _save_pending_async():
+            raise RuntimeError("清除延迟重试记录失败，请检查重试队列文件")
+
+
 def _register_retry(
     channel_id,
     message_id,
@@ -586,7 +599,7 @@ async def _send_profile_retry(channel_id, message_id, entry, owners):
                     result.update({g: True for g in skipped})
                     await _purge_delivered_async(channel_id, message_id, skipped)
                 if targets:
-                    sent = await send_and_record(channel_id, message_id, *rendered, targets)
+                    sent = await send_and_record(channel_id, message_id, *rendered, targets, retry_entry=entry)
                     result.update(sent)
                     busy.update(getattr(sent, "busy_groups", ()))
                     deduplicated.update(getattr(sent, "deduplicated_groups", ()))
@@ -680,6 +693,7 @@ async def _process_due(channel_id):
                 text_parts,
                 media_items,
                 list(entry.groups),
+                retry_entry=entry,
             )
         except asyncio.CancelledError:
             raise
@@ -755,6 +769,8 @@ async def send_and_record(
     media_items,
     groups,
     idempotency_key=None,
+    only_pending=False,
+    retry_entry=None,
 ):
     """统一发送入口（relay / backfill / retry 共用）：
     在途判重 → 发送 → 记录来源游标和可选的跨来源幂等键 → 清除欠账。
@@ -772,6 +788,13 @@ async def send_and_record(
         if idempotency_key
         else set()
     )
+    channel_value = str(channel_id)
+    message_value = str(message_id)
+    if (not idempotency_key and channel_value.isascii() and channel_value.isdecimal()
+            and message_value.isascii() and message_value.isdecimal()):
+        deduplicated_groups.update(
+            await discord_gaps.processed_targets_async(channel_value, message_value, groups)
+        )
     ok_map = {
         group: group in deduplicated_groups
         for group in groups
@@ -811,19 +834,37 @@ async def send_and_record(
         )
 
     try:
+        if retry_entry is not None:
+            current = (_pending.get(channel_id) or {}).get(message_id)
+            valid = set(retry_entry.groups) if current is retry_entry else set()
+            for group in set(claimable) - valid:
+                ok_map[group] = True
+            claimable_for_send = [group for group in claimable if group in valid]
+            if not claimable_for_send:
+                return SendResult(ok_map, deduplicated_groups=set(claimable), busy_groups=busy_groups)
+        else:
+            claimable_for_send = claimable
+        if only_pending:
+            still_pending = await discord_gaps.pending_targets_async(channel_id, message_id, claimable_for_send)
+            already_done = set(claimable_for_send) - still_pending
+            for group in already_done:
+                ok_map[group] = True
+            claimable_for_send = [group for group in claimable_for_send if group in still_pending]
+            if not claimable_for_send:
+                return SendResult(ok_map, deduplicated_groups=already_done, busy_groups=busy_groups)
         sent_map = await send_relay_message(
             text_parts,
             media_items,
-            claimable,
+            claimable_for_send,
             channel_id=channel_id,
             message_id=message_id,
         )
-        for group in claimable:
+        for group in claimable_for_send:
             ok_map[group] = bool(sent_map.get(group))
 
         success_groups = [
             group
-            for group in claimable
+            for group in claimable_for_send
             if ok_map[group]
         ]
 
@@ -840,6 +881,8 @@ async def send_and_record(
                         idempotency_key,
                         exc,
                     )
+            if str(channel_id).isascii() and str(channel_id).isdecimal() and str(message_id).isascii() and str(message_id).isdecimal():
+                await discord_gaps.resolve_async(channel_id, message_id, success_groups)
             await update_last_messages(
                 lambda last: apply_success(
                     normalize_channel_map(last, channel_id),

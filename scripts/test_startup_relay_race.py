@@ -37,7 +37,8 @@ async def test_backfill_request_during_run_schedules_follow_up():
                 "groups_by_channel": {"C1": ["G1"]},
             },
         ), \
-                mock.patch.object(backfill, "_backfill_channel", side_effect=fake_backfill_channel):
+                mock.patch.object(backfill, "_replay_gaps_channel", new_callable=mock.AsyncMock, return_value=0), \
+                mock.patch.object(backfill, "_scan_gaps_channel", side_effect=fake_backfill_channel):
             first_task = asyncio.create_task(backfill._backfill_missed())
             await asyncio.wait_for(first_started.wait(), timeout=1)
             await backfill._backfill_missed()
@@ -160,6 +161,7 @@ async def main():
     ]
     with (
         mock.patch.object(backfill, "load_last_messages", return_value={"C1": {"G1": "100"}}),
+        mock.patch.object(backfill, "get_backfill_runtime_snapshot", return_value={"enabled": True, "groups_by_channel": {"C1": ["G1"]}}),
         mock.patch.object(backfill, "fetch_channel_messages_after", new=mock.AsyncMock(return_value=messages)),
         mock.patch.object(backfill, "load_channel_filter", new=mock.AsyncMock(return_value={})),
         mock.patch.object(backfill, "check_message_filter", return_value=True),
@@ -175,6 +177,8 @@ async def main():
 
     failed_message = {"message_id": "103", "content": "body"}
     with (
+        mock.patch.object(backfill, "get_backfill_runtime_snapshot", return_value={"enabled": True, "groups_by_channel": {"C1": ["G1", "G2"]}}),
+        mock.patch.object(backfill, "BACKFILL_SEND_INTERVAL", 0),
         mock.patch.object(
             backfill,
             "send_and_record",

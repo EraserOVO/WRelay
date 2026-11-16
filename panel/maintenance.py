@@ -27,7 +27,7 @@ class MaintenanceService:
         self._last_backup = 0
         self._checked = {}
         self._worker = None
-        self._last_database_check = 0
+        self._last_database_check = {}
 
     def enabled(self):
         try:
@@ -113,16 +113,16 @@ class MaintenanceService:
                 stat = os.stat(path)
                 revision = (stat.st_mtime_ns, stat.st_size)
                 previous = self._checked.get(name)
-                if name != 'delivery_dedup.sqlite3' and previous and previous[0] == revision:
+                if name not in ('delivery_dedup.sqlite3', 'discord_gaps.sqlite3') and previous and previous[0] == revision:
                     error = previous[1]
                 else:
                     with json_file_lock(path):
-                        if name == 'delivery_dedup.sqlite3':
+                        if name in ('delivery_dedup.sqlite3', 'discord_gaps.sqlite3'):
                             # SQLite WAL writes do not always change the database mtime.
-                            if time.monotonic() - self._last_database_check < 300:
+                            if time.monotonic() - self._last_database_check.get(name, 0) < 300:
                                 continue
-                            service._validate_sqlite_payload(service._sqlite_snapshot_bytes(path))
-                            self._last_database_check = time.monotonic()
+                            service._validate_sqlite_payload(service._sqlite_snapshot_bytes(path), name)
+                            self._last_database_check[name] = time.monotonic()
                             error = ""
                         else:
                             with open(path, "r", encoding="utf-8") as f:

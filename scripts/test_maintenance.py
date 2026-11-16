@@ -117,7 +117,7 @@ def main():
         notifications=[]
         rss={'source_health':[{'id':'s','name':'source','consecutive_failures':2}]}
         maintenance=MaintenanceService(lambda:service,root,lambda *a,**k:rss,
-            lambda k,m: notifications.append(k) or {'sent':1},lambda text:None)
+            lambda k,m,owners=None: notifications.append(k) or {'sent':1},lambda text:None)
         name=maintenance.backup_now()
         maintenance.check_once()
         assert not maintenance.status()['alerts']
@@ -134,7 +134,7 @@ def main():
         notifications.clear()
         rss['source_health'][0]['consecutive_failures']=3
         maintenance.check_once();maintenance.check_once()
-        assert len(notifications)==3 # X、Bilibili、YouTube 各一次，重复检查不重复通知。
+        assert len(notifications)==3, notifications # X、Bilibili、YouTube 各一次，重复检查不重复通知。
         assert len(maintenance.status()['alerts'])==3
         assert any(a['id']=='rss:YouTube:s' and 'RSSHub' not in a['message'] for a in maintenance.status()['alerts'])
         queue.write_bytes(b'\0'*32)

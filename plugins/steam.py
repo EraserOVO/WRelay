@@ -446,8 +446,20 @@ async def _dispatch_locked(owner, settings):
                 delivery_config = await asyncio.to_thread(
                     config.get_steam_source_delivery_config, chosen["source"]
                 )
+                steam_labels = {
+                    "announcements": "公告", "news": "新闻", "discount": "折扣",
+                    "new_listing": "新上架", "early_access": "抢先体验",
+                    "release": "发售", "full_release": "正式发售",
+                }
+                body_lines = str(chosen["text"]).splitlines()
+                if body_lines and body_lines[0].startswith("Steam "):
+                    body_lines = body_lines[1:]
+                formatted = "【Steam · %s】\n%s" % (
+                    steam_labels.get(chosen.get("event"), "动态"),
+                    "\n".join(body_lines),
+                )
                 text_parts = await translate_text_parts(
-                    [make_text(chosen["text"])],
+                    [make_text(formatted)],
                     ("steam", chosen["source"], chosen["identity"]),
                     config=delivery_config["translation"],
                 )

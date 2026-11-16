@@ -72,6 +72,39 @@ async def main():
         assert request.await_count == 2
         sleep.assert_awaited_once_with(0)
 
+    pages = [
+        ([{"id": str(value)} for value in range(250, 150, -1)], True),
+        ([{"id": str(value)} for value in range(150, 50, -1)], True),
+    ]
+    with (
+        mock.patch.object(fetch, "get_discord_token", return_value="test-token"),
+        mock.patch.object(fetch, "_fetch_discord_message_page", new_callable=mock.AsyncMock, side_effect=pages) as page,
+        mock.patch.object(fetch.asyncio, "sleep", new_callable=mock.AsyncMock),
+    ):
+        messages = await fetch.fetch_channel_messages_after("111", "100", limit=5)
+        assert [message["message_id"] for message in messages] == ["101", "102", "103", "104", "105"]
+        first_url = page.await_args_list[0].args[0]
+        second_url = page.await_args_list[1].args[0]
+        assert "after=100" in first_url and "before=" not in first_url
+        assert "before=151" in second_url and "after=" not in second_url
+
+    with (
+        mock.patch.object(fetch, "get_discord_token", return_value="test-token"),
+        mock.patch.object(fetch, "_fetch_discord_message_page", new_callable=mock.AsyncMock,
+                          return_value=([{"id": "102"}, {"id": "103"}], True)),
+    ):
+        assert await fetch.fetch_channel_messages_after("111", "100", limit=5) == []
+
+    count_pages = [JsonResponse(page[0]) for page in pages]
+    with (
+        mock.patch.object(fetch, "get_discord_token", return_value="test-token"),
+        mock.patch.object(fetch, "_discord_request", new_callable=mock.AsyncMock, side_effect=count_pages) as request,
+    ):
+        assert await fetch.fetch_channel_gap_count("111", "100") == 150
+        assert "after=100" in request.await_args_list[0].args[1]
+        assert "before=151" in request.await_args_list[1].args[1]
+        assert "after=" not in request.await_args_list[1].args[1]
+
     print("PASS - 补发分页拒绝坏消息/ID，保留有效雪花 ID并重试429")
 
 

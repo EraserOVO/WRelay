@@ -22,6 +22,7 @@ from plugins.history import (
 from plugins.fetch import normalize_event
 from plugins.forward_service import prepare_discord_message
 from plugins.sender import log_partial_failure
+from plugins import discord_gaps
 from plugins.stats import record
 from plugins.retry import (
     send_and_record,
@@ -206,6 +207,12 @@ async def _process_profile_event(
         channel_id,
     )
 
+    await discord_gaps.initialize_cursors_async(
+        channel_id,
+        {group: str(channel_map.get(group) or channel_map.get("*") or message_id)
+         for group in active_groups},
+    )
+
     # 按群分别判断是否跳过（A4：某个群发送失败不会拖累其他群的去重，
     # 重连补发时已成功的群跳过、失败的群重试）
     target_groups = select_target_groups(
@@ -242,6 +249,7 @@ async def _process_profile_event(
             author_username,
         )
 
+        await discord_gaps.resolve_async(channel_id, message_id, target_groups)
         await update_last_messages(
             lambda last: apply_success(
                 normalize_channel_map(last, channel_id),
@@ -256,6 +264,22 @@ async def _process_profile_event(
         event,
         route_config["channel_name"]
     )
+    message["author_username"] = author_username
+
+    # 写入欠账必须先于渲染和发送，后续更高的成功游标不能抹掉它。
+    registered_groups = await discord_gaps.register_async(channel_id, message_id, target_groups, message)
+    already_processed = set(target_groups) - registered_groups
+    if already_processed:
+        await update_last_messages(
+            lambda last: apply_success(
+                normalize_channel_map(last, channel_id),
+                {group: True for group in already_processed},
+                message_id,
+            )
+        )
+    target_groups = [group for group in target_groups if group in registered_groups]
+    if not target_groups:
+        return
 
 
     # 消息类型筛选：按消息内部各内容组件过滤（由 build_parts 执行），
@@ -269,6 +293,7 @@ async def _process_profile_event(
 
 
     if rendered is None:
+        await discord_gaps.resolve_async(channel_id, message_id, target_groups)
         await update_last_messages(
             lambda last: apply_skipped(
                 normalize_channel_map(last, channel_id),

@@ -54,7 +54,7 @@ def format_forward_text(post, source=None, source_label="自动转发来自"):
     display_source = author or source_name
     lines = []
     if display_source:
-        lines.append("%s Bilibili 中[%s]的投稿：" % (source_label, display_source))
+        lines.append("【Bilibili · 投稿】%s" % display_source)
 
     title = str(post.get("title") or "").strip()
     link = str(post.get("link") or "").strip()

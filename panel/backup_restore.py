@@ -3,6 +3,7 @@
 import io
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -19,6 +20,8 @@ from plugins.state_validation import validate_runtime
 
 BACKUP_SETTINGS_NAME = "settings.json"
 BACKUP_DELIVERY_DEDUP_NAME = "delivery_dedup.sqlite3"
+BACKUP_DISCORD_GAPS_NAME = "discord_gaps.sqlite3"
+BACKUP_SQLITE_NAMES = (BACKUP_DELIVERY_DEDUP_NAME, BACKUP_DISCORD_GAPS_NAME)
 BACKUP_RUNTIME_NAMES = (
     "discord_last.json",
     "retry_pending.json",
@@ -31,9 +34,11 @@ BACKUP_RUNTIME_NAMES = (
     "youtube.json",
     "steam.json",
     BACKUP_DELIVERY_DEDUP_NAME,
+    BACKUP_DISCORD_GAPS_NAME,
 )
 BACKUP_MANIFEST_NAME = "manifest.json"
-BACKUP_MAX_BYTES = 5 * 1024 * 1024
+BACKUP_MAX_MB = 32
+BACKUP_MAX_BYTES = BACKUP_MAX_MB * 1024 * 1024
 RESTORE_BACKUP_RETENTION = 10
 
 
@@ -92,6 +97,7 @@ class BackupRestoreService:
             "youtube.json": os.path.join(os.path.dirname(self.settings_file), "youtube.json"),
             "steam.json": os.path.join(os.path.dirname(self.settings_file), "steam.json"),
             BACKUP_DELIVERY_DEDUP_NAME: self.delivery_dedup_file,
+            BACKUP_DISCORD_GAPS_NAME: os.path.join(os.path.dirname(self.settings_file), BACKUP_DISCORD_GAPS_NAME),
         }
         from plugins import bot_profiles
         for owner in bot_profiles.ids(self.settings_file):
@@ -142,6 +148,9 @@ class BackupRestoreService:
             snapshot = sqlite3.connect(snapshot_path, timeout=10)
             try:
                 source.backup(snapshot)
+                # The source may retain free pages after a large backlog drains.
+                # Compact only the temporary snapshot, never the live database.
+                snapshot.execute("VACUUM")
             finally:
                 snapshot.close()
                 source.close()
@@ -149,7 +158,7 @@ class BackupRestoreService:
                 return file.read(BACKUP_MAX_BYTES + 1)
 
     @staticmethod
-    def _validate_sqlite_payload(payload):
+    def _validate_sqlite_payload(payload, name=BACKUP_DELIVERY_DEDUP_NAME):
         with tempfile.TemporaryDirectory(prefix="wrelay_restore_sqlite_") as tmp:
             path = os.path.join(tmp, BACKUP_DELIVERY_DEDUP_NAME)
             with open(path, "wb") as file:
@@ -164,13 +173,72 @@ class BackupRestoreService:
                             "SELECT name FROM sqlite_master WHERE type = 'table'"
                         )
                     }
-                    columns = {row[1] for row in connection.execute("PRAGMA table_info(delivered_items)")}
+                    if name == BACKUP_DISCORD_GAPS_NAME:
+                        expected = {
+                            "discord_gaps": {"owner", "channel", "message_id", "target", "message"},
+                            "discord_processed": {"owner", "channel", "message_id", "target"},
+                            "discord_scan_cursor": {"owner", "channel", "target", "message_id"},
+                            "discord_scan_run": {"owner", "channel", "target", "base", "before_id", "high_id"},
+                            "discord_scan_buffer": {"owner", "channel", "target", "message_id", "message"},
+                        }
+                        if not set(expected) <= tables or any(
+                            not columns <= {row[1] for row in connection.execute("PRAGMA table_info(" + table + ")")}
+                            for table, columns in expected.items()
+                        ):
+                            raise ValueError("discord_gaps.sqlite3 结构校验失败")
+                        if connection.execute("SELECT 1 FROM sqlite_master WHERE type IN ('trigger', 'view') LIMIT 1").fetchone():
+                            raise ValueError("discord_gaps.sqlite3 包含不支持的数据库对象")
+                        from plugins.discord_gaps import _identity, _message_id
+                        for table in expected:
+                            column_names = [column[1] for column in connection.execute("PRAGMA table_info(" + table + ")")]
+                            for row in connection.execute("SELECT * FROM " + table):
+                                fields = dict(zip(column_names, row))
+                                for key in ("owner", "channel", "target"):
+                                    _identity(fields[key], key)
+                                for key in ("message_id", "base", "before_id", "high_id"):
+                                    if key in fields and fields[key] is not None:
+                                        _message_id(fields[key])
+                                if "attempts" in fields and (type(fields["attempts"]) is not int or not 0 <= fields["attempts"] <= 5):
+                                    raise ValueError("discord_gaps.sqlite3 重试次数无效")
+                                if "next_attempt" in fields and (type(fields["next_attempt"]) not in (int, float)
+                                                                  or not math.isfinite(fields["next_attempt"]) or fields["next_attempt"] < 0):
+                                    raise ValueError("discord_gaps.sqlite3 重试时间无效")
+                                if "message" in fields:
+                                    try:
+                                        message = json.loads(fields["message"])
+                                    except (TypeError, ValueError) as exc:
+                                        raise ValueError("discord_gaps.sqlite3 消息记录无效") from exc
+                                    if not isinstance(message, dict) or str(message.get("message_id", "")) != fields["message_id"]:
+                                        raise ValueError("discord_gaps.sqlite3 消息记录无效")
+                        if connection.execute("""SELECT 1 FROM discord_scan_run r LEFT JOIN discord_scan_cursor c
+                            ON r.owner=c.owner AND r.channel=c.channel AND r.target=c.target
+                            WHERE c.message_id IS NULL OR c.message_id != r.base LIMIT 1""").fetchone():
+                            raise ValueError("discord_gaps.sqlite3 扫描游标不一致")
+                        if connection.execute("""SELECT 1 FROM discord_scan_buffer b LEFT JOIN discord_scan_run r
+                            ON b.owner=r.owner AND b.channel=r.channel AND b.target=r.target
+                            WHERE r.base IS NULL LIMIT 1""").fetchone():
+                            raise ValueError("discord_gaps.sqlite3 扫描缓冲缺少对应任务")
+                    else:
+                        columns = {row[1] for row in connection.execute("PRAGMA table_info(delivered_items)")}
                 finally:
                     connection.close()
             except sqlite3.DatabaseError as exc:
-                raise ValueError("delivery_dedup.sqlite3 不是有效 SQLite 数据库") from exc
-            if not result or result[0] != "ok" or "delivered_items" not in tables or not {"identity_key", "group_id", "delivered_at"} <= columns:
+                raise ValueError(name + " 不是有效 SQLite 数据库") from exc
+            if not result or result[0] != "ok":
+                raise ValueError(name + " 完整性校验失败")
+            if name == BACKUP_DELIVERY_DEDUP_NAME and ("delivered_items" not in tables or not {"identity_key", "group_id", "delivered_at"} <= columns):
                 raise ValueError("delivery_dedup.sqlite3 结构校验失败")
+
+    @staticmethod
+    def _empty_discord_gaps_payload():
+        """Give legacy runtime backups a coherent empty scan journal."""
+        from plugins.discord_gaps import _connect
+        with tempfile.TemporaryDirectory(prefix="wrelay_empty_discord_gaps_") as tmp:
+            path = os.path.join(tmp, BACKUP_DISCORD_GAPS_NAME)
+            db = _connect(path)
+            db.close()
+            with open(path, "rb") as file:
+                return file.read()
 
     @staticmethod
     def _atomic_write_bytes(path, payload):
@@ -248,7 +316,7 @@ class BackupRestoreService:
                 uncompressed_size = len(manifest_payload)
                 for name in names:
                     try:
-                        if name == BACKUP_DELIVERY_DEDUP_NAME:
+                        if name in BACKUP_SQLITE_NAMES:
                             content = self._sqlite_snapshot_bytes(targets[name])
                         else:
                             with open(targets[name], "rb") as source:
@@ -267,16 +335,16 @@ class BackupRestoreService:
                     uncompressed_size += len(content)
                     if uncompressed_size > BACKUP_MAX_BYTES:
                         raise ValueError(
-                            "备份内容超过 5 MB 限制，请取消包含运行状态或减少队列数据"
+                            f"备份内容超过 {BACKUP_MAX_MB} MB 限制，请取消包含运行状态或减少队列数据"
                         )
                     manifest["sha256"][name] = hashlib.sha256(content).hexdigest()
                     archive.writestr(name, content)
                 manifest_payload = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
                 if uncompressed_size + len(manifest_payload) > BACKUP_MAX_BYTES:
-                    raise ValueError("备份内容超过 5 MB 限制")
+                    raise ValueError(f"备份内容超过 {BACKUP_MAX_MB} MB 限制")
                 archive.writestr(BACKUP_MANIFEST_NAME, manifest_payload)
             if payload.tell() > BACKUP_MAX_BYTES:
-                raise ValueError("生成的备份 ZIP 超过 5 MB 限制")
+                raise ValueError(f"生成的备份 ZIP 超过 {BACKUP_MAX_MB} MB 限制")
         result = payload.getvalue()
         self.read_restore_archive(result)
         return result
@@ -287,7 +355,7 @@ class BackupRestoreService:
             or not payload
             or len(payload) > BACKUP_MAX_BYTES
         ):
-            raise ValueError("备份文件为空或超过 5 MB 限制")
+            raise ValueError(f"备份文件为空或超过 {BACKUP_MAX_MB} MB 限制")
         try:
             with zipfile.ZipFile(io.BytesIO(payload), "r") as archive:
                 infos = archive.infolist()
@@ -317,7 +385,7 @@ class BackupRestoreService:
                 if total > BACKUP_MAX_BYTES or any(
                     info.file_size > BACKUP_MAX_BYTES for info in infos
                 ):
-                    raise ValueError("备份解压后超过 5 MB 限制")
+                    raise ValueError(f"备份解压后超过 {BACKUP_MAX_MB} MB 限制")
                 try:
                     manifest = json.loads(
                         archive.read(BACKUP_MANIFEST_NAME).decode("utf-8")
@@ -353,9 +421,9 @@ class BackupRestoreService:
                 for name in names:
                     if name == BACKUP_MANIFEST_NAME:
                         continue
-                    if name == BACKUP_DELIVERY_DEDUP_NAME:
+                    if name in BACKUP_SQLITE_NAMES:
                         content = archive.read(name)
-                        self._validate_sqlite_payload(content)
+                        self._validate_sqlite_payload(content, name)
                         data[name] = content
                         continue
                     try:
@@ -385,7 +453,7 @@ class BackupRestoreService:
                     raise ValueError("运行状态账号不在配置索引中")
                 validate_runtime(name.rsplit("/", 1)[1], value)
                 continue
-            if name not in (BACKUP_SETTINGS_NAME, BACKUP_DELIVERY_DEDUP_NAME):
+            if name not in (BACKUP_SETTINGS_NAME, *BACKUP_SQLITE_NAMES):
                 validate_runtime(name, value)
         return data
 
@@ -524,6 +592,11 @@ class BackupRestoreService:
         if include_runtime_state:
             if not confirmed_runtime_state:
                 raise ValueError("恢复运行状态需要明确确认风险")
+            if "discord_last.json" in data and BACKUP_DISCORD_GAPS_NAME not in data:
+                # Legacy backups cannot contain the new journal. Reset it in the
+                # same rollback-protected restore instead of pairing old cursors
+                # with newer obligations or scan positions.
+                data[BACKUP_DISCORD_GAPS_NAME] = self._empty_discord_gaps_payload()
             names.extend(name for name in BACKUP_RUNTIME_NAMES if name in data)
             names.extend(name for name in data if name.startswith("bot_profile_runtime/"))
         names.append(BACKUP_SETTINGS_NAME)
@@ -536,7 +609,7 @@ class BackupRestoreService:
             written_names = []
             try:
                 for name in names:
-                    if name == BACKUP_DELIVERY_DEDUP_NAME:
+                    if name in BACKUP_SQLITE_NAMES:
                         self._atomic_write_bytes(targets[name], data[name])
                     else:
                         self.atomic_write_json_unlocked(

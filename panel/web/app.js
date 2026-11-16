@@ -305,6 +305,15 @@ function renderPageCredentialShortcut() {
   const showYoutube = activePage === "youtube";
   discord.hidden = !showDiscord;
   youtube.hidden = !showYoutube;
+  const discordHealthy = !!(latestStatus && latestStatus.running === true
+    && latestStatus.health && latestStatus.health.discord === true);
+  discord.dataset.state = discordHealthy ? "on" : "neutral";
+  discord.title = discordHealthy ? "Discord Bot 凭据正常 · 已连接" : "配置 Discord Bot 凭据";
+  discord.setAttribute("aria-label", discordHealthy ? "配置 Discord Bot 凭据：已连接" : "配置 Discord Bot 凭据");
+  const youtubeHealthy = !!(latestYoutubeStatus && latestYoutubeStatus.data_api_healthy === true);
+  youtube.dataset.state = youtubeHealthy ? "on" : "neutral";
+  youtube.title = youtubeHealthy ? "YouTube Data API Key 正常工作" : "配置 YouTube Data API Key";
+  youtube.setAttribute("aria-label", youtubeHealthy ? "配置 YouTube Data API Key：工作正常" : "配置 YouTube Data API Key");
 }
 
 function renderChainStatusShortcut() {
@@ -328,9 +337,9 @@ function renderChainStatusShortcut() {
   button.dataset.target = page.target;
   button.setAttribute("aria-controls", page.target);
   if (page.kind === "backfill") {
-    button.dataset.state = backfillTotal > 0 ? "pending" : "neutral";
+    button.dataset.state = backfillUnknown ? "warn" : (backfillTotal > 0 || backfillScanning ? "pending" : "neutral");
     button.innerHTML = mcIcon("history-anticlockwise", 18);
-    button.title = "Discord 离线补发 · 当前账号待补发 " + backfillTotal + " 条 · 点击查看设置";
+    button.title = "Discord 离线补发 · 当前账号 " + backfillStatusText + " · 点击查看设置";
     button.setAttribute("aria-label", "打开 Discord 离线补发详情");
   } else if (page.kind === "steam") {
     const status = document.getElementById(page.status);
@@ -526,6 +535,8 @@ document.getElementById("youtubeApiKeySave")?.addEventListener("click", async fu
       if (status) status.textContent = saved.msg || "保存失败，请重试";
       return;
     }
+    if (latestYoutubeStatus) latestYoutubeStatus = {...latestYoutubeStatus, data_api_healthy: false};
+    renderPageCredentialShortcut();
     if (input) input.value = "";
     setYoutubeApiKeyVisible(false);
     if (status) status.textContent = "已保存，正在重启机器人…";
@@ -1228,6 +1239,7 @@ function renderStatus(st) {
   } else {
     setOverviewRouteStatus(overviewQQ, "未连接", selectedBot ? "当前 QQ Bot" : "QQ Bot", "warn");
   }
+  renderPageCredentialShortcut();
 }
 
 function setOverviewRouteStatus(target, label, detail, state) {
@@ -3408,6 +3420,7 @@ async function refreshBilibiliStatus() {
 function renderYoutubeStatus(st) {
   const badge = document.getElementById("youtubeBadge");
   if (!badge || !st) return;
+  latestYoutubeStatus = st;
   const botUp = st.bot_running === true;
   const pollTs = Number(st.last_poll_ts) || 0;
   const pollText = pollTs ? xrssFmtTime(pollTs) : "—";
@@ -3487,6 +3500,7 @@ function renderYoutubeStatus(st) {
     if (failed || st.ok === false) appendRssCounters(summary, st, srcText, "来源", true);
   }
   renderChainStatusShortcut();
+  renderPageCredentialShortcut();
 }
 
 async function refreshYoutubeStatus() {
@@ -4289,9 +4303,12 @@ async function refreshIdentities() {
 }
 
 let backfillTotal = 0;  // 当前待补发总数，供「立即补发/清空」按钮可用状态判断
+let backfillUnknown = true;
+let backfillScanning = false;
+let backfillStatusText = "状态未知";
 
 function updateBackfillButtons() {
-  const disable = backfillTotal <= 0;
+  const disable = !backfillUnknown && !backfillScanning && backfillTotal <= 0;
   ["btnBackfillRun", "btnBackfillClear"].forEach(function (id) {
     const b = document.getElementById(id);
     if (b) b.disabled = disable;
@@ -4301,10 +4318,22 @@ function updateBackfillButtons() {
 function renderBackfill(data) {
   const el = document.getElementById("backfillPending");
   if (!el) return;
-  // 仅显示数字：接口不可用/未运行/无待补发均显示 0
-  backfillTotal = (data && data.ok) ? (data.total || 0) : 0;
-  // 超过 99 条只显示 99+，按钮可用状态仍按真实数量判断
-  el.textContent = backfillTotal > 99 ? "99+" : backfillTotal;
+  backfillUnknown = !(data && data.ok) || data.unknown === true;
+  backfillScanning = !!(data && data.ok && data.scanning);
+  backfillTotal = (data && data.ok) ? (Number(data.total) || 0) : 0;
+  const partial = backfillUnknown || backfillScanning || !!(data && data.capped);
+  const numberText = backfillTotal > 99 ? "99+" : String(backfillTotal);
+  el.textContent = backfillTotal > 0 ? (partial && backfillTotal <= 99 ? "≥" : "") + numberText
+    : (backfillUnknown ? "未知" : (backfillScanning ? "扫描中" : "0"));
+  backfillStatusText = backfillUnknown ? "状态未知" : (backfillScanning ? "扫描中" : "待补发 " + numberText + " 条");
+  el.title = backfillUnknown ? "部分状态无法查询，显示已确认的待处理数量" : (backfillScanning ? "正在检查历史消息，数量可能增加" : "已登记的待处理消息数");
+  const stateEl = document.getElementById("backfillState");
+  if (stateEl) {
+    const st = (data && data.ok && data.status) || {};
+    const stateText = backfillUnknown ? "状态未知" : (st.enabled === false ? "已关闭" : (st.running ? "检查中" : "等待下次检查"));
+    const checked = st.last_check ? " · 最近检查 " + new Date(st.last_check * 1000).toLocaleString() : "";
+    stateEl.textContent = stateText + checked + (st.error ? " · " + st.error : "");
+  }
   el.style.color = backfillTotal > 0 ? "var(--pending)" : "";
   // 无待补发时禁用「立即补发」与「清空待补发」（disabled 自带半透明）
   updateBackfillButtons();
@@ -6473,6 +6502,10 @@ async function saveDiscordConfig() {
     showAlert("保存失败", (r && r.msg) || "保存 Discord Bot 配置失败");
     return;
   }
+  if (latestStatus && latestStatus.health) {
+    latestStatus = {...latestStatus, health: {...latestStatus.health, discord: false}};
+    renderPageCredentialShortcut();
+  }
   // 保存成功后再重启，使新配置生效；重启失败不回滚配置
   let rr;
   try {
@@ -6480,6 +6513,7 @@ async function saveDiscordConfig() {
   } catch (e) { rr = { ok: false }; }
   if (!rr || !rr.ok) {
     saveBtn.disabled = false;
+    await refreshStatus();
     showAlert("配置已保存", "配置已保存，但机器人重启失败，请稍后手动重启");
     return;
   }
@@ -7026,7 +7060,7 @@ document.addEventListener("click", async function (e) {
     btn.disabled = true;
     try {
       const p = await jget("/api/backfill/pending");
-      if (p.ok && !p.total) {
+      if (p.ok && !p.total && !p.unknown && !p.scanning) {
         showAlert("补发", "当前无可补发的消息");
         await refreshBackfill();
       } else {
@@ -7452,6 +7486,7 @@ function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
 let lastBackfillSeq = 0;
 let latestStatus = null;
+let latestYoutubeStatus = null;
 
 function renderDiagnostic(st) {
   const body = document.getElementById("diagnosticBody");

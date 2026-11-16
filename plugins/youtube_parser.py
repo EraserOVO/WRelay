@@ -320,7 +320,7 @@ def format_forward_text(post, source=None, source_label="自动转发来自"):
     ).strip()
     lines = []
     if display_name:
-        lines.append("%s YouTube 中[%s]的视频：" % (source_label, display_name))
+        lines.append("【YouTube · 视频】%s" % display_name)
     title = str(post.get("title") or "").strip()
     link = str(post.get("link") or "").strip()
     if title:

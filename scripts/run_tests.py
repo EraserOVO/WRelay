@@ -12,6 +12,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TEST_TIMEOUT_SECONDS = 120
 TESTS = (
+    "test_discord_gaps.py",
+    "test_discord_gap_delivery.py",
+    "test_discord_gap_backup.py",
     "test_fetch_reference.py",
     "test_fetch_text_emoji.py",
     "test_fetch_pagination_ids.py",

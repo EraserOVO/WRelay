@@ -18,13 +18,14 @@ from plugins.paths import data_path
 from plugins.user_errors import localize_user_error
 from plugins.fetch import (
     fetch_channel_latest,
-    fetch_channel_gap_count,
     _resolve_channel_metadata,
 )
-from plugins.backfill import _backfill_missed
+from plugins.backfill import _backfill_missed, backfill_operation_lock, get_backfill_status
+from plugins import discord_gaps
+from plugins.retry import clear_retry_through
+from plugins.json_io import run_in_thread_to_completion
 from plugins.dedup import (
     normalize_channel_map,
-    compute_base_id,
 )
 
 
@@ -73,21 +74,21 @@ def _apply_clear_baseline(channel_map, active_groups, latest):
 
 @app.get("/api/backfill/pending")
 async def api_backfill_pending():
-    """统计各启用频道的待补发缺口数（取最落后群的记录为基准）
-
-    返回 {"ok": True, "total": int, "channels": {频道ID: {"name": str, "count": int}}}
-    count 达到上限 1000 时表示"至少 1000 条"；统计失败记 -1"""
+    """统计已登记的不同消息，并标识扫描未完成和查询失败。"""
     snapshot = await asyncio.to_thread(get_backfill_routing_snapshot)
     channels = snapshot["channels"]
     groups_by_channel = snapshot["groups_by_channel"]
 
     if not channels:
-        return {"ok": True, "total": 0, "channels": {}}
+        return {"ok": True, "total": 0, "channels": {}, "unknown": False, "scanning": False, "capped": False, "status": get_backfill_status()}
 
     last_messages = await load_last_messages_async(load_last_messages)
 
     result = {}
     total = 0
+    unknown = False
+    scanning = False
+    capped = False
 
     for channel_id, channel_name in channels.items():
 
@@ -99,59 +100,43 @@ async def api_backfill_pending():
             result[channel_id] = {"name": channel_name, "count": 0}
             continue
 
-        channel_map = normalize_channel_map(
-            last_messages,
-            channel_id,
-        )
-
-        base_id = compute_base_id(
-            channel_map,
-            active_groups,
-        )
-
-        if base_id is None:
-            result[channel_id] = {"name": channel_name, "count": 0}
-            continue
-
         try:
-
-            latest = await fetch_channel_latest(
-                channel_id
+            state = await run_in_thread_to_completion(
+                discord_gaps.channel_status, discord_gaps.current_owner(), str(channel_id), active_groups,
             )
-
-            if (
-                not latest
-                or int(latest) <= int(base_id)
-            ):
-                count = 0
-            else:
-                count = await fetch_channel_gap_count(
-                    channel_id,
-                    base_id,
-                )
-
-                if count is None:
-                    count = -1
-
+            latest = await fetch_channel_latest(channel_id)
+            is_unknown = not latest
+            in_progress = state["scanning"]
+            if latest:
+                channel_map = normalize_channel_map(last_messages, channel_id)
+                for group, cursor in state["cursors"].items():
+                    cursor = cursor or channel_map.get(group) or channel_map.get("*")
+                    if cursor is None or int(latest) > int(cursor):
+                        in_progress = True
+            count = state["count"]
+            unknown = unknown or is_unknown
+            scanning = scanning or in_progress
+            capped = capped or state["capped"]
+            result[channel_id] = {"name": channel_name, "count": count,
+                                  "unknown": is_unknown, "scanning": in_progress,
+                                  "capped": state["capped"]}
+            total += count
         except Exception:
             logger.exception(
                 "统计待补发数量失败: {}",
                 channel_id
             )
-            count = -1
-
-        result[channel_id] = {
-            "name": channel_name,
-            "count": count,
-        }
-
-        if count > 0:
-            total += count
+            result[channel_id] = {"name": channel_name, "count": 0, "unknown": True}
+            unknown = True
 
     return {
         "ok": True,
         "total": total,
         "channels": result,
+        "unknown": unknown,
+        "scanning": scanning,
+        "capped": capped,
+        "status": get_backfill_status(),
     }
 
 
@@ -167,6 +152,11 @@ async def api_backfill_run():
 @app.post("/api/backfill/clear")
 async def api_backfill_clear():
     """清除待补发：把各启用频道的记录推进到最新消息 ID（不发送消息）"""
+    async with backfill_operation_lock:
+        return await _clear_backfill_locked()
+
+
+async def _clear_backfill_locked():
     snapshot = await asyncio.to_thread(get_backfill_routing_snapshot)
     channels = snapshot["channels"]
     groups_by_channel = snapshot["groups_by_channel"]
@@ -204,6 +194,10 @@ async def api_backfill_clear():
             return cleared > 0
 
         await update_last_messages(apply_clear_baselines)
+        # 同一账号的持久缺口及扫描游标必须一起处理；仅清到查询到的
+        # 频道最新 ID，之后到达的消息和停用群的记录保留。
+        await run_in_thread_to_completion(discord_gaps.clear_through, discord_gaps.current_owner(), baselines)
+        await clear_retry_through(baselines)
 
     if cleared:
         logger.info(

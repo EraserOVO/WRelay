@@ -7,7 +7,7 @@ import nonebot
 
 nonebot.init()
 
-from plugins import backfill, backfill_api
+from plugins import backfill, backfill_api, bot_profiles
 
 
 async def verify_nonblocking(call, module, getter_name, result, expected):
@@ -34,7 +34,8 @@ async def main():
         backfill_api,
         "get_backfill_routing_snapshot",
         empty_routing,
-        {"ok": True, "total": 0, "channels": {}},
+        {"ok": True, "total": 0, "channels": {}, "unknown": False,
+         "scanning": False, "capped": False, "status": {}},
     )
     await verify_nonblocking(
         backfill_api.api_backfill_clear,
@@ -63,18 +64,19 @@ async def main():
     backfill._backfill_running = False
     backfill._backfill_rerun_requested = False
     try:
-        await verify_nonblocking(
-            backfill._backfill_missed,
-            backfill,
-            "get_backfill_runtime_snapshot",
-            {
-                "enabled": False,
-                "limit": 10,
-                "channels": {},
-                "groups_by_channel": {},
-            },
-            None,
-        )
+        with mock.patch.object(bot_profiles, "ids", return_value=[]):
+            await verify_nonblocking(
+                backfill._backfill_missed,
+                backfill,
+                "get_backfill_runtime_snapshot",
+                {
+                    "enabled": False,
+                    "limit": 10,
+                    "channels": {},
+                    "groups_by_channel": {},
+                },
+                None,
+            )
         assert backfill._backfill_running is False
     finally:
         backfill._backfill_running = previous_running

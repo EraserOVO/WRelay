@@ -2543,19 +2543,19 @@ body.desktop-host[data-active-page="discord"] #pageDiscord .func-cards > #backfi
   margin: auto 0 0; padding-top: 12px; width: 100%; gap: 8px; flex-wrap: wrap;
 }
 body.desktop-host[data-active-page="discord"] #pageDiscord .func-cards > #backfillCard .backfill-actions > button { flex: 0 0 auto; white-space: nowrap; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#btnBackfillToggle, #btnScheduledMessageToggle, #btnBilibiliAutoResolveToggle) {
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) :is(#btnBackfillToggle, #btnScheduledMessageToggle, #btnBilibiliAutoResolveToggle) {
   flex: 0 0 auto; width: auto; min-width: 0; max-width: 100%;
   justify-content: flex-start;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#btnBackfillToggle, #btnScheduledMessageToggle, #btnBilibiliAutoResolveToggle, #btnLogAutoScroll) {
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) :is(#btnBackfillToggle, #btnScheduledMessageToggle, #btnBilibiliAutoResolveToggle) {
   display: inline-flex; align-items: center; gap: 8px; padding: 0 8px; min-height: 36px;
   color: var(--fg); background: transparent; border-color: transparent;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#btnBackfillToggle, #btnScheduledMessageToggle, #btnBilibiliAutoResolveToggle, #btnLogAutoScroll):hover { background: var(--sec-bg); }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) [role="switch"] .settings-switch-track { width: 32px; height: 18px; flex: none; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) [role="switch"] .settings-switch-track::after { width: 14px; height: 14px; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) [role="switch"][data-on="1"] .settings-switch-track { background: var(--toggle-on); }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) [role="switch"][data-on="1"] .settings-switch-track::after { transform: translateX(14px); }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) :is(#btnBackfillToggle, #btnScheduledMessageToggle, #btnBilibiliAutoResolveToggle):hover { background: var(--sec-bg); }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) [role="switch"] .settings-switch-track { width: 32px; height: 18px; flex: none; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) [role="switch"] .settings-switch-track::after { width: 14px; height: 14px; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) [role="switch"][data-on="1"] .settings-switch-track { background: var(--toggle-on); }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) [role="switch"][data-on="1"] .settings-switch-track::after { transform: translateX(14px); }
 /* 卡片动作栏的胶囊开关落位：默认贴左；左侧已有按钮时贴右；
    右下角还有按钮时保持在它左侧（动作栏按「左按钮 → 胶囊 → 右按钮」排列）。 */
 :is(.scheduled-message-actions, .relay-link-actions, .auto-translation-actions, #backfillCard #backfillContent > .row) > button.pill-switch:not(:first-child) {
@@ -3848,7 +3848,9 @@ body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"]
 .chain-status-shortcut svg, .page-key-shortcut svg { width: 18px; height: 18px; flex: 0 0 18px; }
 .page-key-shortcut svg { width: 20px; height: 20px; flex-basis: 20px; }
 .chain-status-shortcut > span { display: none; }
-#chainStatusShortcut[data-state="on"] {
+#chainStatusShortcut[data-state="on"],
+#discordConfigShortcut[data-state="on"],
+#youtubeApiKeyShortcut[data-state="on"] {
   border-color: color-mix(in srgb, var(--badge-on-fg) 32%, var(--field-border));
   background: var(--badge-on-bg);
   color: var(--badge-on-fg);
@@ -3870,6 +3872,7 @@ body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"]
   color: var(--badge-off-fg);
 }
 #chainStatusShortcut[data-state="neutral"] { color: var(--muted); }
+#chainStatusShortcut[aria-controls="backfillCard"] { color: var(--sec-fg); }
 .chain-status-shortcut:not(:disabled):hover,
 .chain-status-shortcut:not(:disabled):focus-visible,
 .page-key-shortcut:not(:disabled):hover,

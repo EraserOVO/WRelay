@@ -159,6 +159,7 @@ from plugins.startup_config import discord_ready
 from panel.backup_restore import (
     BACKUP_MANIFEST_NAME,
     BACKUP_MAX_BYTES,
+    BACKUP_MAX_MB,
     BACKUP_RUNTIME_NAMES,
     BACKUP_SETTINGS_NAME,
     RESTORE_BACKUP_RETENTION,
@@ -1787,7 +1788,7 @@ async def api_backup_restore(request: Request, include_runtime_state: bool = Fal
         try:
             if int(content_length) > BACKUP_MAX_BYTES:
                 return JSONResponse(
-                    {"ok": False, "msg": "备份文件为空或超过 5 MB 限制"},
+                    {"ok": False, "msg": f"备份文件为空或超过 {BACKUP_MAX_MB} MB 限制"},
                     status_code=413,
                 )
         except ValueError:
@@ -1800,7 +1801,7 @@ async def api_backup_restore(request: Request, include_runtime_state: bool = Fal
         async for chunk in request.stream():
             if len(payload) + len(chunk) > BACKUP_MAX_BYTES:
                 return JSONResponse(
-                    {"ok": False, "msg": "备份文件为空或超过 5 MB 限制"},
+                    {"ok": False, "msg": f"备份文件为空或超过 {BACKUP_MAX_MB} MB 限制"},
                     status_code=413,
                 )
             payload.extend(chunk)

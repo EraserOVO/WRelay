@@ -312,6 +312,25 @@ class DesktopApi:
         except (OSError, ValueError, IndexError, TypeError) as exc:
             return {"ok": False, "msg": str(exc)}
 
+    def open_bot_profile(self):
+        """Open a native picker and read one bounded Bot profile for import."""
+        try:
+            import webview
+            paths = webview.windows[0].create_file_dialog(webview.FileDialog.OPEN, allow_multiple=False,
+                file_types=("JSON 文件 (*.json)",))
+            if not paths:
+                return {"ok": True, "cancelled": True}
+            path = paths if isinstance(paths, str) else paths[0]
+            if os.path.getsize(path) > 5 * 1024 * 1024:
+                raise ValueError("配置文件不能超过 5 MB")
+            with open(path, "r", encoding="utf-8-sig") as source:
+                content = source.read()
+            if len(content.encode("utf-8")) > 5 * 1024 * 1024:
+                raise ValueError("配置文件不能超过 5 MB")
+            return {"ok": True, "filename": os.path.basename(path), "content": content}
+        except (OSError, ValueError, IndexError, TypeError, UnicodeError) as exc:
+            return {"ok": False, "msg": str(exc)}
+
     def set_last_qq_bot(self, value):
         try:
             return {"ok": True, **self._preferences.set_last_qq_bot(value)}

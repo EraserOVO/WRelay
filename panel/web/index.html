@@ -18,8 +18,8 @@
   html.panel-styles-ready body { visibility: visible; }
 </style>
 <link rel="icon" type="image/svg+xml" href="./wrelay-logo.svg">
-<link rel="stylesheet" href="./style.css?v=20261116-source-links-r1">
-<link rel="stylesheet" href="./ui-components.css?v=20261116-secondary-checkbox-switch-r1">
+<link rel="stylesheet" href="./style.css?v=20261116-credential-health-r2">
+<link rel="stylesheet" href="./ui-components.css?v=20261116-profile-import-summary-r1">
 <link rel="stylesheet" href="./onboarding.css?v=20261107-restart">
 <link rel="stylesheet" href="./personal-qq.css">
 </head>
@@ -111,7 +111,8 @@
             <button id="btnBackfillClear" class="danger rowicon bf-clear" disabled><svg data-mingcute-icon="delete-2" data-mingcute-size="18"></svg></button>
           </span>
         </div>
-        <div class="hint" id="hint-backfill" style="display:none">启用后，机器人连接时会自动补发离线期间未转发的消息；清空后不再补发。</div>
+        <div id="backfillState" class="hint" role="status">等待检查</div>
+        <div class="hint" id="hint-backfill" style="display:none">启用后定期检查并分批补发；扫描中数量可能增加。清空后不再补发已清除的消息。</div>
       </div>
     </div>
 
@@ -1078,23 +1079,20 @@
     <div><button type="button" id="personalQQSave">保存</button></div>
   </div>
 </div>
+  <input id="profileImportFile" type="file" accept=".json,application/json" aria-label="Bot 配置 JSON 文件" hidden>
   <div id="profileImportModal" style="display:none;">
     <div>
       <button type="button" class="modal-x" data-close="profileImportModal" aria-label="关闭"><svg data-mingcute-icon="close" data-mingcute-size="18"></svg></button>
-      <h3>上传 Bot 配置</h3>
-      <p id="profileImportOwner" class="profile-import-owner"></p>
+      <h3>确认覆盖 Bot 配置</h3>
       <div class="profile-import-file-field">
         <span id="profileImportFileLabel" class="profile-import-field-label">配置文件</span>
         <div class="profile-import-file-control">
-          <button type="button" class="sec" id="profileImportChoose" aria-controls="profileImportFile">选择文件</button>
+          <button type="button" class="sec" id="profileImportChoose" aria-controls="profileImportFile">更换文件</button>
           <span id="profileImportFileName" class="profile-import-file-name" role="status" aria-live="polite">未选择文件</span>
-          <input id="profileImportFile" type="file" accept=".json,application/json" aria-label="Bot 配置 JSON 文件" hidden>
         </div>
       </div>
-      <label class="profile-import-mode">导入方式<select id="profileImportMode"><option value="merge">合并，保留已有配置</option><option value="replace">替换当前账号的来源和转发组</option></select></label>
-      <div id="profileImportMapping" class="profile-import-mapping"></div>
-      <div id="profileImportReview" class="profile-import-review" role="status">请预览并检查导入结果。</div>
-      <div><button type="button" class="sec" id="profileImportPreview">预览</button><button type="button" id="profileImportSave" disabled>确认导入</button></div>
+      <div id="profileImportReview" class="profile-import-review" role="status">选择文件后显示配置摘要。</div>
+      <div><button type="button" id="profileImportSave" disabled>确认导入</button></div>
     </div>
   </div>
 <div id="chainDetailModal" class="modal-overlay" style="display:none">
@@ -1109,11 +1107,11 @@
 </div>
   <script src="./local-api.js"></script>
 <script src="./mingcute-icons.js?v=20261116-youtube-key-visibility-r1"></script>
-<script src="./app.js?v=20261116-source-links-r1"></script>
+<script src="./app.js?v=20261116-credential-health-r3-backfill-status-r1"></script>
 <script src="./desktop.js?v=20261107-select-sheen"></script>
 <script src="./ui-components.js?v=20261116-youtube-key-modal-r1"></script>
 <script src="./personal-qq.js"></script>
-  <script src="./bot-profiles.js"></script>
+  <script src="./bot-profiles.js?v=20261116-profile-menu-actions-r4"></script>
 <script src="./discord-page.js?v=20261114-steam-workspace"></script>
 <script src="./onboarding.js?v=20261114-mingcute-buttons"></script>
 <script src="./steam-page.js?v=20261116-source-links-r1"></script>

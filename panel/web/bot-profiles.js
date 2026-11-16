@@ -10,15 +10,34 @@
   });
   document.addEventListener("click", event => { if (!event.target.closest(".profile-config-menu")) closeMenu(); });
   document.addEventListener("keydown", event => { if (event.key === "Escape" && !menu.hidden) { closeMenu(); menuButton.focus(); } });
-  let owner = "", documentValue = null, preview = null, generation = 0, busy = false;
+  let owner = "", documentValue = null, preview = null, importMapping = {}, generation = 0, busy = false;
   const fileInput = $("profileImportFile"), fileName = $("profileImportFileName");
-  $("profileImportChoose").addEventListener("click", () => fileInput.click());
-  const names = {discord_channels: "Discord 来源", x_rss_sources: "X 来源", bilibili_sources: "Bilibili 来源", youtube_sources: "YouTube 来源", steam_sources: "Steam 来源", forwarding_groups: "Discord 转发组", x_forwarding_groups: "X 转发组", bilibili_forwarding_groups: "Bilibili 转发组", youtube_forwarding_groups: "YouTube 转发组", steam_forwarding_groups: "Steam 转发组", qq_forwarding_groups: "QQ 转发组"};
+  async function chooseFile() {
+    const api = window.pywebview && window.pywebview.api;
+    if (api && api.open_bot_profile) {
+      try {
+        const result = await api.open_bot_profile();
+        if (!result || !result.ok) throw new Error(result?.msg || "无法打开配置文件");
+        if (result.cancelled) return;
+        const content = String(result.content || "");
+        await processSelectedFile({
+          name: result.filename || "Bot 配置.json",
+          size: new Blob([content]).size,
+          text: async () => content,
+        });
+      } catch (error) { showAlert("上传失败", error.message || "无法打开配置文件"); }
+      return;
+    }
+    // Use the browser picker when the native bridge is not available yet.
+    fileInput.value = "";
+    fileInput.click();
+  }
+  $("profileImportChoose").addEventListener("click", chooseFile);
   function invalidate() {
     generation++;
     preview = null;
     $("profileImportSave").disabled = true;
-    $("profileImportReview").textContent = "请预览并检查导入结果。";
+    $("profileImportReview").textContent = "正在核对导入内容，请检查账号、文件和预览结果。";
   }
   function close() {
     if (busy) return;
@@ -33,11 +52,56 @@
   function body() {
     if (!documentValue) throw new Error("请先选择 Bot 配置文件");
     if (currentQQBotId() !== owner) throw new Error("当前账号已变化，请重新打开上传窗口");
-    const mapping = {};
-    $("profileImportMapping").querySelectorAll("select").forEach(select => { mapping[select.dataset.source] = select.value; });
-    return {document: documentValue, mode: $("profileImportMode").value, mapping};
+    return {document: documentValue, mode: "replace", mapping: importMapping};
   }
-  $("profileExport").addEventListener("click", async () => {
+  function summarizeLine(label, items, getName) {
+    const list = Array.isArray(items) ? items : [];
+    if (!list.length) return label + "：无（0个）";
+    const first = String(getName(list[0]) || "未命名").trim();
+    return label + "：" + (list.length === 1 ? first + "（1个）" : first + "等" + list.length + "个");
+  }
+  function buildGroupMapping(value) {
+    const groups = (settings.qq_group_openids || []).filter(group => String(group.bot_id || "") === owner);
+    const targetById = new Map(groups.map(group => [String(group.openid), group]));
+    const targetsByQQ = new Map();
+    groups.forEach(group => {
+      const qqId = String(group.qq_id || "").trim();
+      if (!qqId) return;
+      if (!targetsByQQ.has(qqId)) targetsByQQ.set(qqId, []);
+      targetsByQQ.get(qqId).push(group);
+    });
+    const metadata = new Map((Array.isArray(value.targets) ? value.targets : []).map(group => [String(group.openid), group]));
+    const used = new Set();
+    ["forwarding_groups", "x_forwarding_groups", "bilibili_forwarding_groups", "youtube_forwarding_groups", "steam_forwarding_groups", "qq_forwarding_groups"]
+      .forEach(key => (value.config[key] || []).forEach(group => (group.groups || []).forEach(id => used.add(String(id)))));
+    importMapping = {};
+    used.forEach(id => {
+      if (value.origin_bot === owner && targetById.has(id)) {
+        importMapping[id] = id;
+        return;
+      }
+      const qqId = String(metadata.get(id)?.qq_id || "").trim();
+      const matches = qqId ? targetsByQQ.get(qqId) || [] : [];
+      importMapping[id] = matches.length === 1 ? String(matches[0].openid) : "";
+    });
+    return Object.values(importMapping).filter(target => !target).length;
+  }
+  function renderSummary(value, unmappedCount) {
+    const config = value.config || {};
+    const currentUsers = Array.isArray(settings.qq_user_openids) ? settings.qq_user_openids : [];
+    const lines = [
+      summarizeLine("Discord来源", config.discord_channels, item => item.name || item.id),
+      summarizeLine("X来源", config.x_rss_sources, item => item.name || item.source),
+      summarizeLine("Bilibili来源", config.bilibili_sources, item => item.name || item.value || item.uid),
+      summarizeLine("YouTube来源", config.youtube_sources, item => item.name || item.value),
+      summarizeLine("Steam来源", config.steam_sources, item => item.name || item.value),
+      summarizeLine("QQ接收群", value.targets, item => item.name || item.qq_id || item.openid) +
+        (unmappedCount ? "（未匹配" + unmappedCount + "个，相关转发组将暂停）" : ""),
+      summarizeLine("QQ授权用户（当前保留）", currentUsers, item => item.name || item.qq_id || item.openid),
+    ];
+    $("profileImportReview").textContent = lines.join("\n");
+  }
+  async function exportProfile() {
     closeMenu();
     const selected = currentQQBotId();
     if (!selected) return showAlert("导出失败", "请先配置并选择 QQ 账号");
@@ -47,8 +111,7 @@
       const content = JSON.stringify(value, null, 2);
       const filename = "WRelay-" + selected.replace(":", "_") + "-" + new Date().toISOString().slice(0, 10) + ".json";
       const api = window.pywebview && window.pywebview.api;
-      if (api) {
-        if (!api.save_bot_profile) throw new Error("桌面程序需要重新启动后才能导出配置");
+      if (api && api.save_bot_profile) {
         const result = await api.save_bot_profile(filename, content);
         if (!result.ok) throw new Error(result.msg || "保存失败");
         if (!result.cancelled) showAlert("导出成功", "配置已保存到：\n" + result.path);
@@ -61,8 +124,8 @@
       document.body.append(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (error) { showAlert("导出失败", error.message); }
-  });
-  $("profileImport").addEventListener("click", () => {
+  }
+  function beginImport() {
     closeMenu();
     owner = currentQQBotId();
     if (!owner) return showAlert("上传失败", "请先配置并选择目标 QQ 账号");
@@ -70,68 +133,63 @@
     fileInput.value = "";
     fileName.textContent = "未选择文件";
     fileName.title = "";
-    $("profileImportMode").value = "merge";
-    $("profileImportMapping").replaceChildren();
-    $("profileImportOwner").textContent = "导入到：" + owner;
+    importMapping = {};
     invalidate();
-    modal.style.display = "flex";
-    $("qqBotWorkspace").disabled = true;
+    modal.style.display = "none";
+    chooseFile();
+  }
+  $("profileExport").addEventListener("click", event => {
+    event.preventDefault();
+    event.stopPropagation();
+    void exportProfile();
   });
-  fileInput.addEventListener("change", async event => {
-    const file = event.target.files[0] || null;
+  $("profileImport").addEventListener("click", event => {
+    event.preventDefault();
+    event.stopPropagation();
+    beginImport();
+  });
+  fileInput.addEventListener("change", event => processSelectedFile(event.target.files[0] || null));
+  async function processSelectedFile(file) {
+    if (!file) return;
+    if (!owner || currentQQBotId() !== owner) {
+      owner = "";
+      return showAlert("上传失败", "当前账号已变化，请重新选择目标账号并上传。");
+    }
     fileName.textContent = file?.name || "未选择文件";
     fileName.title = file?.name || "";
-    invalidate(); documentValue = null;
-    $("profileImportMapping").replaceChildren();
+    invalidate(); documentValue = null; importMapping = {};
+    $("profileImportReview").textContent = "正在读取配置文件…";
+    modal.style.display = "flex";
+    $("qqBotWorkspace").disabled = true;
     const version = generation;
     try {
-      if (!file) return;
       if (file.size > 5 * 1024 * 1024) throw new Error("配置文件不能超过 5 MB");
       const value = JSON.parse((await file.text()).replace(/^\uFEFF/, ""));
       if (version !== generation) return;
       if (value.format !== "wrelay-bot-export" || value.version !== 1 || !value.config) throw new Error("不支持的 Bot 配置格式或版本");
-      const targets = (settings.qq_group_openids || []).filter(group => group.bot_id === owner);
-      const metadata = new Map((value.targets || []).map(group => [group.openid, group]));
-      const used = new Set();
-      Object.keys(names).filter(key => key.endsWith("forwarding_groups") || key === "forwarding_groups").forEach(key => {
-        (value.config[key] || []).forEach(group => (group.groups || []).forEach(id => used.add(id)));
-      });
-      used.forEach(id => {
-        const source = metadata.get(id);
-        const label = document.createElement("label");
-        label.className = "form-field";
-        label.textContent = (source?.name || id) + " → 接收群";
-        const select = document.createElement("select");
-        select.dataset.source = id;
-        select.add(new Option("暂不对应（相关转发组将暂停）", ""));
-        targets.forEach(group => select.add(new Option(group.name || group.openid, group.openid)));
-        if (value.origin_bot === owner && targets.some(group => group.openid === id)) select.value = id;
-        select.addEventListener("change", invalidate);
-        label.append(select); $("profileImportMapping").append(label);
-      });
       documentValue = value;
-    } catch (error) { $("profileImportReview").textContent = error.message; }
-  });
-  $("profileImportMode").addEventListener("change", invalidate);
-  $("profileImportPreview").addEventListener("click", async () => {
-    invalidate(); const version = generation;
+      const unmappedCount = buildGroupMapping(value);
+      renderSummary(value, unmappedCount);
+      await previewImport(version);
+    } catch (error) { if (version === generation) $("profileImportReview").textContent = error.message; }
+  }
+  async function previewImport(version) {
+    if (!documentValue) return;
+    version = version === undefined ? generation : version;
     try {
       const response = await jpost(endpoint("import"), body());
       if (version !== generation) return;
       if (!response.ok) throw new Error(response.msg || "预览失败");
       preview = response;
-      const replacing = $("profileImportMode").value === "replace";
-      $("profileImportReview").textContent = (replacing ? "将替换当前账号的来源、转发组及链路设置。\n" : "将合并到当前账号，已有同标识配置保留。\n") +
-        Object.entries(response.counts).map(([key, count]) => names[key] + "：" + (settings[key] || []).length + " → " + count).join("\n") +
-        "\n\n" + response.warnings.join("\n");
       $("profileImportSave").disabled = false;
-    } catch (error) { if (version === generation) $("profileImportReview").textContent = error.message; }
-  });
+    } catch (error) { if (version === generation) $("profileImportReview").textContent += "\n\n校验失败：" + error.message; }
+  }
   $("profileImportSave").addEventListener("click", async () => {
     if (!preview || busy) return;
     try {
       const request = {...body(), confirm: true, revision: preview.revision, preview_hash: preview.preview_hash};
       busy = true;
+      fileInput.disabled = true;
       modal.querySelectorAll("input, select, button").forEach(node => { node.disabled = true; });
       const response = await jpost(endpoint("import"), request);
       if (!response.ok) throw new Error(response.msg || "导入失败");
@@ -142,6 +200,7 @@
       invalidate(); $("profileImportReview").textContent = error.message;
     } finally {
       busy = false;
+      fileInput.disabled = false;
       modal.querySelectorAll("input, select, button").forEach(node => { node.disabled = false; });
       $("profileImportSave").disabled = !preview;
     }

@@ -119,6 +119,7 @@ _youtube_api_cooldown_until = 0.0
 _youtube_api_cooldown_reason = ""
 _youtube_api_cooldown_rate_limited = False
 _youtube_api_failure_count = 0
+_youtube_api_healthy = False
 _posts_cache = {}
 _video_page_cache = {}
 _protection_runtime_state = None
@@ -352,14 +353,16 @@ async def _youtube_data_api_get(endpoint, params):
     """Call a public YouTube Data API endpoint without putting its key in URLs."""
     global _last_youtube_api_request_ts, _youtube_api_failure_count
     global _youtube_api_cooldown_until, _youtube_api_cooldown_reason
-    global _youtube_api_cooldown_rate_limited
+    global _youtube_api_cooldown_rate_limited, _youtube_api_healthy
     key = _youtube_data_api_key()
     if not key:
+        _youtube_api_healthy = False
         raise YoutubeDataAPIError("YOUTUBE_DATA_API_KEY 未配置")
 
     async with _youtube_api_request_lock:
         remaining = _youtube_api_cooldown_until - time.monotonic()
         if remaining > 0:
+            _youtube_api_healthy = False
             reason = _youtube_api_cooldown_reason or "上游请求退避中"
             raise YoutubeDataAPIError(
                 "YouTube Data API 退避中（约 %.0f 秒）：%s" % (remaining, reason),
@@ -371,6 +374,7 @@ async def _youtube_data_api_get(endpoint, params):
         elapsed = time.monotonic() - _last_youtube_api_request_ts
         if elapsed < YOUTUBE_DATA_API_REQUEST_GAP:
             await asyncio.sleep(YOUTUBE_DATA_API_REQUEST_GAP - elapsed)
+        _youtube_api_healthy = False
         try:
             response = await _youtube_get(
                 "%s/%s" % (YOUTUBE_DATA_API_BASE, endpoint),
@@ -442,6 +446,7 @@ async def _youtube_data_api_get(endpoint, params):
         _youtube_api_cooldown_until = 0.0
         _youtube_api_cooldown_reason = ""
         _youtube_api_cooldown_rate_limited = False
+        _youtube_api_healthy = True
         return payload
 
 
@@ -1211,7 +1216,7 @@ async def _render_post(
         or ""
     ).strip()
     header = (
-        "%s YouTube 中[%s]的视频：" % (source_label, source_name)
+        "【YouTube · 视频】%s" % source_name
         if source_name
         else ""
     )
@@ -1720,12 +1725,15 @@ _youtube_app = get_app()
 
 
 def _youtube_data_api_status():
+    cooldown = max(
+        0,
+        int(_youtube_api_cooldown_until - time.monotonic() + 0.999),
+    )
+    configured = bool(_youtube_data_api_key())
     return {
-        "data_api_enabled": bool(_youtube_data_api_key()),
-        "data_api_cooldown_seconds": max(
-            0,
-            int(_youtube_api_cooldown_until - time.monotonic() + 0.999),
-        ),
+        "data_api_enabled": configured,
+        "data_api_cooldown_seconds": cooldown,
+        "data_api_healthy": configured and _youtube_api_healthy and cooldown == 0,
     }
 
 
