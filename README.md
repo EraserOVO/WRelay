@@ -11,6 +11,10 @@ WRelay 是一个基于 NoneBot2 的 Windows 消息转发服务。当前代码包
 
 项目不提供 QQ → Discord 自动转发，也不做双向同步。
 
+## Code signing policy
+
+正式 Windows 发布计划通过 SignPath Foundation 对安装包进行 Authenticode 签名；签名前由项目维护者人工批准。详见 [Code signing policy](CODE_SIGNING_POLICY.md)。
+
 五条自动链路也支持个人 QQ，通过 OneBot v11 反向 WebSocket 兼容 NapCat / SnowLuma；
 不同账号可混用协议端，同一账号只允许一个连接。「设置 → 个人 QQ」管理连接及接收群。
 第二期支持白名单私聊管理、明确授权的手动 QQ → QQ、Bilibili 群链接解析及定时消息。

@@ -105,9 +105,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\prepare_runtime.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\build_installer.ps1
 ```
 
-脚本检查锁定依赖与 WebView2 安装器签名，编译 `WRelay.exe`、`WRelay.Bot.exe` 和 `WRelay.Restart.exe`，审计安装目录后编译 `WRelay.iss`。正式版只允许从干净、已提交的 Git 工作树构建。构建器用 Authenticode/SHA-256 和 RFC 3161 时间戳签署 WRelay 程序与标题栏组件；Inno Setup 再签署安装程序和卸载程序。签名验证通过后才生成 `dist/WRelay-Setup.exe` 和同目录的 SHA256 文件。缺少证书或签名工具时，正式版构建会停止。若编译器不在常见安装目录，可以先设置 `INNO_SETUP_ISCC` 为 `ISCC.exe` 的完整路径。安装包不分发项目自有 Python 源码或字节码；Web 前端资源仍随包提供。
+脚本检查锁定依赖与 WebView2 安装器签名，编译 `WRelay.exe`、`WRelay.Bot.exe` 和 `WRelay.Restart.exe`，审计安装目录后编译 `WRelay.iss`。正式版只允许从干净、已提交的 Git 工作树构建。配置本机受信任证书时，构建器用 Authenticode/SHA-256 和 RFC 3161 时间戳签署 WRelay 程序与标题栏组件；Inno Setup 再签署安装程序和卸载程序。若编译器不在常见安装目录，可以先设置 `INNO_SETUP_ISCC` 为 `ISCC.exe` 的完整路径。安装包不分发项目自有 Python 源码或字节码；Web 前端资源仍随包提供。
 
-公开发行需要受信任证书颁发机构签发、带 Code Signing 用途及私钥的 Authenticode 证书。将证书安全导入 Windows 当前用户或本机个人证书库，并设置：
+本机正式构建的旧式签名方式需要受信任证书颁发机构签发、带 Code Signing 用途及私钥的 Authenticode 证书。将证书安全导入 Windows 当前用户或本机个人证书库，并设置：
 
 ```powershell
 $env:WRELAY_SIGN_CERT_SHA1 = '<40 位证书 SHA1 指纹>'
@@ -116,7 +116,7 @@ $env:WRELAY_TIMESTAMP_URL = '<证书提供方的 HTTPS RFC 3161 时间戳地址>
 $env:WRELAY_SIGNTOOL = '<Windows SDK 中 signtool.exe 的完整路径>'
 ```
 
-不要提交私钥/PFX 或密码，也不要通过聊天发送。自签名证书不能替代公开发行所需的受信任发布者证书。
+不要提交私钥/PFX 或密码，也不要通过聊天发送。自签名证书不能替代公开发行所需的受信任发布者证书。公开 GitHub 发布的首选签名方式是 SignPath Foundation 工作流，政策见 [Code signing policy](../CODE_SIGNING_POLICY.md)。维护者先为版本标签创建 GitHub 草稿 Release，再从该版本标签手动运行 `Sign and publish Windows release`；工作流在 GitHub 托管的 Windows runner 构建，将安装包送交 SignPath 人工批准签名，验证签名并生成 SHA256 后才上传资产并发布 Release。配置 SignPath 项目后，在 GitHub Actions variables 中设置 `SIGNPATH_ORGANIZATION_ID`、`SIGNPATH_PROJECT_SLUG`、`SIGNPATH_SIGNING_POLICY_SLUG`、`SIGNPATH_ARTIFACT_CONFIGURATION_SLUG`，并在 Actions secrets 中设置 `SIGNPATH_API_TOKEN`。
 
 `pyproject.toml` 也提供标准 Python 构建元数据，可用于构建插件依赖包；它不是完整的桌面应用安装方式。
 完整的 Bot、桌面窗口及 Windows 快捷方式请使用上面的 Inno Setup 安装包。
@@ -135,7 +135,7 @@ Get-FileHash .\dist\WRelay-Setup.exe -Algorithm SHA256
 
 脚本在独立临时目录安装并检查 Windows 卸载注册、开始菜单快捷方式、编译程序、依赖及未配置时的安全退出，再卸载并确认保留用户数据；`--skip-desktop` 避免与正在运行的机器人争用端口。已有正式版安装或正式版开机启动项时脚本会拒绝运行，避免临时安装更改现有设置。
 
-GitHub Actions 会准备锁定依赖与编译环境，构建未签名的隔离测试版，再安装到独立目录执行编译版冒烟检查；CI 不生成可公开发行的正式安装包。
+GitHub Actions 会准备锁定依赖与编译环境，构建未签名的隔离测试版，再安装到独立目录执行编译版冒烟检查。正式安装包由独立的 SignPath 发布工作流构建和签名。
 推送和 Pull Request 都会触发该检查。
 
 发布包中不得包含 `.env.prod`、`data/` 运行数据或其他真实凭据。正式版应同时验证 Authenticode 签名并提供 SHA256；校验值应通过可信渠道分发。
