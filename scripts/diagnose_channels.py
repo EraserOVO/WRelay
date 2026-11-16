@@ -24,6 +24,7 @@ if BASE not in sys.path:
 
 from plugins.json_io import atomic_write_json
 from plugins.paths import data_path, PROJECT_ROOT
+from plugins.proxy_guard import align_discord_proxy
 
 BASE = os.fspath(PROJECT_ROOT)
 
@@ -81,8 +82,10 @@ def load_token_proxy():
         token = bots[0]["token"] if bots else ""
     except Exception:
         token = ""
-    # 与 Bot 保持一致：启动时会清除 HTTP_PROXY，Discord 只使用适配器专用代理。
+    # 频道扫描与 Bot 使用同一套专用代理；代理软件重启后端口变化时跟随当前系统代理。
     proxy = env.get("DISCORD_PROXY") or None
+    if proxy and align_discord_proxy(env):
+        proxy = env.get("DISCORD_PROXY") or None
     return token, proxy
 
 
@@ -98,7 +101,9 @@ async def main():
     total_visible = 0
     total_readable = 0
 
-    async with httpx.AsyncClient(proxy=proxy, timeout=20) as client:
+    # 不继承启动扫描器的进程代理变量，和 Bot 一样只使用 DISCORD_PROXY；
+    # 未配置时由系统网络路由（包括 TUN）直连 Discord。
+    async with httpx.AsyncClient(proxy=proxy, timeout=20, trust_env=False) as client:
         r = await client.get(
             "https://discord.com/api/v10/users/@me/guilds", headers=headers
         )

@@ -95,7 +95,9 @@ async def notify_delivery_failure(qq_bot, failed_groups, channel_id="", message_
         "、".join(str(group) for group in failed_groups),
     )
     for openid in recipients:
-        key = (*key_prefix, str(openid))
+        # The same upstream post/group combination can fail independently for
+        # multiple QQ bots. Keep cooldowns and in-flight sends account scoped.
+        key = ("delivery", bot_id, *key_prefix, str(openid))
         await _notify_recipient(
             qq_bot,
             openid,
@@ -116,7 +118,7 @@ async def notify_maintenance_failure(qq_bot, alert_id, message):
     _prune_recent_failures(time.monotonic(), config["cooldown_seconds"])
     sent = 0
     for openid in recipients:
-        key = ("maintenance", alert_id, str(openid))
+        key = ("maintenance", bot_id, str(alert_id), str(openid))
         before = _recent_failures.get(key)
         await _notify_recipient(qq_bot, openid, key, "【WRelay 维护提醒】\n" + message,
                                 config["cooldown_seconds"])

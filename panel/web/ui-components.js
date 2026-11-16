@@ -1,6 +1,6 @@
 /* Presentation components: reuse existing nodes, IDs and delegated actions. */
 (function () {
-  const externalIcon = '<svg class="external-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3h7v7M21 3 10 14M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"/></svg>';
+  const externalIcon = mcIcon("external-link", 16, "external-link-icon");
   function externalLinkButton(button) {
     const destination = button.getAttribute("aria-label") ||
       button.closest(".settings-row")?.querySelector("strong")?.textContent || button.textContent.trim();
@@ -22,18 +22,18 @@
   const specs = {
     runtimeLogModal: {size: "large", footer: "btnClearLog", grid: true, backdrop: true},
     discordConfigModal: {size: "medium", footer: "discordConfigSave", grid: true, backdrop: true},
+    youtubeApiKeyModal: {size: "medium", footer: "youtubeApiKeySave", backdrop: true},
     qqConfigModal: {size: "medium", footer: "qqConfigSave", grid: true, backdrop: true},
     personalQQModal: {size: "medium", footer: "personalQQSave", grid: true, backdrop: true},
     profileImportModal: {size: "medium", footer: "profileImportSave", grid: true, backdrop: true},
     translationConfigModal: {size: "large", footer: "translationConfigSave", backdrop: true},
     backupRestoreModal: {size: "medium", footer: "btnBackupRestoreConfirm", heading: ".backup-title", grid: true, backdrop: true},
-    diagnosticModal: {size: "small", heading: ".diagnostic-toolbar", tools: ["btnDiagnosticRefresh"], backdrop: true},
+    diagnosticModal: {size: "small", heading: ".diagnostic-toolbar", footerTools: ["btnDiagnosticRefresh"], backdrop: true},
     messageTraceModal: {size: "large", heading: ".message-trace-toolbar", tools: ["messageTraceSummary", "btnMessageTraceRefresh"], backdrop: true},
     confirmModal: {size: "small", footer: "confirmOk", backdrop: true},
     bilibiliSourceModal: {size: "medium", footer: "bilibiliSourceSave", heading: ".bilibili-source-heading", backdrop: true},
     youtubeSourceModal: {size: "medium", footer: "youtubeSourceSave", heading: ".bilibili-source-heading", backdrop: true},
-    filterModal: {size: "medium", footer: "filterSave", backdrop: true},
-    translationSourceModal: {size: "small", footer: "translationSourceSave", grid: true, backdrop: true},
+    filterModal: {size: "medium", footer: "filterSave", tools: ["filterScopeTabs"], backdrop: true},
     relayChannelsModal: {size: "medium", footer: "relayChannelsSave", grid: true, tools: ["relayScopeTabs"], backdrop: true},
     translationChainsModal: {size: "small", grid: true, backdrop: true},
     scheduledMessageContentModal: {size: "large", footer: "scheduledMessageContentConfirm", grid: true, backdrop: true},
@@ -54,6 +54,7 @@
     const oldHeader = spec.heading && shell.querySelector(spec.heading);
     const subtitle = oldHeader && oldHeader.querySelector("p");
     const oldFooter = spec.footer && document.getElementById(spec.footer).parentElement;
+    const footerTools = (spec.footerTools || []).map(tool => document.getElementById(tool)).filter(Boolean);
     overlay.classList.add("modal-overlay");
     const display = overlay.style.display;
     overlay.removeAttribute("style");
@@ -75,12 +76,13 @@
     const actions = document.createElement("div");
     actions.className = "modal-header-actions";
     (spec.tools || []).forEach(tool => actions.append(document.getElementById(tool)));
-    close.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>';
+    close.innerHTML = mcIcon("close", 18);
     actions.append(close);
     header.append(heading, actions);
     oldHeader?.remove();
     const footer = document.createElement("footer");
     footer.className = "modal-footer";
+    footer.append(...footerTools);
     if (oldFooter) {
       footer.append(...oldFooter.childNodes);
       oldFooter.remove();
@@ -164,7 +166,7 @@
   new MutationObserver(decorateLogToggle).observe(autoScroll, {childList: true, attributes: true, attributeFilter: ["data-on"]});
   decorateLogToggle();
   document.querySelectorAll(".foldbtn").forEach(button => {
-    button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+    button.innerHTML = mcIcon("down", 10);
     button.setAttribute("aria-controls", button.dataset.fold);
     button.setAttribute("aria-expanded", String(!button.classList.contains("folded")));
   });

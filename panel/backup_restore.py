@@ -29,6 +29,7 @@ BACKUP_RUNTIME_NAMES = (
     "x_rss.json",
     "youtube_protection.json",
     "youtube.json",
+    "steam.json",
     BACKUP_DELIVERY_DEDUP_NAME,
 )
 BACKUP_MANIFEST_NAME = "manifest.json"
@@ -89,13 +90,14 @@ class BackupRestoreService:
             "x_rss.json": os.path.join(os.path.dirname(self.settings_file), "x_rss.json"),
             "youtube_protection.json": os.path.join(os.path.dirname(self.settings_file), "youtube_protection.json"),
             "youtube.json": os.path.join(os.path.dirname(self.settings_file), "youtube.json"),
+            "steam.json": os.path.join(os.path.dirname(self.settings_file), "steam.json"),
             BACKUP_DELIVERY_DEDUP_NAME: self.delivery_dedup_file,
         }
         from plugins import bot_profiles
         for owner in bot_profiles.ids(self.settings_file):
             name = "bot_profiles/" + bot_profiles.filename(owner)
             targets[name] = self.profile_target(name)
-            for runtime in ("x_rss.json", "bilibili.json", "youtube.json", "x_protection.json", "bilibili_protection.json", "youtube_protection.json"):
+            for runtime in ("x_rss.json", "bilibili.json", "youtube.json", "steam.json", "x_protection.json", "bilibili_protection.json", "youtube_protection.json"):
                 name = "bot_profile_runtime/" + bot_profiles.filename(owner)[:-5] + "/" + runtime
                 targets[name] = self.profile_target(name)
         return targets
@@ -126,7 +128,7 @@ class BackupRestoreService:
     def profile_target(self, name):
         """Resolve only known profile paths, including accounts absent on this machine."""
         profile = r"(?:official_[1-9][0-9]{0,19}|personal_[1-9][0-9]{4,19}|unassigned)"
-        runtime = r"(?:x_rss|bilibili|youtube|x_protection|bilibili_protection|youtube_protection)\.json"
+        runtime = r"(?:x_rss|bilibili|youtube|steam|x_protection|bilibili_protection|youtube_protection)\.json"
         if re.fullmatch(r"bot_profiles/" + profile + r"\.json", name) or re.fullmatch(r"bot_profile_runtime/" + profile + "/" + runtime, name):
             return os.path.join(os.path.dirname(self.settings_file), *name.split("/"))
         raise ValueError("备份内含不允许的配置路径")

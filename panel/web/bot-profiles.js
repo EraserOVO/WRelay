@@ -11,7 +11,9 @@
   document.addEventListener("click", event => { if (!event.target.closest(".profile-config-menu")) closeMenu(); });
   document.addEventListener("keydown", event => { if (event.key === "Escape" && !menu.hidden) { closeMenu(); menuButton.focus(); } });
   let owner = "", documentValue = null, preview = null, generation = 0, busy = false;
-  const names = {discord_channels: "Discord 来源", x_rss_sources: "X 来源", bilibili_sources: "Bilibili 来源", youtube_sources: "YouTube 来源", forwarding_groups: "Discord 转发组", x_forwarding_groups: "X 转发组", bilibili_forwarding_groups: "Bilibili 转发组", youtube_forwarding_groups: "YouTube 转发组", qq_forwarding_groups: "QQ 转发组"};
+  const fileInput = $("profileImportFile"), fileName = $("profileImportFileName");
+  $("profileImportChoose").addEventListener("click", () => fileInput.click());
+  const names = {discord_channels: "Discord 来源", x_rss_sources: "X 来源", bilibili_sources: "Bilibili 来源", youtube_sources: "YouTube 来源", steam_sources: "Steam 来源", forwarding_groups: "Discord 转发组", x_forwarding_groups: "X 转发组", bilibili_forwarding_groups: "Bilibili 转发组", youtube_forwarding_groups: "YouTube 转发组", steam_forwarding_groups: "Steam 转发组", qq_forwarding_groups: "QQ 转发组"};
   function invalidate() {
     generation++;
     preview = null;
@@ -65,7 +67,9 @@
     owner = currentQQBotId();
     if (!owner) return showAlert("上传失败", "请先配置并选择目标 QQ 账号");
     documentValue = null;
-    $("profileImportFile").value = "";
+    fileInput.value = "";
+    fileName.textContent = "未选择文件";
+    fileName.title = "";
     $("profileImportMode").value = "merge";
     $("profileImportMapping").replaceChildren();
     $("profileImportOwner").textContent = "导入到：" + owner;
@@ -73,12 +77,14 @@
     modal.style.display = "flex";
     $("qqBotWorkspace").disabled = true;
   });
-  $("profileImportFile").addEventListener("change", async event => {
+  fileInput.addEventListener("change", async event => {
+    const file = event.target.files[0] || null;
+    fileName.textContent = file?.name || "未选择文件";
+    fileName.title = file?.name || "";
     invalidate(); documentValue = null;
     $("profileImportMapping").replaceChildren();
     const version = generation;
     try {
-      const file = event.target.files[0];
       if (!file) return;
       if (file.size > 5 * 1024 * 1024) throw new Error("配置文件不能超过 5 MB");
       const value = JSON.parse((await file.text()).replace(/^\uFEFF/, ""));

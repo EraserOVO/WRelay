@@ -12,6 +12,7 @@
     x: {workspace: "xFgBody"},
     bilibili: {workspace: "bilibiliFgBody"},
     youtube: {workspace: "youtubeFgBody"},
+    steam: {workspace: "steamWorkspace"},
     qq: {workspace: "qqFgBody"},
   };
   let active = "";
@@ -34,7 +35,7 @@
   }
   const toggles = ["btnBackfillToggle", "btnScheduledMessageToggle"].map(byId);
   function decorateToggle(button) {
-    if (!enabled) return;
+    if (!enabled || !pages[active]) return;
     button.setAttribute("role", "switch");
     button.setAttribute("aria-checked", String(button.dataset.on === "1"));
     button.removeAttribute("aria-pressed");
@@ -65,7 +66,7 @@
     {attributes:true, attributeFilter:["class"], childList:true});
   function sync() {
     const page = document.body.dataset.activePage;
-    const next = document.body.classList.contains("desktop-host") && pages[page] ? page : "";
+    const next = document.body.classList.contains("desktop-host") && (pages[page] || page === "overview") ? page : "";
     if (next === active) return;
     // Restore before entering a different page so shared controls never accumulate.
     if (enabled) {
@@ -74,6 +75,12 @@
       groups.forEach(node => node.remove());
       groups.length = 0;
       document.querySelectorAll(".discord-external-actions").forEach(node => node.remove());
+      if (pages[active]) {
+        toggles.forEach(button => {
+          button.removeAttribute("role"); button.removeAttribute("aria-checked");
+          button.querySelector(".settings-switch-track")?.remove();
+        });
+      }
       if (active === "qq") {
         scheduledEdit.innerHTML = originalScheduledEdit.html;
         scheduledEdit.className = originalScheduledEdit.className;
@@ -88,12 +95,7 @@
       group(status, "desktop-connection-group", [byId("badge"), status.querySelector(".qq-bot-workspace-field")]);
       group(status, "desktop-statistics-group", [...status.querySelectorAll(".robot-stat")]);
       const config = pages[active];
-      if (active === "discord") {
-        // 离线补发与其它功能页的小卡片共用两列网格。
-        const lowerCards = group(byId("pageDiscord"), "relay-translation-row func-cards", []);
-        move(byId("backfillCard"), lowerCards);
-      }
-      if (active === "qq") {
+      if (config && active === "qq") {
         // 转发组下方的所有小卡片共用同一个两列网格：同宽同高，从左至右、从上至下排列。
         const lowerCards = group(byId("pageQQ"), "relay-translation-row func-cards", []);
         move(byId("scheduledMessageCard"), lowerCards);
@@ -102,15 +104,18 @@
       }
       // Align the primary and external actions in the two table footers.
       // 转发组底部已不再挂平台外链，没有可归类的控件时不生成空容器。
-      byId(config.workspace).querySelectorAll(".addrow").forEach(bar => {
-        const nodes = [...bar.querySelectorAll(".linkbtn, .iconbtn")];
-        if (!nodes.length) return;
-        const external = document.createElement("span");
-        external.className = "discord-external-actions";
-        bar.append(external);
-        nodes.forEach(node => move(node, external));
-      });
-      toggles.forEach(decorateToggle);
+      if (config) {
+        // Keep the source and group tools page-specific; overview only shares the status row.
+        byId(config.workspace).querySelectorAll(".addrow").forEach(bar => {
+          const nodes = [...bar.querySelectorAll(".linkbtn, .iconbtn")];
+          if (!nodes.length) return;
+          const external = document.createElement("span");
+          external.className = "discord-external-actions";
+          bar.append(external);
+          nodes.forEach(node => move(node, external));
+        });
+        toggles.forEach(decorateToggle);
+      }
     } else {
       toggles.forEach(button => {
         button.removeAttribute("role"); button.removeAttribute("aria-checked");
@@ -136,29 +141,62 @@
   let owner = null;
   let description = null;
   let feedbackTimer = null;
+  let feedbackPinned = false;
   let suppressedTitles = [];
   const textTitles = new WeakMap();
+  const suppressedTooltipSelector = [
+    ".robot-stat", "#pidinfo", "#statsToday", "#statsTotal", "#statsFailed",
+    ".overview-route-copy b", ".col-muted", ".foldbtn",
+    ".fgtab-add", ".fg-toggle", ".fgctrl:not(.fg-delete)",
+    "#btnAutoUpdateCheck", "#btnStatusSheenToggle", "#closeBehavior",
+    "#btnFailureNotificationToggle", "#btnSettingsAutostart",
+  ].join(", ");
+  const suppressedTooltipText = new Set([
+    "拖拽排序", "删除转发组", "移出当前转发组", "编辑群资料", "内容筛选",
+  ]);
+  function hasSuppressedTooltip(control) {
+    if (!(control instanceof Element)) return false;
+    if (control.matches(suppressedTooltipSelector)) return true;
+    return [
+      textTitles.get(control), control.dataset.wrelayTitle, control.dataset.tooltip,
+      control.getAttribute("title"), control.getAttribute("aria-label"),
+    ].some(text => text && suppressedTooltipText.has(text.trim()));
+  }
   function labelText(control) {
     const label = control.cloneNode(true);
     label.querySelectorAll('svg, [aria-hidden="true"]').forEach(node => node.remove());
     return label.textContent.trim();
   }
   function rememberTextTitle(control) {
-    if (!control.matches("button, .linkbtn, .id-cell")) return;
+    if (!(control instanceof Element) || !control.hasAttribute("title")) return;
     const title = control.getAttribute("title");
     if (title === null) return;
-    if (control.disabled && title !== labelText(control)) return;
-    if (control.matches(".id-cell") || (!control.matches(".hintbtn") && (labelText(control) || control.getAttribute("aria-label")))) {
-      // Keep the full label for clipped text, without a second native tooltip.
-      textTitles.set(control, title);
+    if (hasSuppressedTooltip(control)) {
+      textTitles.delete(control);
+      control.removeAttribute("data-wrelay-title");
       control.removeAttribute("title");
+      return;
     }
+    if (!title.trim()) {
+      textTitles.delete(control);
+      control.removeAttribute("data-wrelay-title");
+      control.removeAttribute("title");
+      return;
+    }
+    // Keep the title text for the shared panel tooltip, never the browser tooltip.
+    textTitles.set(control, title);
+    control.setAttribute("data-wrelay-title", title);
+    control.removeAttribute("title");
   }
-  function hide() {
+  function hide(force = false) {
+    if (feedbackPinned && !force) return false;
     clearTimeout(feedbackTimer);
     feedbackTimer = null;
+    feedbackPinned = false;
     const visible = !tooltip.hidden;
     tooltip.hidden = true;
+    tooltip.classList.remove("ui-tooltip-copy-feedback", "is-fading");
+    tooltip.replaceChildren();
     if (owner) {
       if (description === null) owner.removeAttribute("aria-describedby");
       else owner.setAttribute("aria-describedby", description);
@@ -170,7 +208,7 @@
     suppressedTitles = [];
     return visible;
   }
-  window.dismissWRelayTooltip = hide;
+  window.dismissWRelayTooltip = () => hide(true);
   document.querySelectorAll(".hintbtn").forEach(button => {
     button.setAttribute("aria-label", (button.dataset.title || "帮助") + "说明");
   });
@@ -189,21 +227,23 @@
     if (!button.title) button.title = "打开外部页面：" + button.textContent.trim();
     if (!button.getAttribute("aria-label")) button.setAttribute("aria-label", button.title);
   });
-  document.querySelectorAll("button[title], .linkbtn[title], .id-cell[title]").forEach(rememberTextTitle);
+  document.querySelectorAll("[title]").forEach(rememberTextTitle);
   new MutationObserver(records => {
     records.forEach(record => {
       if (record.type === "attributes") rememberTextTitle(record.target);
       else record.addedNodes.forEach(node => {
         if (node.nodeType !== 1) return;
         rememberTextTitle(node);
-        node.querySelectorAll("button[title], .linkbtn[title], .id-cell[title]").forEach(rememberTextTitle);
+        node.querySelectorAll("[title]").forEach(rememberTextTitle);
       });
     });
   }).observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ["title"]});
   function show(target) {
-    const control = target.closest("button, .rowicon, .iconbtn, .linkbtn, .chan-name-edit, .middle-value, .id-value, [data-fold]");
+    if (feedbackPinned) return;
+    const control = target.closest("[data-wrelay-title], button, .rowicon, .iconbtn, .linkbtn, .chan-name-edit, .middle-value, .id-value, [data-fold]");
     if (control === owner) return;
-    if (!control || control.disabled) { if (!tooltip.contains(target)) hide(); return; }
+    if (!control) { if (!tooltip.contains(target)) hide(); return; }
+    if (hasSuppressedTooltip(control)) { hide(); return; }
     hide();
     const label = labelText(control);
     const iconOnly = !label || control.matches(".iconbtn, .rowicon, .panel-action-icon, .foldbtn, .chan-name-edit, .modal-x") ||
@@ -211,10 +251,13 @@
     const clipped = [control, ...control.querySelectorAll(".fgtab-name, .table-cell-clip")]
       .some(node => node.scrollWidth > node.clientWidth + 1);
     const copyValue = control.dataset.copyValue;
-    if (!control.matches(".hintbtn") && !iconOnly && !clipped && copyValue === undefined) return;
+    const hasTitle = textTitles.has(control) || control.hasAttribute("data-wrelay-title");
+    const titleOnlyTarget = hasTitle && !control.matches("button, .rowicon, .iconbtn, .linkbtn, .chan-name-edit, .middle-value, .id-value, [data-fold]");
+    const disabledTitle = hasTitle && control.disabled;
+    if (!control.matches(".hintbtn") && !iconOnly && !clipped && copyValue === undefined && !titleOnlyTarget && !disabledTitle) return;
     let text = control.dataset.tooltip || (control.dataset.hint
       ? document.getElementById(control.dataset.hint)?.textContent.trim()
-      : control.title || textTitles.get(control) || control.getAttribute("aria-label") || label);
+      : textTitles.get(control) || control.dataset.wrelayTitle || control.getAttribute("aria-label") || label);
     if (copyValue !== undefined) text = copyValue;
     if (!text) return;
     owner = control;
@@ -234,22 +277,37 @@
       ? rect.bottom + 6 : rect.top - box.height - 6) + "px";
   }
   window.showWRelayCopyFeedback = function (control, message) {
-    hide();
+    hide(true);
     show(control);
     if (owner !== control) return;
-    tooltip.textContent = message;
-    feedbackTimer = setTimeout(function () { if (owner === control) hide(); }, 1100);
+    if (message === "已复制" && typeof globalThis.mcIcon === "function") {
+      const icon = document.createElement("span");
+      icon.className = "ui-tooltip-copy-icon";
+      icon.innerHTML = globalThis.mcIcon("check", 16);
+      const label = document.createElement("span");
+      label.textContent = message;
+      tooltip.replaceChildren(icon, label);
+      tooltip.classList.add("ui-tooltip-copy-feedback");
+    } else {
+      tooltip.textContent = message;
+    }
+    feedbackPinned = true;
+    feedbackTimer = setTimeout(function () {
+      if (owner !== control) return;
+      tooltip.classList.add("is-fading");
+      feedbackTimer = setTimeout(function () { if (owner === control) hide(true); }, 240);
+    }, 2000);
   };
   document.addEventListener("pointerover", event => show(event.target));
   document.addEventListener("pointerout", event => {
     if (owner && !owner.contains(event.relatedTarget) && !tooltip.contains(event.relatedTarget)) hide();
   });
   document.addEventListener("focusin", event => show(event.target));
-  document.addEventListener("focusout", hide);
-  document.addEventListener("click", hide, true);
+  document.addEventListener("focusout", () => hide());
+  document.addEventListener("click", () => hide(), true);
   document.addEventListener("scroll", event => { if (!tooltip.contains(event.target)) hide(); }, true);
-  window.addEventListener("resize", hide);
-  window.addEventListener("blur", hide);
+  window.addEventListener("resize", () => hide());
+  window.addEventListener("blur", () => hide());
   new MutationObserver(() => { if (owner && (!owner.isConnected || !owner.getClientRects().length)) hide(); })
     .observe(document.body, {childList: true, subtree: true});
 })();

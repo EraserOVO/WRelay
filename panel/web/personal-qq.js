@@ -20,7 +20,7 @@
       const state = statuses.find(status => status.uin === item.uin);
       const status = state ? state.message + (state.version ? " · " + state.version : "") : "未连接";
       return '<section class="personal-qq-row" data-index="' + index + '">' +
-        '<label class="form-field">名称<input name="name" maxlength="80" value="' + esc(item.name || "") + '"></label>' +
+        '<label class="form-field">账号名称<input name="name" maxlength="80" value="' + esc(item.name || "") + '"></label>' +
         '<label class="form-field">QQ 号<input name="uin" inputmode="numeric" value="' + esc(item.uin || "") + '"></label>' +
         '<label class="form-field">协议端<select name="implementation"><option value="napcat"' + (item.implementation === "napcat" ? " selected" : "") + '>NapCat</option><option value="snowluma"' + (item.implementation === "snowluma" ? " selected" : "") + '>SnowLuma</option></select></label>' +
         '<label class="form-field">访问令牌<input name="token" type="password" autocomplete="new-password" placeholder="留空保留已保存令牌" value="' + esc(item.token || "") + '"></label>' +

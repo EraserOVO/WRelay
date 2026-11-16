@@ -73,7 +73,7 @@ def main():
             "plugins.backfill", "plugins.backfill_api", "plugins.command",
             "plugins.health_api", "plugins.manage", "plugins.qq_fwd",
             "plugins.registration", "plugins.relay", "plugins.scheduled_message",
-            "plugins.bilibili", "plugins.bilibili_auto_resolve", "plugins.x_rss",
+            "plugins.bilibili", "plugins.bilibili_auto_resolve", "plugins.x_rss", "plugins.steam",
         )
         from plugins.compiled_plugins import install
         install()

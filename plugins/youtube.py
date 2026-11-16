@@ -1,7 +1,8 @@
 """YouTube 频道 → QQ 自动转发（第一期：标题、封面与链接）。
 
-来源只支持频道（频道 ID 或 ``@handle``），通过 YouTube 官方
-``feeds/videos.xml`` 拉取；不解析视频本体，不做关键词/搜索来源。
+来源只支持频道（频道 ID 或 ``@handle``），配置 Data API Key 时通过官方
+YouTube Data API 拉取并以官方 ``feeds/videos.xml`` 备用；不解析视频本体，
+不做关键词/搜索来源。
 投递复用 translation/retry/sender，并沿用 Bilibili 的基线、限速与积压
 保护，不改变 Discord、X、Bilibili 或 QQ→QQ 的路由与配置。
 """
@@ -10,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import email.utils
 import json
+import os
 import threading
 import time
 
@@ -49,6 +52,7 @@ from plugins.history import (
 from plugins.json_io import atomic_write_json, run_in_thread_to_completion
 from plugins.media import fetch_bytes_many, make_media_link, make_text
 from plugins.paths import data_path
+from plugins.proxy_guard import loopback_http_proxy, system_loopback_http_proxy
 from plugins.retry import send_and_record
 from plugins.rss_polling import read_rss_poll_interval, run_rss_poll_loop
 from plugins.stats import record
@@ -59,6 +63,9 @@ from plugins.youtube_parser import (
     channel_page_url,
     parse_channel_page,
     parse_feed,
+    parse_api_playlist_items,
+    parse_channel_videos_page,
+    parse_video_page_post,
 )
 from plugins.bilibili_rate_limit import (
     choose_overflow,
@@ -71,15 +78,30 @@ from plugins.bilibili_rate_limit import (
 FEED_TIMEOUT = 30
 FEED_MAX_ATTEMPTS = 4
 FEED_RETRY_DELAYS = (2, 5, 15)
+# YouTube RSS occasionally returns a transient 404 for valid channel feeds.
+FEED_404_RETRY_DELAYS = (1, 2)
 # YouTube 官方 RSS 没有公开频率说明；多个来源共用同一客户端，保持间隔。
 FEED_REQUEST_GAP = 2
 YOUTUBE_POLL_CONCURRENCY = 3
 DEFAULT_YOUTUBE_POLL_INTERVAL = 300
+YOUTUBE_DATA_API_BASE = "https://www.googleapis.com/youtube/v3"
+YOUTUBE_DATA_API_REQUEST_GAP = 1
+YOUTUBE_API_MAX_PAGES = 20
+YOUTUBE_API_SERVER_COOLDOWN = 30
+YOUTUBE_API_MAX_SERVER_COOLDOWN = 900
+YOUTUBE_API_RATE_LIMIT_COOLDOWN = 300
+YOUTUBE_API_CONFIG_COOLDOWN = 3600
+YOUTUBE_API_QUOTA_COOLDOWN = 21600
+YOUTUBE_WEB_FALLBACK_COOLDOWN = 900
+YOUTUBE_RSS_404_COOLDOWN = 900
 YOUTUBE_STATE_FILE = data_path("youtube.json")
 YOUTUBE_PROTECTION_FILE = data_path("youtube_protection.json")
 
 _feed_client = None
 _feed_proxy = None
+_feed_clients = {}
+_feed_proxy_override = None
+_feed_proxy_override_source = None
 _feed_request_tasks = set()
 _feed_stopping = False
 _state_file_lock = threading.Lock()
@@ -88,7 +110,17 @@ _protection_state_lock = threading.RLock()
 _protection_lock = asyncio.Lock()
 _feed_request_lock = asyncio.Lock()
 _last_feed_request_ts = 0.0
+_feed_cooldown_until = 0.0
+_web_fallback_cooldown_until = 0.0
+_youtube_rss_source_cooldowns = {}
+_youtube_api_request_lock = asyncio.Lock()
+_last_youtube_api_request_ts = 0.0
+_youtube_api_cooldown_until = 0.0
+_youtube_api_cooldown_reason = ""
+_youtube_api_cooldown_rate_limited = False
+_youtube_api_failure_count = 0
 _posts_cache = {}
+_video_page_cache = {}
 _protection_runtime_state = None
 _protection_load_error = ""
 _PROTECTION_STATE_MISSING = object()
@@ -114,8 +146,56 @@ class YoutubeProtectionError(RuntimeError):
     """本地投递保护状态不可用，不能继续投递或推进游标。"""
 
 
+class YoutubeDataAPIError(RuntimeError):
+    """YouTube Data API 请求失败，携带可用于退避与降级的状态信息。"""
+
+    def __init__(self, message, status_code=None, reason="", rate_limited=False):
+        super().__init__(message)
+        self.status_code = status_code
+        self.reason = reason
+        self.rate_limited = bool(rate_limited)
+
+
 def _short_error(error, limit=160):
     return " ".join(str(error or "").split())[:limit]
+
+
+def _http_response_diagnostics(response):
+    """Return a bounded summary that helps distinguish YouTube from proxy errors."""
+    url = _short_error(getattr(response, "url", ""), 300) or "未知"
+    server = _short_error(response.headers.get("server"), 100) or "未知"
+    via = _short_error(response.headers.get("via"), 100) or "无"
+    content_type = _short_error(response.headers.get("content-type"), 100) or "未知"
+    try:
+        snippet = response.content[:1024].decode(
+            response.encoding or "utf-8", "replace"
+        )
+        snippet = _short_error(snippet, 240) or "空"
+    except Exception:
+        snippet = "不可读取"
+    return "url=%s server=%s via=%s content-type=%s body=%s" % (
+        url,
+        server,
+        via,
+        content_type,
+        snippet,
+    )
+
+
+def _describe_exception(exc):
+    details = []
+    current = exc
+    seen = set()
+    while current is not None and id(current) not in seen and len(details) < 4:
+        seen.add(id(current))
+        detail = _short_error(current, 140)
+        if detail and detail not in details:
+            details.append(detail)
+        current = current.__cause__ or current.__context__
+    return "%s: %s" % (
+        type(exc).__name__,
+        " ← ".join(details) if details else "无详细说明",
+    )
 
 
 def _read_discord_proxy():
@@ -129,44 +209,246 @@ def _read_discord_proxy():
     return None
 
 
-def _get_feed_client():
+def _read_youtube_proxy():
+    proxy = str(os.environ.get("YOUTUBE_PROXY") or "").strip()
+    return proxy or _read_discord_proxy()
+
+
+def _effective_feed_proxy():
+    global _feed_proxy_override, _feed_proxy_override_source
+    configured = _read_youtube_proxy()
+    if _feed_proxy_override is not None:
+        if configured == _feed_proxy_override_source:
+            return _feed_proxy_override
+        # 运行时代理配置发生变化后，丢弃上一次连接错误时选出的备用代理。
+        _feed_proxy_override = None
+        _feed_proxy_override_source = None
+    return configured
+
+
+def _get_feed_client(proxy=None, explicit_proxy=False):
     global _feed_client, _feed_proxy
-    proxy = _read_discord_proxy()
-    if _feed_client is None or proxy != _feed_proxy:
-        if _feed_client is not None:
-            try:
-                asyncio.get_running_loop().create_task(_feed_client.aclose())
-            except RuntimeError:
-                pass
-        # YouTube 在部分网络下需要与 Discord 相同的代理；trust_env=False
-        # 避免系统环境代理覆盖显式配置。
-        _feed_client = httpx.AsyncClient(
+    if not explicit_proxy:
+        proxy = _effective_feed_proxy()
+    client = _feed_clients.get(proxy)
+    if client is None or client.is_closed:
+        # 保留各代理的客户端，切换备用代理时不关闭仍有并发请求在使用的客户端。
+        client = httpx.AsyncClient(
             proxy=proxy,
             follow_redirects=True,
             trust_env=False,
             headers={"User-Agent": "WRelay YouTube RSS"},
         )
-        _feed_proxy = proxy
-    return _feed_client
+        _feed_clients[proxy] = client
+    _feed_client = client
+    _feed_proxy = proxy
+    return client
+
+
+def _same_proxy_endpoint(left, right):
+    if left == right:
+        return True
+    left_endpoint = loopback_http_proxy(left)
+    right_endpoint = loopback_http_proxy(right)
+    return left_endpoint is not None and left_endpoint == right_endpoint
 
 
 async def _youtube_get(*args, **kwargs):
     """Track YouTube requests so shutdown can reap one-shot calls."""
+    global _feed_proxy_override, _feed_proxy_override_source
     if _feed_stopping:
         raise asyncio.CancelledError("YouTube RSS HTTP client is shutting down")
     task = asyncio.current_task()
     if task is not None:
         _feed_request_tasks.add(task)
     try:
-        return await _get_feed_client().get(*args, **kwargs)
+        configured_proxy = _read_youtube_proxy()
+        primary_proxy = _effective_feed_proxy()
+        client = _get_feed_client(proxy=primary_proxy, explicit_proxy=True)
+        try:
+            return await client.get(*args, **kwargs)
+        except (httpx.ConnectError, httpx.ProxyError) as primary_error:
+            # 只对本机/未显式指定的代理配置回退，避免覆盖用户指定的远程代理。
+            if configured_proxy and loopback_http_proxy(configured_proxy) is None:
+                raise
+            system_proxy = system_loopback_http_proxy()
+            if not system_proxy or _same_proxy_endpoint(system_proxy, primary_proxy):
+                raise
+            try:
+                response = await _get_feed_client(
+                    proxy=system_proxy,
+                    explicit_proxy=True,
+                ).get(*args, **kwargs)
+            except Exception as retry_error:
+                raise RuntimeError(
+                    "默认连接路径失败；Windows 系统代理重试失败: %s"
+                    % _describe_exception(retry_error)
+                ) from retry_error
+            _feed_proxy_override = system_proxy
+            _feed_proxy_override_source = configured_proxy
+            logger.warning("YouTube 请求通过 Windows 当前系统代理重试成功")
+            return response
     finally:
         if task is not None:
             _feed_request_tasks.discard(task)
 
 
+def _youtube_data_api_key():
+    """Read the server-side Data API key loaded from .env.prod."""
+    return str(os.environ.get("YOUTUBE_DATA_API_KEY") or "").strip()
+
+
+def _retry_after_seconds(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return max(0.0, float(text))
+    except (OverflowError, TypeError, ValueError):
+        pass
+    try:
+        parsed = email.utils.parsedate_to_datetime(text)
+        return max(0.0, parsed.timestamp() - time.time())
+    except (OverflowError, TypeError, ValueError):
+        return None
+
+
+def _api_error_details(response):
+    try:
+        payload = response.json()
+    except Exception:
+        payload = {}
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        error = {}
+    errors = error.get("errors")
+    reason = ""
+    if isinstance(errors, list):
+        for item in errors:
+            if isinstance(item, dict) and item.get("reason"):
+                reason = _short_error(item.get("reason"), 80)
+                break
+    reason = reason or _short_error(error.get("status"), 80)
+    message = _short_error(error.get("message"), 180)
+    if not message:
+        message = "HTTP %s" % response.status_code
+    return reason, message
+
+
+def _set_youtube_api_cooldown(delay, reason, rate_limited=False):
+    global _youtube_api_cooldown_until, _youtube_api_cooldown_reason
+    global _youtube_api_cooldown_rate_limited
+    delay = max(0.0, float(delay or 0))
+    if delay <= 0:
+        return
+    until = time.monotonic() + delay
+    if until >= _youtube_api_cooldown_until:
+        _youtube_api_cooldown_until = until
+        _youtube_api_cooldown_reason = _short_error(reason, 100)
+        _youtube_api_cooldown_rate_limited = bool(rate_limited)
+
+
+async def _youtube_data_api_get(endpoint, params):
+    """Call a public YouTube Data API endpoint without putting its key in URLs."""
+    global _last_youtube_api_request_ts, _youtube_api_failure_count
+    global _youtube_api_cooldown_until, _youtube_api_cooldown_reason
+    global _youtube_api_cooldown_rate_limited
+    key = _youtube_data_api_key()
+    if not key:
+        raise YoutubeDataAPIError("YOUTUBE_DATA_API_KEY 未配置")
+
+    async with _youtube_api_request_lock:
+        remaining = _youtube_api_cooldown_until - time.monotonic()
+        if remaining > 0:
+            reason = _youtube_api_cooldown_reason or "上游请求退避中"
+            raise YoutubeDataAPIError(
+                "YouTube Data API 退避中（约 %.0f 秒）：%s" % (remaining, reason),
+                status_code=429 if _youtube_api_cooldown_rate_limited else 503,
+                reason=reason,
+                rate_limited=_youtube_api_cooldown_rate_limited,
+            )
+
+        elapsed = time.monotonic() - _last_youtube_api_request_ts
+        if elapsed < YOUTUBE_DATA_API_REQUEST_GAP:
+            await asyncio.sleep(YOUTUBE_DATA_API_REQUEST_GAP - elapsed)
+        try:
+            response = await _youtube_get(
+                "%s/%s" % (YOUTUBE_DATA_API_BASE, endpoint),
+                params=params,
+                headers={"Accept": "application/json", "X-Goog-Api-Key": key},
+                timeout=FEED_TIMEOUT,
+            )
+        except Exception as exc:
+            _last_youtube_api_request_ts = time.monotonic()
+            _youtube_api_failure_count += 1
+            delay = min(
+                YOUTUBE_API_SERVER_COOLDOWN * (2 ** min(_youtube_api_failure_count - 1, 5)),
+                YOUTUBE_API_MAX_SERVER_COOLDOWN,
+            )
+            reason = _describe_exception(exc)
+            _set_youtube_api_cooldown(delay, reason)
+            raise YoutubeDataAPIError(
+                "YouTube Data API 连接失败，退避 %.0f 秒：%s" % (delay, reason),
+                reason="connection",
+            ) from exc
+        finally:
+            _last_youtube_api_request_ts = time.monotonic()
+
+        if response.status_code >= 400:
+            reason, message = _api_error_details(response)
+            retry_after = _retry_after_seconds(response.headers.get("retry-after"))
+            lower_reason = reason.lower()
+            rate_limited = response.status_code == 429 or lower_reason in {
+                "ratelimitexceeded", "userratelimitexceeded",
+            }
+            if rate_limited:
+                delay = retry_after if retry_after is not None else YOUTUBE_API_RATE_LIMIT_COOLDOWN
+                _set_youtube_api_cooldown(delay, reason or message, rate_limited=True)
+            elif response.status_code >= 500:
+                _youtube_api_failure_count += 1
+                delay = retry_after if retry_after is not None else min(
+                    YOUTUBE_API_SERVER_COOLDOWN * (2 ** min(_youtube_api_failure_count - 1, 5)),
+                    YOUTUBE_API_MAX_SERVER_COOLDOWN,
+                )
+                _set_youtube_api_cooldown(delay, reason or message)
+            elif lower_reason in {"quotaexceeded", "dailylimitexceeded"}:
+                _set_youtube_api_cooldown(
+                    YOUTUBE_API_QUOTA_COOLDOWN, reason or message
+                )
+            elif lower_reason in {"keyinvalid", "accessnotconfigured", "forbidden"}:
+                _set_youtube_api_cooldown(
+                    YOUTUBE_API_CONFIG_COOLDOWN, reason or message
+                )
+            raise YoutubeDataAPIError(
+                "YouTube Data API HTTP %s%s：%s" % (
+                    response.status_code,
+                    " (%s)" % reason if reason else "",
+                    message,
+                ),
+                status_code=response.status_code,
+                reason=reason,
+                rate_limited=rate_limited,
+            )
+
+        try:
+            payload = response.json()
+        except Exception as exc:
+            raise YoutubeDataAPIError(
+                "YouTube Data API 返回了无效 JSON：%s" % _short_error(exc)
+            ) from exc
+        if not isinstance(payload, dict):
+            raise YoutubeDataAPIError("YouTube Data API 返回格式无效")
+        _youtube_api_failure_count = 0
+        _youtube_api_cooldown_until = 0.0
+        _youtube_api_cooldown_reason = ""
+        _youtube_api_cooldown_rate_limited = False
+        return payload
+
+
 @get_driver().on_shutdown
 async def _close_feed_client():
-    global _feed_client, _poll_task, _loop_started, _poll_stopping, _feed_stopping
+    global _feed_client, _feed_proxy, _feed_clients, _feed_proxy_override
+    global _feed_proxy_override_source, _poll_task, _loop_started, _poll_stopping, _feed_stopping
     _feed_stopping = True
     _poll_stopping = True
     current_task = asyncio.current_task()
@@ -187,9 +469,16 @@ async def _close_feed_client():
         _poll_task = None
     _loop_started = False
     _runtime_status["loop_started"] = False
-    if _feed_client is not None:
-        await _feed_client.aclose()
-        _feed_client = None
+    clients = list({id(client): client for client in _feed_clients.values()}.values())
+    if _feed_client is not None and all(client is not _feed_client for client in clients):
+        clients.append(_feed_client)
+    if clients:
+        await asyncio.gather(*(client.aclose() for client in clients), return_exceptions=True)
+    _feed_clients.clear()
+    _feed_client = None
+    _feed_proxy = None
+    _feed_proxy_override = None
+    _feed_proxy_override_source = None
 
 
 def _read_state():
@@ -592,6 +881,7 @@ def _update_source_state(
     source_url=None,
     channel_id=None,
     channel_title=None,
+    uploads_playlist_id=None,
 ):
     with _state_file_lock:
         state = _load_state()
@@ -610,6 +900,8 @@ def _update_source_state(
             source_state["channel_id"] = str(channel_id)
         if channel_title:
             source_state["channel_title"] = str(channel_title)
+        if uploads_playlist_id:
+            source_state["uploads_playlist_id"] = str(uploads_playlist_id)
         _save_state(state)
 
 
@@ -618,14 +910,14 @@ async def _update_source_state_async(*args, **kwargs):
     return await asyncio.to_thread(_update_source_state, *args, **kwargs)
 
 
-async def _resolve_channel_id(source):
-    """把 @handle 解析为频道 ID；已缓存时直接复用。"""
+async def _resolve_channel_id(source, force_refresh=False):
+    """把 @handle 解析为频道 ID；强制刷新时跳过已有缓存。"""
     value = str(source.get("value") or "").strip()
     if CHANNEL_ID_RE.fullmatch(value):
         return value
     source_state = (await _load_state_async())["sources"].get(source["id"], {})
     cached = str((source_state or {}).get("channel_id") or "").strip()
-    if CHANNEL_ID_RE.fullmatch(cached):
+    if not force_refresh and CHANNEL_ID_RE.fullmatch(cached):
         return cached
 
     response = await _youtube_get(
@@ -646,15 +938,139 @@ async def _resolve_channel_id(source):
     return channel_id
 
 
+async def _resolve_channel_uploads(source, force_refresh=False):
+    """Resolve and cache a channel's official uploads playlist via Data API."""
+    value = str(source.get("value") or "").strip()
+    source_state = (await _load_state_async())["sources"].get(source["id"], {})
+    if not isinstance(source_state, dict):
+        source_state = {}
+    cached_channel_id = str(source_state.get("channel_id") or "").strip()
+    cached_playlist_id = str(source_state.get("uploads_playlist_id") or "").strip()
+    if (
+        not force_refresh
+        and CHANNEL_ID_RE.fullmatch(cached_channel_id)
+        and cached_playlist_id
+        and (not CHANNEL_ID_RE.fullmatch(value) or value == cached_channel_id)
+    ):
+        return cached_channel_id, cached_playlist_id
+
+    params = {"part": "id,snippet,contentDetails", "maxResults": 1}
+    if CHANNEL_ID_RE.fullmatch(value):
+        params["id"] = value
+    else:
+        handle = value[1:] if value.startswith("@") else value
+        params["forHandle"] = handle
+    payload = await _youtube_data_api_get("channels", params)
+    items = payload.get("items")
+    item = items[0] if isinstance(items, list) and items else None
+    if not isinstance(item, dict):
+        raise YoutubeDataAPIError(
+            "YouTube Data API 未找到频道：%s" % value,
+            status_code=404,
+            reason="channelNotFound",
+        )
+    channel_id = str(item.get("id") or "").strip()
+    content = item.get("contentDetails")
+    related = content.get("relatedPlaylists") if isinstance(content, dict) else None
+    if not isinstance(related, dict):
+        related = {}
+    playlist_id = str(related.get("uploads") or "").strip()
+    snippet = item.get("snippet")
+    title = str((snippet or {}).get("title") or "").strip()
+    if not CHANNEL_ID_RE.fullmatch(channel_id) or not playlist_id:
+        raise YoutubeDataAPIError(
+            "YouTube Data API 未返回有效频道 ID 或上传列表 ID",
+            status_code=404,
+            reason="channelNotFound",
+        )
+    await _update_source_state_async(
+        source["id"],
+        channel_id=channel_id,
+        channel_title=title,
+        uploads_playlist_id=playlist_id,
+    )
+    return channel_id, playlist_id
+
+
+async def _source_base_cursor(source_id):
+    active_groups = await _load_source_groups(source_id)
+    if not active_groups:
+        return None
+    last = await load_last_messages_async(load_last_messages)
+    channel_map = normalize_channel_map(last, _source_channel_key(source_id))
+    cursors = [
+        str(channel_map.get(group) or channel_map.get("*") or "").strip()
+        for group in active_groups
+    ]
+    cursors = [cursor for cursor in cursors if _valid_cursor_id(cursor)]
+    return min(cursors, key=int) if cursors else None
+
+
+async def _fetch_youtube_api_posts(source, channel_id, uploads_playlist_id):
+    base_cursor = await _source_base_cursor(source["id"])
+    next_page_token = ""
+    all_posts = {}
+    watermark_reached = base_cursor is None
+    for _ in range(YOUTUBE_API_MAX_PAGES):
+        params = {
+            "part": "snippet,contentDetails",
+            "playlistId": uploads_playlist_id,
+            "maxResults": 50,
+        }
+        if next_page_token:
+            params["pageToken"] = next_page_token
+        payload = await _youtube_data_api_get("playlistItems", params)
+        items = payload.get("items")
+        if not isinstance(items, list):
+            raise YoutubeDataAPIError("YouTube Data API 上传列表缺少 items")
+        page_posts = parse_api_playlist_items(items, channel_id)
+        for post in page_posts:
+            all_posts[post["id"]] = post
+        next_page_token = str(payload.get("nextPageToken") or "")
+        if not next_page_token:
+            watermark_reached = True
+            break
+        if base_cursor is None:
+            break
+        if page_posts and min(int(post["cursor_id"]) for post in page_posts) <= int(base_cursor):
+            watermark_reached = True
+            break
+    if next_page_token and not watermark_reached:
+        raise YoutubeDataAPIError(
+            "YouTube 上传列表超过单轮回补上限，游标保持不变并将在下轮继续读取",
+            reason="catchupLimit",
+        )
+    return sorted(all_posts.values(), key=lambda post: int(post["cursor_id"]))
+
+
 async def _fetch_feed(url, etag=None):
-    global _last_feed_request_ts
+    global _last_feed_request_ts, _feed_cooldown_until
     headers = {"Accept-Encoding": "identity"}
     if isinstance(etag, str) and etag:
         headers["If-None-Match"] = etag.removeprefix("W/")
     last_error = ""
+    last_status = None
     for attempt in range(FEED_MAX_ATTEMPTS):
+        remaining_cooldown = _feed_cooldown_until - time.monotonic()
+        if remaining_cooldown > 0:
+            return (
+                None,
+                None,
+                "HTTP 429 限流退避中（约 %.0f 秒）" % remaining_cooldown,
+                429,
+            )
+        retry_delay = None
+        max_attempts = FEED_MAX_ATTEMPTS
         try:
             async with _feed_request_lock:
+                remaining_cooldown = _feed_cooldown_until - time.monotonic()
+                if remaining_cooldown > 0:
+                    return (
+                        None,
+                        None,
+                        "HTTP 429 限流退避中（约 %.0f 秒）" % remaining_cooldown,
+                        429,
+                    )
                 elapsed = time.monotonic() - _last_feed_request_ts
                 if elapsed < FEED_REQUEST_GAP:
                     await asyncio.sleep(FEED_REQUEST_GAP - elapsed)
@@ -667,30 +1083,91 @@ async def _fetch_feed(url, etag=None):
                 finally:
                     _last_feed_request_ts = time.monotonic()
         except Exception as exc:
-            last_error = "请求异常: %s" % exc
+            last_error = "请求异常: %s" % _describe_exception(exc)
+            last_status = None
             retriable = True
         else:
+            last_status = response.status_code
             if response.status_code == 304:
-                return None, etag, None
+                _feed_cooldown_until = 0.0
+                return None, etag, None, 304
             if response.status_code == 200 and response.content:
-                return response.content, response.headers.get("etag"), None
+                _feed_cooldown_until = 0.0
+                return response.content, response.headers.get("etag"), None, 200
             last_error = "HTTP %s" % response.status_code
-            if response.status_code == 404:
-                last_error += "（频道不存在或已关闭 RSS）"
-            retriable = response.status_code == 429 or response.status_code >= 500
+            if response.status_code == 429:
+                retry_after = _retry_after_seconds(response.headers.get("retry-after"))
+                retry_delay = (
+                    retry_after
+                    if retry_after is not None
+                    else YOUTUBE_API_RATE_LIMIT_COOLDOWN
+                )
+                _feed_cooldown_until = max(
+                    _feed_cooldown_until,
+                    time.monotonic() + retry_delay,
+                )
+                last_error += "（已按 Retry-After/限流退避）"
+                retriable = False
+            elif response.status_code == 404:
+                last_error += "（官方 RSS 地址返回 404；可能是频道 ID、RSS 状态或代理响应问题）"
+                max_attempts = min(
+                    FEED_MAX_ATTEMPTS, len(FEED_404_RETRY_DELAYS) + 1
+                )
+                retriable = attempt + 1 < max_attempts
+                if retriable:
+                    retry_delay = FEED_404_RETRY_DELAYS[attempt]
+                else:
+                    logger.warning(
+                        "YouTube RSS HTTP 404 响应诊断: {}",
+                        _http_response_diagnostics(response),
+                    )
+            else:
+                retriable = response.status_code >= 500
 
-        if not retriable or attempt + 1 >= FEED_MAX_ATTEMPTS:
+        if not retriable or attempt + 1 >= max_attempts:
             break
-        delay = FEED_RETRY_DELAYS[min(attempt, len(FEED_RETRY_DELAYS) - 1)]
+        delay = retry_delay
+        if delay is None:
+            delay = FEED_RETRY_DELAYS[min(attempt, len(FEED_RETRY_DELAYS) - 1)]
         logger.warning(
             "YouTube RSS 拉取临时失败，将在 {} 秒后重试（{}/{}）: {}",
             delay,
             attempt + 1,
-            FEED_MAX_ATTEMPTS,
+            max_attempts,
             last_error,
         )
         await asyncio.sleep(delay)
-    return None, None, last_error
+    return None, None, last_error, last_status
+
+
+async def _fetch_channel_videos_fallback(channel_id):
+    """RSS 失效时从频道视频页读取并核实视频发布时间。"""
+    response = await _youtube_get(
+        channel_page_url(channel_id) + "/videos",
+        timeout=FEED_TIMEOUT,
+        headers={"Accept-Language": "en-US,en;q=0.9", "User-Agent": "Mozilla/5.0"},
+    )
+    response.raise_for_status()
+    videos, author = parse_channel_videos_page(response.text, channel_id)
+    sem = asyncio.Semaphore(3)
+
+    async def read_video(video):
+        key = (channel_id, video["video_id"])
+        if key in _video_page_cache:
+            return dict(_video_page_cache[key], title=video["title"], author=author)
+        async with sem:
+            page = await _youtube_get(
+                "https://www.youtube.com/watch?v=" + video["video_id"],
+                timeout=FEED_TIMEOUT,
+                headers={"Accept-Language": "en-US,en;q=0.9", "User-Agent": "Mozilla/5.0"},
+            )
+            page.raise_for_status()
+            post = parse_video_page_post(page.text, video, channel_id, author)
+            _video_page_cache[key] = post
+            return post
+
+    posts = await asyncio.gather(*(read_video(video) for video in videos))
+    return sorted(posts, key=lambda item: int(item["cursor_id"]))
 
 
 def _source_channel_key(source_id):
@@ -849,8 +1326,21 @@ async def _send_posts(source, posts):
         return new_count, sent_count, failed_count
 
 
-async def _poll_source(source):
+async def _poll_source_rss(source, allow_page_fallback=True):
+    global _web_fallback_cooldown_until
     source_id = source["id"]
+    cooldown_until = _youtube_rss_source_cooldowns.get(source_id, 0.0)
+    remaining = cooldown_until - time.monotonic()
+    if remaining > 0:
+        return {
+            "result": "fetch_failed",
+            "provider": "rss",
+            "error": "YouTube RSS 404 冷却中（约 %.0f 秒），频道 ID 未确认变化时暂不重复抓取" % remaining,
+            "new": 0,
+            "sent": 0,
+            "failed": 0,
+        }
+    _youtube_rss_source_cooldowns.pop(source_id, None)
     channel_id = await _resolve_channel_id(source)
     feed_url = channel_feed_url(channel_id)
     feed_state = (await _load_state_async())["sources"].get(source_id, {})
@@ -870,15 +1360,89 @@ async def _poll_source(source):
             source_url=feed_url,
         )
 
-    body, new_etag, error = await _fetch_feed(feed_url, etag)
+    body, new_etag, error, status_code = await _fetch_feed(feed_url, etag)
     posts = None
     if error is None and body is None:
         if cached_posts is not None:
             posts = cached_posts
         else:
-            body, new_etag, error = await _fetch_feed(feed_url, None)
+            body, new_etag, error, status_code = await _fetch_feed(feed_url, None)
+
+    source_value = str(source.get("value") or "").strip()
+    if status_code == 404 and not CHANNEL_ID_RE.fullmatch(source_value):
+        try:
+            refreshed_channel_id = await _resolve_channel_id(
+                source, force_refresh=True
+            )
+        except Exception as exc:
+            refresh_error = _describe_exception(exc)
+            logger.warning(
+                "YouTube RSS 404 后重新解析频道 handle 失败: {} ({})",
+                source_value,
+                refresh_error,
+            )
+            error = "%s；重新解析 %s 失败: %s" % (
+                error,
+                source_value,
+                refresh_error,
+            )
+        else:
+            if refreshed_channel_id == channel_id:
+                logger.warning(
+                    "YouTube RSS 404 后重新解析 handle，频道 ID 未变化: {} -> {}",
+                    source_value,
+                    channel_id,
+                )
+                error = "%s；重新解析后频道 ID 未变化，请核对频道 RSS 与代理响应" % error
+            else:
+                logger.warning(
+                    "YouTube RSS 404 后频道 ID 已更新，将使用新 ID 重试: {} -> {}",
+                    channel_id,
+                    refreshed_channel_id,
+                )
+                channel_id = refreshed_channel_id
+                feed_url = channel_feed_url(channel_id)
+                _posts_cache.pop(source_id, None)
+                await _update_source_state_async(
+                    source_id,
+                    clear_etag=True,
+                    source_url=feed_url,
+                )
+                body, new_etag, error, status_code = await _fetch_feed(
+                    feed_url, None
+                )
+
+    if error and allow_page_fallback and status_code != 429:
+        remaining = _web_fallback_cooldown_until - time.monotonic()
+        if remaining > 0:
+            error += "；频道视频页后备抓取限流冷却中（约 %.0f 秒）" % remaining
+        else:
+            try:
+                posts = await _fetch_channel_videos_fallback(channel_id)
+            except Exception as exc:
+                response = getattr(exc, "response", None)
+                if getattr(response, "status_code", None) == 429:
+                    retry_after = _retry_after_seconds(
+                        getattr(response, "headers", {}).get("retry-after")
+                    )
+                    delay = retry_after if retry_after is not None else YOUTUBE_WEB_FALLBACK_COOLDOWN
+                    _web_fallback_cooldown_until = max(
+                        _web_fallback_cooldown_until,
+                        time.monotonic() + delay,
+                    )
+                    error += "；频道视频页返回 HTTP 429，后备抓取冷却 %.0f 秒" % delay
+                logger.warning("YouTube 频道视频页后备读取失败: {} ({})", source_id, _describe_exception(exc))
+                error += "；频道视频页后备读取失败: " + _describe_exception(exc)
+            else:
+                logger.info("YouTube RSS 不可用，已从频道视频页读取 {} 条视频: {}", len(posts), source_id)
+                error = None
+                await _update_source_state_async(source_id, clear_etag=True, source_url=feed_url)
 
     if error:
+        if status_code == 404:
+            _youtube_rss_source_cooldowns[source_id] = (
+                time.monotonic() + YOUTUBE_RSS_404_COOLDOWN
+            )
         logger.warning(
             "YouTube RSS 拉取失败，本轮跳过该来源: {} ({}): {}",
             source["name"],
@@ -921,13 +1485,95 @@ async def _poll_source(source):
         _posts_cache[source_id] = posts
 
     counts = await _send_posts(source, posts)
+    _youtube_rss_source_cooldowns.pop(source_id, None)
     return {
         "result": "ok",
+        "provider": "rss",
         "error": "",
         "new": counts[0],
         "sent": counts[1],
         "failed": counts[2],
     }
+
+
+async def _poll_source_data_api(source):
+    channel_id, uploads_playlist_id = await _resolve_channel_uploads(source)
+    return await _fetch_youtube_api_posts(
+        source,
+        channel_id,
+        uploads_playlist_id,
+    )
+
+
+async def _poll_source(source):
+    if not _youtube_data_api_key():
+        result = await _poll_source_rss(source)
+        result.setdefault("provider", "rss")
+        return result
+
+    try:
+        posts = await _poll_source_data_api(source)
+    except YoutubeDataAPIError as api_error:
+        api_message = _short_error(api_error)
+        if api_error.rate_limited:
+            logger.warning(
+                "YouTube Data API 限流，本轮遵循退避且不再请求 RSS/频道页: {} ({})",
+                source["name"],
+                api_message,
+            )
+            return {
+                "result": "fetch_failed",
+                "provider": "data_api",
+                "error": api_message,
+                "new": 0,
+                "sent": 0,
+                "failed": 0,
+            }
+        logger.warning(
+            "YouTube Data API 来源读取失败，尝试 RSS 备用源: {} ({})",
+            source["name"],
+            api_message,
+        )
+    except Exception as exc:
+        api_message = _short_error(_describe_exception(exc))
+        logger.warning(
+            "YouTube Data API 来源读取异常，尝试 RSS 备用源: {} ({})",
+            source["name"],
+            api_message,
+        )
+    else:
+        counts = await _send_posts(source, posts)
+        return {
+            "result": "ok",
+            "provider": "data_api",
+            "error": "",
+            "new": counts[0],
+            "sent": counts[1],
+            "failed": counts[2],
+        }
+
+    try:
+        result = await _poll_source_rss(source)
+    except Exception as exc:
+        result = {
+            "result": "fetch_failed",
+            "error": _short_error(_describe_exception(exc)),
+            "new": 0,
+            "sent": 0,
+            "failed": 0,
+        }
+    result["provider"] = "rss_fallback"
+    if result.get("result") != "ok":
+        result["error"] = _short_error(
+            "Data API：%s；RSS 备用源：%s"
+            % (api_message, result.get("error") or result.get("result") or "失败")
+        )
+    else:
+        logger.warning(
+            "YouTube Data API 不可用，本轮由 RSS 备用源成功处理: {}",
+            source["name"],
+        )
+    return result
 
 
 async def _poll_all_profile():
@@ -975,7 +1621,12 @@ async def _poll_all_profile():
         count = 0 if status == "ok" else (
             previous.get(identity, {}).get("consecutive_failures", 0) + 1
         )
-        health.append({"id": identity, "name": source["name"], "consecutive_failures": count})
+        health.append({
+            "id": identity,
+            "name": source["name"],
+            "consecutive_failures": count,
+            "provider": result.get("provider", "rss"),
+        })
     _runtime_status["source_health"] = health
     new_total = sent_total = failed_total = 0
     bad_result = ""
@@ -1068,18 +1719,33 @@ async def _start_poll_loop():
 _youtube_app = get_app()
 
 
+def _youtube_data_api_status():
+    return {
+        "data_api_enabled": bool(_youtube_data_api_key()),
+        "data_api_cooldown_seconds": max(
+            0,
+            int(_youtube_api_cooldown_until - time.monotonic() + 0.999),
+        ),
+    }
+
+
 @_youtube_app.get("/api/youtube/status")
 async def api_youtube_status(bot_id: str = ""):
     if bot_id:
-        return await _profile_runtime.status(bot_id)
+        data = await _profile_runtime.status(bot_id)
+        data.update(_youtube_data_api_status())
+        return data
     if await asyncio.to_thread(_profile_runtime.owners):
-        return await _profile_runtime.status_all()
+        data = await _profile_runtime.status_all()
+        data.update(_youtube_data_api_status())
+        return data
     bots = get_bots()
     status_config = await asyncio.to_thread(get_youtube_status_snapshot)
     sources = status_config["sources"]
     data = runtime_status()
     protection_state, protection_load_error = await _load_protection_state_async()
     data.update({
+        **_youtube_data_api_status(),
         "ok": True,
         "running": bool(data.get("loop_started")),
         "qq_connected": any(isinstance(bot, QQBot) for bot in bots.values()) or personal_qq.any_connected(),

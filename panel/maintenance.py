@@ -11,7 +11,7 @@ from plugins.state_validation import validate_runtime
 
 
 class MaintenanceService:
-    def __init__(self, backup_factory, data_dir, bot_get, notify, logger):
+    def __init__(self, backup_factory, data_dir, bot_get, notify, logger, profile_ids=None):
         self.backup_factory = backup_factory
         self.data_dir = Path(data_dir)
         self.folder = self.data_dir / 'auto_backups'
@@ -19,6 +19,7 @@ class MaintenanceService:
         self.bot_get = bot_get
         self.notify = notify
         self.logger = logger
+        self.profile_ids = profile_ids or (lambda: [])
         self.lock = threading.RLock()
         self._status_lock = threading.Lock()
         self._alerts = {}
@@ -147,31 +148,76 @@ class MaintenanceService:
     def check_once(self):
         alerts = {}
         self._check_files(alerts)
+        try:
+            profile_ids = [str(owner) for owner in self.profile_ids()
+                           if str(owner) and str(owner) != 'unassigned']
+        except Exception:
+            profile_ids = []
+        alert_bot_ids = {}
+
+        def set_alert(key, message, owners=None):
+            alerts[key] = message
+            alert_bot_ids[key] = list(owners) if owners is not None else (profile_ids or None)
+
+        # Shared files alert every configured bot. Files under an individual
+        # profile's settings/runtime directory only alert that profile.
+        if profile_ids:
+            try:
+                from plugins.bot_profiles import filename
+                for owner in profile_ids:
+                    profile_name = filename(owner)
+                    profile_stem = Path(profile_name).stem
+                    for key in alerts:
+                        if not key.startswith('file:'):
+                            continue
+                        relative = key[len('file:'):].replace('\\', '/')
+                        if (relative == 'bot_profiles/' + profile_name
+                                or relative.startswith('bot_profile_runtime/' + profile_stem + '/')):
+                            alert_bot_ids[key] = [owner]
+            except (ImportError, ValueError):
+                pass
         for label, endpoint, source_hint in (
             ('X', '/api/x-rss/status', '请检查来源与 RSSHub。'),
             ('Bilibili', '/api/bilibili/status', '请检查来源与 RSSHub。'),
             # YouTube 用官方频道 RSS，不经 RSSHub，提示不能引导用户去查 RSSHub
             ('YouTube', '/api/youtube/status', '请检查频道与网络/代理。'),
         ):
-            status = self.bot_get(endpoint, timeout=5)
-            if not isinstance(status, dict):
-                continue
-            config_failure = status.get('config_error') or status.get('last_result') == 'config_failed'
-            if config_failure:
-                alerts['config:' + label] = label + ' 账号配置读取失败，相关账号的自动投递已暂停。请检查配置，并确认机器人和面板已更新及重启。'
-            legacy_config_failure = not status.get('config_error') and status.get('last_result') == 'config_failed'
-            if status.get('protection_error') and not legacy_config_failure:
-                alerts['protection:' + label] = label + ' 投递保护异常，自动投递已暂停，请检查维护与备份。'
-            for item in status.get('source_health', []):
-                if item.get('consecutive_failures', 0) >= 3:
-                    key = 'rss:' + label + ':' + str(item.get('id', ''))
-                    alerts[key] = label + ' 来源“' + str(item.get('name', ''))[:60] + '”连续三轮轮询失败，' + source_hint
+            if profile_ids:
+                statuses = []
+                for owner in profile_ids:
+                    try:
+                        status = self.bot_get(endpoint, timeout=5, bot_id=owner)
+                    except TypeError:
+                        status = self.bot_get(endpoint, timeout=5)
+                    statuses.append((owner, status))
+            else:
+                statuses = [('', self.bot_get(endpoint, timeout=5))]
+            for owner, status in statuses:
+                if not isinstance(status, dict):
+                    continue
+                suffix = ':' + owner if owner else ''
+                owners = [owner] if owner else None
+                config_failure = status.get('config_error') or status.get('last_result') == 'config_failed'
+                if config_failure:
+                    set_alert('config:' + label + suffix,
+                              label + ' 账号配置读取失败，相关账号的自动投递已暂停。请检查配置，并确认机器人和面板已更新及重启。',
+                              owners)
+                legacy_config_failure = not status.get('config_error') and status.get('last_result') == 'config_failed'
+                if status.get('protection_error') and not legacy_config_failure:
+                    set_alert('protection:' + label + suffix,
+                              label + ' 投递保护异常，自动投递已暂停，请检查维护与备份。', owners)
+                for item in status.get('source_health', []):
+                    if item.get('consecutive_failures', 0) >= 3:
+                        key = 'rss:' + label + suffix + ':' + str(item.get('id', ''))
+                        set_alert(key,
+                                  label + ' 来源“' + str(item.get('name', ''))[:60] + '”连续三轮轮询失败，' + source_hint,
+                                  owners)
         try:
             enabled = self.enabled()
             if enabled and time.time() - self._last_backup >= 3600:
                 self.backup_now()
         except Exception:
-            alerts['backup'] = '自动备份失败，已保留原有备份。请检查维护页面、数据文件和磁盘空间。'
+            set_alert('backup', '自动备份失败，已保留原有备份。请检查维护页面、数据文件和磁盘空间。')
         with self._status_lock:
             old = self._alerts
             self._alerts = {key: {'id': key, 'message': msg, 'since': old.get(key, {}).get('since', int(time.time()))}
@@ -179,15 +225,19 @@ class MaintenanceService:
         for key, message in alerts.items():
             if key not in old:
                 self.logger('维护告警：' + message)
-            if time.monotonic() - self._notified.get(key, float('-inf')) >= 300:
+            bot_ids = alert_bot_ids.get(key, profile_ids or None)
+            notification_key = (key, tuple(bot_ids) if bot_ids is not None else None)
+            if time.monotonic() - self._notified.get(notification_key, float('-inf')) >= 300:
                 try:
-                    result = self.notify(key, message)
+                    result = self.notify(key, message, bot_ids)
                     if result and result.get('sent'):
-                        self._notified[key] = time.monotonic()
+                        self._notified[notification_key] = time.monotonic()
                 except Exception:
                     pass
         for key in set(old) - set(alerts):
-            self._notified.pop(key, None)
+            for notification_key in list(self._notified):
+                if notification_key[0] == key:
+                    self._notified.pop(notification_key, None)
             self.logger('维护故障已恢复：' + key)
 
     def start(self):

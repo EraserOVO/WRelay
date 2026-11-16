@@ -12,12 +12,14 @@ from pathlib import Path
 from plugins.json_io import json_file_lock, file_revision, _atomic_write_json_unlocked, ConcurrentWriteError
 
 CURRENT = ContextVar("wrelay_bot_profile", default="")
-LIST_KEYS = ("discord_channels", "x_rss_sources", "bilibili_sources", "youtube_sources",
+LIST_KEYS = ("discord_channels", "x_rss_sources", "bilibili_sources", "youtube_sources", "steam_sources",
              "forwarding_groups", "x_forwarding_groups", "bilibili_forwarding_groups",
-             "youtube_forwarding_groups", "qq_forwarding_groups")
-GROUP_KEYS = LIST_KEYS[4:]
+             "youtube_forwarding_groups", "steam_forwarding_groups", "qq_forwarding_groups")
+GROUP_KEYS = ("forwarding_groups", "x_forwarding_groups", "bilibili_forwarding_groups",
+              "youtube_forwarding_groups", "steam_forwarding_groups", "qq_forwarding_groups")
 VALUE_KEYS = ("x_rss_poll_interval", "x_rsshub_base", "x_protection", "bilibili_poll_interval",
               "bilibili_rsshub_base", "bilibili_protection", "youtube_poll_interval", "youtube_protection",
+              "steam_poll_interval", "steam_region", "steam_protection",
               "backfill_enabled", "backfill_limit", "bilibili_auto_resolve",
               "qq_c2c_relay_filter", "x_c2c_relay_filter", "bilibili_c2c_relay_filter",
               "scheduled_message", "translation", "x_translation")
@@ -346,7 +348,7 @@ def migrate(settings_file, configured_ids):
                 shutil.copyfile(path, path + ".bak")
             _atomic_write_json_unlocked(path, profile, indent=2)
             # Copy state without deleting legacy files. History remains keyed by channel × target group.
-            for name in ("x_rss.json", "bilibili.json", "youtube.json", "x_protection.json", "bilibili_protection.json", "youtube_protection.json"):
+            for name in ("x_rss.json", "bilibili.json", "youtube.json", "steam.json", "x_protection.json", "bilibili_protection.json", "youtube_protection.json"):
                 source = Path(settings_file).parent / name
                 if source.exists():
                     target = Path(runtime_path(settings_file, owner, name))

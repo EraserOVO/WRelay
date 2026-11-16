@@ -12,7 +12,7 @@
   modal.style.display = "none";
   modal.innerHTML = '<section class="modal-shell modal-large" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">' +
     '<header class="modal-header"><div class="modal-heading"><h3 id="onboardingTitle">配置向导</h3><p>跟随步骤，完成你的第一条转发</p></div>' +
-    '<div class="modal-header-actions"><button type="button" class="modal-x" id="onboardingClose" aria-label="稍后配置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div></header>' +
+    '<div class="modal-header-actions"><button type="button" class="modal-x" id="onboardingClose" aria-label="稍后配置">' + mcIcon("close", 18) + '</button></div></header>' +
     '<div class="modal-body"><ol class="onboarding-steps" aria-label="配置步骤"></ol><fieldset id="onboardingForm"></fieldset><p id="onboardingNotice" role="status" aria-live="polite"></p></div>' +
     '<footer class="modal-footer onboarding-footer"><div class="onboarding-footer-group"><button type="button" class="sec" id="onboardingLater">稍后配置</button><button type="button" class="sec" id="onboardingRestart">重新开始</button></div><div class="onboarding-footer-group"><button type="button" class="sec" id="onboardingBack">上一步</button><button type="button" id="onboardingNext">下一步</button></div></footer></section>';
   document.body.append(modal);

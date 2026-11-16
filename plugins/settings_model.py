@@ -248,6 +248,11 @@ class SettingsModel(dict):
                 "overflow_policy": "latest",
             },
             "youtube_forwarding_groups": [],
+            "steam_sources": [],
+            "steam_forwarding_groups": [],
+            "steam_poll_interval": 900,
+            "steam_region": "CN",
+            "steam_protection": {"min_send_interval": 60, "hourly_limit": 30, "backlog_limit": 500},
             "scheduled_message": {
                 "enabled": False,
                 "content": "",
@@ -288,9 +293,10 @@ class SettingsModel(dict):
                 "max_output_tokens": 800,
             },
             # AI API 配置档案：保留上面的 ai 字段作为旧版兼容镜像，
-            # 当前请求由 ai_active_profile 指向的档案决定。
+            # ai_profile_priority 按顺序指定主用及备用模型。
             "ai_profiles": [],
             "ai_active_profile": "",
+            "ai_profile_priority": [],
             "tencent_tmt": {
                 "secret_id_env": "WRELAY_TENCENT_SECRET_ID",
                 "secret_key_env": "WRELAY_TENCENT_SECRET_KEY",
@@ -324,6 +330,18 @@ class SettingsModel(dict):
         for key, value in defaults.items():
             if key not in result:
                 result[key] = deepcopy(value)
+        # 旧配置没有模型优先级时，以原主用模型开头，再沿用现有档案顺序。
+        if "ai_profile_priority" not in data and isinstance(result.get("ai_profiles"), list):
+            profile_ids = [
+                str(profile.get("id") or "")
+                for profile in result["ai_profiles"]
+                if isinstance(profile, dict) and str(profile.get("id") or "")
+            ]
+            active_id = str(result.get("ai_active_profile") or "")
+            if active_id in profile_ids:
+                profile_ids.remove(active_id)
+                profile_ids.insert(0, active_id)
+            result["ai_profile_priority"] = profile_ids
         # Discord/X 共用服务路由。将旧的 x_translation 路由字段同步为
         # translation 的值，保留字段本身以兼容旧配置格式。
         shared_translation = result.get("translation")
@@ -619,6 +637,58 @@ def _validate_youtube_sources_and_protection(data):
             return "youtube_protection.overflow_policy 只支持 latest 或 oldest"
 
 
+def _validate_steam(data):
+    from plugins.steam_data import app_id, creator_url
+    sources = data.get("steam_sources", [])
+    if not isinstance(sources, list) or len(sources) > 100:
+        return "steam_sources 必须是最多 100 项的列表"
+    seen = set()
+    for item in sources:
+        if not isinstance(item, dict):
+            return "Steam 来源必须是对象"
+        identity = item.get("id")
+        if not isinstance(identity, str) or not identity.strip() or len(identity) > 128 or identity in seen:
+            return "Steam 来源标识无效或重复"
+        seen.add(identity)
+        kind, value = item.get("kind"), item.get("value")
+        if not isinstance(kind, str) or kind not in {"game", "creator"} or not isinstance(value, str) or (kind == "game" and not app_id(value)) or (kind == "creator" and not creator_url(value)):
+            return "Steam 游戏或开发商、发行商主页地址无效"
+        if not isinstance(item.get("name", ""), str) or len(item.get("name", "")) > 200 or not isinstance(item.get("enabled", True), bool):
+            return "Steam 来源名称或启用状态无效"
+        for key in ("include_dlc", "include_bundles"):
+            if not isinstance(item.get(key, False), bool):
+                return "Steam 附加内容选项必须是布尔值"
+        events = item.get("events", [])
+        allowed = {"announcements", "news", "discount"} if kind == "game" else {"discount", "new_listing", "early_access", "release", "full_release"}
+        if not isinstance(events, list) or any(not isinstance(event, str) or event not in allowed for event in events) or len(events) != len(set(events)):
+            return "Steam 来源监控内容无效"
+        feeds = item.get("news_feeds", [])
+        if not isinstance(feeds, list) or len(feeds) > 50 or any(not isinstance(x, str) or not x.strip() or len(x) > 200 for x in feeds):
+            return "Steam 新闻来源筛选无效"
+    interval = data.get("steam_poll_interval", 900)
+    if type(interval) is not int or not 300 <= interval <= 86400:
+        return "Steam 轮询间隔必须为 300 至 86400 秒"
+    region = data.get("steam_region", "CN")
+    if not isinstance(region, str) or len(region) != 2 or not region.isascii() or not region.isalpha() or region != region.upper():
+        return "Steam 商店地区须为两个大写英文字母"
+    protection = data.get("steam_protection", {"min_send_interval": 60, "hourly_limit": 30, "backlog_limit": 500})
+    if not isinstance(protection, dict):
+        return "Steam 投递保护配置无效"
+    for key, low, high in (("min_send_interval", 1, 86400), ("hourly_limit", 1, 10000), ("backlog_limit", 1, 10000)):
+        if type(protection.get(key)) is not int or not low <= protection[key] <= high:
+            return "Steam 投递保护 %s 数值无效" % key
+    groups = data.get("steam_forwarding_groups", [])
+    if not isinstance(groups, list):
+        return "Steam 转发组必须是列表"
+    for group in groups:
+        if not isinstance(group, dict):
+            return "Steam 转发组必须是对象"
+        for key in ("sources", "groups"):
+            members = group.get(key)
+            if not isinstance(members, list) or any(not isinstance(x, str) or not x.strip() for x in members):
+                return "Steam 转发组成员必须是非空字符串列表"
+
+
 def _validate_qq_c2c_filters(data):
     """校验三条手动转发的类型筛选，各自使用该链路支持的类型集。
 
@@ -864,6 +934,22 @@ def _validate_ai_settings(data):
         return "ai_active_profile 必须是字符串"
     if ai_active_profile and ai_active_profile not in profile_ids:
         return "ai_active_profile 不存在"
+    ai_profile_priority = data.get("ai_profile_priority", [])
+    if not isinstance(ai_profile_priority, list):
+        return "ai_profile_priority 必须是列表"
+    priority_ids = set()
+    for index, profile_id in enumerate(ai_profile_priority):
+        if not isinstance(profile_id, str) or not profile_id.strip():
+            return "ai_profile_priority[%d] 必须是非空字符串" % index
+        if profile_id in priority_ids:
+            return "ai_profile_priority 不能包含重复配置"
+        if profile_id not in profile_ids:
+            return "ai_profile_priority[%d] 指向不存在的配置" % index
+        priority_ids.add(profile_id)
+    if ai_profile_priority and priority_ids != profile_ids:
+        return "ai_profile_priority 必须包含全部 AI 配置"
+    if ai_profile_priority and ai_active_profile and ai_active_profile != ai_profile_priority[0]:
+        return "ai_active_profile 必须与首选 AI 配置一致"
 
     tmt = data.get("tencent_tmt")
     if not isinstance(tmt, dict):
@@ -886,6 +972,7 @@ def _validate_forwarding_groups(
         ("x_forwarding_groups", ("sources", "groups")),
         ("bilibili_forwarding_groups", ("sources", "groups")),
         ("youtube_forwarding_groups", ("sources", "groups")),
+        ("steam_forwarding_groups", ("sources", "groups")),
         ("qq_forwarding_groups", ("groups",)),
     ):
         if not validate_forwarding_groups:
@@ -934,6 +1021,7 @@ def validate_settings(
         _validate_x_sources,
         _validate_bilibili_sources_and_protection,
         _validate_youtube_sources_and_protection,
+        _validate_steam,
         _validate_qq_c2c_filters,
         _validate_backfill_and_failure_notifications,
         _validate_scheduled_messages,

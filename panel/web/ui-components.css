@@ -10,6 +10,8 @@
 }
 
 body .external-link-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 36px; min-height: 36px; padding: 0 14px; box-sizing: border-box; border: 1px solid var(--field-border); border-radius: var(--radius-control); background: var(--sec-bg); color: var(--sec-fg); font: inherit; text-decoration: none; white-space: nowrap; }
+body .icon-label-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
+body .icon-label-button > svg { display: block; flex: 0 0 auto; }
 body .external-link-button::before { display: none; }
 body .external-link-button > .external-link-icon { display: block; width: 16px; height: 16px; flex: 0 0 16px; }
 body .external-link-button:hover:not(:disabled) { background: var(--hover-bg, var(--sec-bg)); border-color: var(--muted); opacity: 1; }
@@ -23,6 +25,8 @@ body #confirmModal.modal-overlay { z-index: 1100; }
 body .modal-overlay > .modal-shell { --modal-width: 640px; position: relative; display: flex; flex-direction: column; gap: 0; width: min(var(--modal-width), 100%); max-width: var(--modal-width); height: auto; min-height: 0; max-height: 85vh; padding: 0; margin: 0; overflow: hidden; background: var(--modal-bg); color: var(--fg); border: 1px solid var(--modal-border); border-radius: var(--radius-card); box-shadow: 0 20px 64px rgba(0,0,0,.4); }
 body .modal-overlay > .modal-small { --modal-width: 520px; }
 body .modal-overlay > .modal-large { --modal-width: 880px; }
+body #filterModal.modal-overlay > .modal-shell,
+body #relayChannelsModal.modal-overlay > .modal-shell { box-sizing: border-box; height: min(760px, 85vh); min-height: 0; }
 body .modal-shell .modal-header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--panel-border); }
 .modal-heading { min-width: 0; flex: 1; }
 body .modal-shell .modal-header h3 { margin: 0 !important; padding: 0; font-size: 18px; font-weight: 600; line-height: 1.4; }
@@ -39,8 +43,96 @@ body .modal-shell textarea { min-height: 96px; padding: 10px; box-sizing: border
 body .modal-shell select { color-scheme: dark; }
 body.theme-light .modal-shell select { color-scheme: light; }
 .modal-shell :is(button:not(.flt-chip-x), .backup-file-select) { height: 36px; box-sizing: border-box; }
+/* Dialog row icons match the close control's square hit area. */
+body .modal-shell button.rowicon {
+  width: 32px; height: 32px; min-width: 32px; min-height: 32px;
+  flex: 0 0 32px; padding: 0; box-sizing: border-box; aspect-ratio: 1;
+}
 .modal-shell .form-field { font-size: 13px; color: var(--muted); }
 .modal-shell .form-field > input { margin-top: 6px; }
+
+/* Bot profile import: consistent form rhythm and a custom file picker. */
+#profileImportModal .modal-body.modal-grid {
+  gap: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+#profileImportModal .profile-import-owner {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-control);
+  background: var(--field-bg);
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.5;
+}
+#profileImportModal .profile-import-file-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+#profileImportModal .profile-import-field-label {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+#profileImportModal .profile-import-file-control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+#profileImportModal #profileImportChoose {
+  flex: 0 0 auto;
+  min-width: 96px;
+  white-space: nowrap;
+}
+#profileImportModal .profile-import-file-name {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#profileImportModal .profile-import-mode { margin: 0; }
+#profileImportModal #profileImportMode { width: 100%; min-width: 0; }
+#profileImportModal #profileImportMapping:empty { display: none; }
+#profileImportModal #profileImportMapping:not(:empty) {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--panel-border);
+}
+#profileImportModal #profileImportMapping > .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+}
+#profileImportModal #profileImportMapping > .form-field > select { width: 100%; min-width: 0; }
+#profileImportModal #profileImportReview {
+  min-height: 40px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-control);
+  background: var(--field-bg);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
 
 /* ---------- 二级窗口统一规则（长期有效） ----------
    1. 内容网格式对齐：加 .modal-grid 的窗口正文一律单列起排、同宽同间距；
@@ -90,11 +182,11 @@ button.pill-switch[data-on="1"] .settings-switch-track { background: var(--toggl
 body .modal-shell .pill-switch[data-on="1"] .settings-switch-track::after,
 button.pill-switch[data-on="1"] .settings-switch-track::after { transform: translateX(14px); }
 body .modal-shell .pill-switch:disabled { opacity: .45; cursor: not-allowed; }
-/* 「翻译链路」「翻译设置」窗口里的开关各占一行，按钮按内容宽度起排。 */
-body .modal-shell .modal-grid > :is(.translation-chain-toggles, .translation-setting-buttons) { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
-body .modal-shell :is(.translation-chain-toggles, .translation-setting-buttons) > .pill-switch { justify-self: start; }
-/* 头部工具区里的链路 tab（已注册频道）等宽，不被压缩。 */
-.modal-header-actions .fscope-tab { flex: 1 1 92px; min-width: 92px; }
+/* 「翻译链路」窗口里的开关各占一行，按钮按内容宽度起排。 */
+body .modal-shell .modal-grid > .translation-chain-toggles { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+body .modal-shell .translation-chain-toggles > .pill-switch { justify-self: start; }
+/* 多链路图标胶囊在弹窗标题栏保持紧凑的固有宽度。 */
+.modal-header-actions .filter-scope-tabs.multi-chain-switch { flex: 0 0 auto; }
 @media (max-width: 620px) {
   .modal-split { grid-template-columns: minmax(0, 1fr); }
 }
@@ -111,12 +203,23 @@ body #translationConfigModal > .modal-shell { max-width: 880px; max-height: 85vh
 #translationConfigModal .translation-config-label { grid-column: 1 / -1; margin: 14px 0 6px; }
 #translationConfigModal .modal-body > input { grid-column: 1 / -1; width: 100%; }
 #translationConfigModal .translation-config-section-title { color: var(--fg); font-size: 14px; font-weight: 600; padding: 16px 0 10px; margin: 16px 0 0; border-top: 1px solid var(--panel-border); }
+#translationConfigModal .translation-config-heading-row { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 10px; }
+#translationConfigModal .translation-config-heading-row .translation-config-section-title { flex: 1 1 auto; padding: 0; margin: 0; border-top: 0; }
+#translationConfigModal .translation-config-test-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; margin-top: 10px; }
+#translationConfigModal .translation-config-test-actions { display: flex; flex: 1 1 auto; align-items: center; gap: 10px; min-width: 0; }
+#translationConfigModal .translation-config-test-actions #aiApiTestStatus { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#translationConfigModal .translation-config-test-row .ai-profile-toolbar { flex: 0 0 auto; }
 #translationConfigModal .translation-runtime-banner { margin: 0; padding: 12px; border-radius: var(--radius-control); }
 #translationConfigModal .ai-profile-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0; }
 #translationConfigModal .ai-profile-toolbar select { flex: 1; min-width: 160px; }
 #translationConfigModal .translation-test-history { margin: 14px 0 0; padding: 12px; border: 1px solid var(--field-border); border-radius: var(--radius-control); }
 #translationConfigModal .translation-test-history-list { max-height: none; }
-.qq-bot-form-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) auto; gap: 12px; align-items: end; padding: 12px 0; border-bottom: 1px solid var(--panel-border); }
+@media (max-width: 560px) {
+  #translationConfigModal .translation-config-test-row { flex-wrap: wrap; }
+  #translationConfigModal .translation-config-test-actions { flex-wrap: wrap; width: 100%; }
+  #translationConfigModal .translation-config-test-row .ai-profile-toolbar { margin-left: auto; }
+}
+.qq-bot-form-row { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)) auto; gap: 12px; align-items: end; padding: 12px 0; border-bottom: 1px solid var(--panel-border); }
 .qq-bot-form-row label { min-width: 0; }
 .modal-shell .qq-bot-remove { min-width: 64px; border: 1px solid var(--field-border) !important; }
 /* 复选框行需要横向排布：必须比 .modal-grid > label.form-field（含 id 级选择器）更具体才能覆盖。 */
@@ -157,6 +260,30 @@ body.desktop-host :is(#xrssCard, #bilibiliCard, #youtubeCard) > :is(h2, .rss-sta
 body :is(#xrssCard, #bilibiliCard, #youtubeCard) .rss-status-line > .badge { flex: none; }
 body :is(#xrssCard, #bilibiliCard, #youtubeCard) .rss-status-line > .xrss-summary { flex: 0 0 auto; max-width: none; flex-wrap: nowrap; white-space: nowrap; }
 .rss-status-line .xrss-summary > * + *::before { content: "·"; color: var(--muted); margin-right: 8px; }
+.youtube-api-key-config { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--field-border); }
+.youtube-api-key-copy { display: flex; flex-direction: column; gap: 2px; min-width: 180px; color: var(--fg); font-size: 13px; }
+.youtube-api-key-copy small { color: var(--muted); font-size: 12px; }
+.youtube-api-key-input-wrap { display: flex; align-items: center; flex: 1 1 320px; min-width: 220px; max-width: 480px; }
+.youtube-api-key-input-wrap .secret-input-wrap { width: 100%; }
+.youtube-api-key-config button { flex: 0 0 auto; }
+#youtubeApiKeyModal .youtube-api-key-modal-config { margin-top: 8px; }
+#youtubeApiKeyModal .youtube-api-key-copy { min-width: 150px; }
+#youtubeApiKeyModal .youtube-api-key-input-wrap { max-width: none; }
+.secret-input-wrap { position: relative; display: block; width: 100%; min-width: 0; }
+.secret-input-wrap > input { box-sizing: border-box; width: 100%; min-width: 0; padding-right: 42px !important; }
+.secret-input-toggle {
+  position: absolute; z-index: 1; top: 50%; right: 6px; transform: translateY(-50%);
+  display: grid; place-items: center; width: 28px !important; min-width: 28px !important; height: 28px !important; min-height: 28px !important;
+  padding: 0 !important; border: 0 !important; border-radius: 4px; background: transparent !important;
+  color: var(--muted); box-shadow: none !important; cursor: pointer;
+}
+.secret-input-toggle:hover { color: var(--fg); background: transparent !important; }
+.secret-input-toggle svg { display: block; width: 18px; height: 18px; }
+.secret-input-toggle:focus-visible { outline: 2px solid var(--primary-border); outline-offset: 0; }
+@media (max-width: 560px) {
+  .youtube-api-key-config { align-items: stretch; }
+  .youtube-api-key-input-wrap { max-width: none; }
+}
 body.desktop-host .discord-whitelist h2 > .foldbtn { margin-left: auto; }
 body.desktop-host .discord-whitelist .addrow { display: flex; justify-content: flex-start; align-items: center; gap: 8px; padding: 11px 0; margin: 0; min-height: 0; }
 body.desktop-host #scheduledMessageCard .scheduled-message-actions { grid-row: 2; justify-self: end; padding: 0; flex-wrap: nowrap; align-items: center; }
@@ -173,6 +300,8 @@ body #runtimeLogModal #btnLogAutoScroll { display: inline-flex; align-items: cen
 #runtimeLogModal #btnLogAutoScroll[data-on="1"] .settings-switch-track { background: var(--primary); }
 #runtimeLogModal .modal-footer #btnClearLog { background: transparent; color: var(--danger-icon); border: 1px solid var(--field-border); }
 #runtimeLogModal .modal-footer #btnClearLog:hover { background: var(--badge-off-bg); }
+#runtimeLogModal .modal-footer > .modal-actions { flex: 1 1 100%; }
+#runtimeLogModal .modal-actions-end { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; }
 body .foldbtn svg { width: 10px; height: 10px; }
 
 /* Desktop secondary actions share one hover/focus treatment; stateful and icon-only controls keep their own feedback. */

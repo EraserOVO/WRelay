@@ -11,7 +11,10 @@ def _cursor(value):
 def validate_runtime(name, data):
     if not isinstance(data, dict):
         raise ValueError(name + '：顶层必须是对象')
-    if name == 'discord_last.json':
+    if name == 'steam.json':
+        from plugins.steam_state import validate_state
+        validate_state(data)
+    elif name == 'discord_last.json':
         for value in data.values():
             values = value.values() if isinstance(value, dict) else [value]
             if any(v not in (None, '') and not _cursor(v) for v in values):

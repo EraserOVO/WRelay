@@ -107,11 +107,42 @@ class RSSProfiles:
                 settings = await asyncio.to_thread(config._load_settings)
             key = "x_rss_sources" if self.prefix == "x" else self.prefix + "_sources"
             sources = settings.get(key, [])
+            if self.prefix == "x":
+                forwarding_groups = config._ensure_x_forwarding_groups(settings)
+            elif self.prefix == "bilibili":
+                forwarding_groups = config._ensure_bilibili_forwarding_groups(settings)
+            else:
+                forwarding_groups = config._ensure_youtube_forwarding_groups(settings)
+
+            def source_key(source):
+                if self.prefix == "x":
+                    return config._x_source_key(str(source.get("source") or "").strip())
+                if self.prefix == "bilibili":
+                    return str(source.get("id") or config._bilibili_source_id(
+                        source.get("kind"), source.get("value")
+                    )).strip()
+                return str(source.get("id") or config._youtube_source_id(
+                    source.get("value")
+                )).strip()
+
+            active_targets = set(config._enabled_group_openids(settings))
+            routed_source_keys = {
+                str(source_id)
+                for group in forwarding_groups
+                if group.get("enabled", True) is not False
+                and active_targets.intersection(group.get("groups", []))
+                for source_id in group.get("sources", [])
+            }
+            routed_sources = [
+                source for source in sources
+                if isinstance(source, dict) and source_key(source) in routed_source_keys
+            ]
+            routable_sources = sum(1 for source in routed_sources if source.get("enabled") is True)
             queue = state.get("_protection_runtime_state") or {}
             from plugins.sender import get_qq_bots
             from plugins.personal_qq import connected_bots
-            data.update(ok=True, running=bool(self.ns.get("_loop_started")), sources_total=len(sources),
-                sources_enabled=sum(s.get("enabled") is True for s in sources),
+            data.update(ok=True, running=bool(self.ns.get("_loop_started")), sources_total=len(routed_sources),
+                sources_enabled=routable_sources,
                 forwarding_groups=len(settings.get("x_forwarding_groups" if self.prefix == "x" else self.prefix + "_forwarding_groups", [])),
                 poll_interval=settings.get("x_rss_poll_interval" if self.prefix == "x" else self.prefix + "_poll_interval", 300),
                 protection=settings.get(self.prefix + "_protection", {}),

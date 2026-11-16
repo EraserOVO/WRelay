@@ -1,5 +1,6 @@
 import asyncio
 import math
+import os
 import re
 import threading
 from urllib.parse import urlsplit
@@ -224,7 +225,7 @@ def make_media_link(kind, url):
 
 
 def _get_proxy(url):
-    """Discord/X/YouTube media CDNs use DISCORD_PROXY; domestic media stays on system routing."""
+    """Use platform proxies for hosted media; domestic media stays on system routing."""
     try:
         host = (urlsplit(str(url)).hostname or "").lower()
     except (TypeError, ValueError):
@@ -245,10 +246,23 @@ def _get_proxy(url):
         or host.endswith(".googleusercontent.com")
     ):
         return None
-    try:
-        proxy = getattr(get_driver().config, "discord_proxy", None)
-    except Exception:
-        return None
+    is_youtube_host = (
+        host == "youtube.com"
+        or host.endswith(".youtube.com")
+        or host == "youtu.be"
+        or host == "ytimg.com"
+        or host.endswith(".ytimg.com")
+        or host == "ggpht.com"
+        or host.endswith(".ggpht.com")
+        or host == "googleusercontent.com"
+        or host.endswith(".googleusercontent.com")
+    )
+    proxy = str(os.environ.get("YOUTUBE_PROXY") or "").strip() if is_youtube_host else ""
+    if not proxy:
+        try:
+            proxy = getattr(get_driver().config, "discord_proxy", None)
+        except Exception:
+            return None
     if isinstance(proxy, str):
         proxy = proxy.strip()
         return proxy or None

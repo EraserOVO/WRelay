@@ -619,7 +619,7 @@ async def _render_post(
     """推文 dict → (text_parts, media_items) 或 None（无可发送内容）
 
     文字层级与 RSS 顺序一致：header → RT 行 → 主推文字 → 引用行；
-    媒体单独成条（主推媒体在前、引用媒体在后）。"""
+    媒体单独成条，只发送主推文媒体，不附带引用推文媒体。"""
     text_parts = []
     media_items = []
 
@@ -659,9 +659,9 @@ async def _render_post(
         )
         has_body = True
 
+    # 引用内容只显示文字，不下载或发送被引用推文的图片/视频。
+    # RT 他人的引用推文时同样只处理 RT 主文自身的媒体。
     all_media = list(post["media"])
-    if quote:
-        all_media.extend(quote.get("media") or [])
 
     all_media = [
         media for media in all_media

@@ -427,6 +427,7 @@ BOT_PLUGIN_MODULES = (
     "plugins.bilibili_auto_resolve",
     "plugins.x_rss",
     "plugins.youtube",
+    "plugins.steam",
 )
 from plugins.compiled_plugins import install as install_compiled_plugin_loader
 install_compiled_plugin_loader()

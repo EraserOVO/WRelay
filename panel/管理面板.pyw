@@ -1162,13 +1162,13 @@ def _watchdog_loop():
 
 
 # ---------------- 转发统计 / 日志级别（机器人侧写入，面板只读） ----------------
-def read_stats():
+def read_stats(bot_id=None):
     try:
         with open(STATS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
             from plugins.bot_profiles import CURRENT
-            owner = CURRENT.get()
+            owner = CURRENT.get() if bot_id is None else str(bot_id or "")
             return data.get("bot_stats", {}).get(owner, {}) if owner else data
     except Exception:
         pass
@@ -1189,13 +1189,14 @@ def current_log_level():
 BOT_API_BASE = "http://127.0.0.1:%d" % BOT_PORT
 
 
-def bot_api_get(path, timeout=10.0):
+def bot_api_get(path, timeout=10.0, bot_id=None):
     """GET bot HTTP 端点，返回 dict；bot 不可用时返回 None"""
     import urllib.request
     from plugins.bot_profiles import CURRENT
-    if CURRENT.get():
+    owner = CURRENT.get() if bot_id is None else str(bot_id or "")
+    if owner and "bot_id=" not in path:
         from urllib.parse import quote
-        path += ("&" if "?" in path else "?") + "bot_id=" + quote(CURRENT.get())
+        path += ("&" if "?" in path else "?") + "bot_id=" + quote(owner, safe="")
     try:
         req = urllib.request.Request(
             BOT_API_BASE + path,
@@ -1207,11 +1208,12 @@ def bot_api_get(path, timeout=10.0):
         return None
 
 
-def bot_api_post(path, timeout=30.0):
+def bot_api_post(path, timeout=30.0, bot_id=None):
     from plugins.bot_profiles import CURRENT
-    if CURRENT.get():
+    owner = CURRENT.get() if bot_id is None else str(bot_id or "")
+    if owner and "bot_id=" not in path:
         from urllib.parse import quote
-        path += ("&" if "?" in path else "?") + "bot_id=" + quote(CURRENT.get(), safe="")
+        path += ("&" if "?" in path else "?") + "bot_id=" + quote(owner, safe="")
     """POST bot HTTP 端点（无请求体），返回 dict；bot 不可用时返回 None"""
     import urllib.request
     try:
@@ -1227,24 +1229,24 @@ def bot_api_post(path, timeout=30.0):
         return None
 
 
-# 健康检查缓存：/api/status 会被多个页面（浏览器标签页/内嵌 webview）各自轮询，
-# 若每个请求都实时转发给 bot，/api/health 就会被数倍放大（曾观测到 0.3~1 秒一次）。
-# 这里做 3 秒 TTL 缓存：任意多个前端轮询源叠加，bot 的 /api/health 最多 3 秒请求一次。
-# 返回结构与实时请求完全一致，不影响前端 Bot 状态判断逻辑。
+# 健康检查缓存按账号隔离：待重试数量随当前工作区变化；多个页面并行轮询时，
+# 每个账号 3 秒内最多请求一次 bot 的 /api/health，避免多个 WebView 放大请求。
 _health_cache_lock = threading.Lock()
-_health_cache = {"ts": 0.0, "value": None}
+_health_cache = {}
 HEALTH_CACHE_TTL = 3.0
 
 
-def _bot_health_cached():
-    """返回 bot 健康状态；TTL 内复用缓存，防止多页面轮询打爆 bot 接口"""
+def _bot_health_cached(bot_id=None):
+    """按账号缓存健康状态，避免各账号共享待重试数量。"""
+    from plugins.bot_profiles import CURRENT
+    owner = CURRENT.get() if bot_id is None else str(bot_id or "")
     now = time.time()
     with _health_cache_lock:
-        if now - _health_cache["ts"] < HEALTH_CACHE_TTL:
-            return _health_cache["value"]
-        value = bot_api_get("/api/health", timeout=2.0)
-        _health_cache["ts"] = now
-        _health_cache["value"] = value
+        cached = _health_cache.get(owner)
+        if cached and now - cached["ts"] < HEALTH_CACHE_TTL:
+            return cached["value"]
+        value = bot_api_get("/api/health", timeout=2.0, bot_id=owner)
+        _health_cache[owner] = {"ts": now, "value": value}
         return value
 
 
@@ -1319,6 +1321,101 @@ def _version_key(value):
         return None
 
 
+def _latest_release_from_page(current_version, include_assets=False):
+    """REST API 被限流时，从 GitHub 最新稳定发行页读取版本和安装包链接。"""
+    from html.parser import HTMLParser
+    from urllib.parse import quote, unquote, urlparse
+    import urllib.request
+
+    repository = "EraserOVO/WRelay"
+    request = urllib.request.Request(
+        "https://github.com/%s/releases/latest" % repository,
+        headers={
+            "Accept": "text/html,application/xhtml+xml",
+            "User-Agent": "WRelay-Desktop/" + str(current_version),
+        },
+    )
+    with urllib.request.urlopen(request, timeout=12) as response:
+        latest_url = urlparse(response.geturl())
+    match = re.fullmatch(r"/EraserOVO/WRelay/releases/tag/([^/]+)", latest_url.path)
+    if latest_url.scheme != "https" or latest_url.hostname != "github.com" or not match:
+        raise ValueError("GitHub 未返回有效的最新稳定发行版地址")
+
+    tag = unquote(match.group(1))
+    release = {
+        "tag_name": tag,
+        "html_url": "https://github.com/%s/releases/tag/%s" % (repository, quote(tag, safe="")),
+        "assets": [],
+    }
+    if not include_assets:
+        return release
+
+    class ReleaseAssetParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.assets = []
+            self.seen = set()
+
+        def handle_starttag(self, tag_name, attrs):
+            if tag_name != "a":
+                return
+            href = dict(attrs).get("href", "")
+            asset_url = urlparse(href)
+            if asset_url.netloc and asset_url.netloc.lower() != "github.com":
+                return
+            path = unquote(asset_url.path)
+            prefix = "/%s/releases/download/%s/" % (repository, tag)
+            if not path.startswith(prefix):
+                return
+            name = path[len(prefix):]
+            if not name or "/" in name or not name.lower().endswith(".exe") or name in self.seen:
+                return
+            self.seen.add(name)
+            self.assets.append({
+                "name": name,
+                "browser_download_url": "https://github.com" + asset_url.path,
+                "size": 0,
+            })
+
+    assets_request = urllib.request.Request(
+        "https://github.com/%s/releases/expanded_assets/%s" % (repository, quote(tag, safe="")),
+        headers={
+            "Accept": "text/html,application/xhtml+xml",
+            "User-Agent": "WRelay-Desktop/" + str(current_version),
+        },
+    )
+    with urllib.request.urlopen(assets_request, timeout=12) as response:
+        asset_page = response.read().decode("utf-8", "replace")
+    parser = ReleaseAssetParser()
+    parser.feed(asset_page)
+    release["assets"] = parser.assets
+    return release
+
+
+def _fetch_latest_release(current_version, include_assets=False):
+    """优先使用 GitHub API；命中未授权请求限流时改读 Release 页面。"""
+    import urllib.error
+    import urllib.request
+
+    request = urllib.request.Request(
+        "https://api.github.com/repos/EraserOVO/WRelay/releases/latest",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "WRelay-Desktop/" + str(current_version),
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            release = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code not in (403, 429):
+            raise
+        return _latest_release_from_page(current_version, include_assets=include_assets)
+    if not isinstance(release, dict) or not str(release.get("tag_name") or "").strip():
+        raise ValueError("GitHub 返回的发布信息缺少版本号")
+    return release
+
+
 @app.get("/api/app/info")
 def api_app_info():
     return {
@@ -1330,23 +1427,12 @@ def api_app_info():
 
 @app.get("/api/app/update-check")
 def api_app_update_check():
-    """只读查询 GitHub 最新稳定发行版；不下载、不安装更新。"""
+    """只读查询 GitHub 最新稳定发行版；REST API 限流时读取发布页。"""
     import urllib.error
-    import urllib.request
 
     current_version = _application_version()
-    request = urllib.request.Request(
-        "https://api.github.com/repos/EraserOVO/WRelay/releases/latest",
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "WRelay-Desktop/" + current_version,
-        },
-    )
     try:
-        with urllib.request.urlopen(request, timeout=8) as response:
-            release = json.loads(response.read().decode("utf-8"))
-        if not isinstance(release, dict):
-            return {"ok": False, "msg": "GitHub 返回的发布信息格式无效，请稍后重试。"}
+        release = _fetch_latest_release(current_version)
         latest_version = str(release.get("tag_name") or "").strip()
         current_key = _version_key(current_version)
         latest_key = _version_key(latest_version)
@@ -1512,19 +1598,9 @@ def api_app_update_install():
     if _update_state_snapshot()["running"]:
         return {"ok": False, "msg": "更新已在进行中。"}
 
-    import urllib.request
-
     current_version = _application_version()
-    request = urllib.request.Request(
-        "https://api.github.com/repos/EraserOVO/WRelay/releases/latest",
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "WRelay-Desktop/" + current_version,
-        },
-    )
     try:
-        with urllib.request.urlopen(request, timeout=8) as response:
-            release = json.loads(response.read().decode("utf-8"))
+        release = _fetch_latest_release(current_version, include_assets=True)
     except Exception:
         return {"ok": False, "msg": "无法读取最新发行信息，请稍后重试。"}
 
@@ -1550,13 +1626,16 @@ def api_app_update_progress():
 
 
 @app.get("/api/status")
-def api_status():
+def api_status(bot_id: str = ""):
+    from plugins import bot_profiles
+    owner = bot_id or bot_profiles.CURRENT.get()
     st = bot_status()
     health = None
     if st["running"]:
         # bot 进程活着不代表网关连上；询问 bot 自身连接状态（带 3 秒缓存，防多页面轮询放大）
-        health = _bot_health_cached()
-    settings = load_settings()
+        health = _bot_health_cached(owner)
+    with bot_profiles.scope(owner):
+        settings = load_settings()
     scheduled_message = settings.get("scheduled_message", {})
     if isinstance(scheduled_message, dict):
         scheduled_message = dict(scheduled_message)
@@ -1581,7 +1660,7 @@ def api_status():
         "health": health,
         "autostart": get_autostart(),
         "log": log_tail(BOT_LOG),
-        "stats": read_stats(),
+        "stats": read_stats(owner),
         "level": current_log_level(),
         # 补发相关：前端轮询发现 backfill_seq 变化时立即刷新待补发数量
         "backfill_seq": _backfill_seq,
@@ -1593,13 +1672,13 @@ def api_status():
 
 
 @app.get("/api/message-trace")
-def api_message_trace(limit: int = 50):
+def api_message_trace(limit: int = 50, bot_id: str = ""):
     """代理 bot 的近期投递追踪接口；bot 不可用时返回可展示的空状态。"""
     try:
         limit = max(1, min(int(limit), 200))
     except (TypeError, ValueError):
         limit = 50
-    data = bot_api_get("/api/message-trace?limit=%d" % limit, timeout=2.0)
+    data = bot_api_get("/api/message-trace?limit=%d" % limit, timeout=2.0, bot_id=bot_id)
     if not isinstance(data, dict):
         return {"ok": False, "msg": "机器人未运行", "entries": []}
     return data
@@ -2315,6 +2394,7 @@ def api_bot_restart():
 # （/api/bot/restart）：新 Bot 进程启动时由 nonebot.init() 重新读取 .env.prod，
 # 适配器据此建连。本 API 绝不返回/打印 AppSecret 与 Discord Token 等敏感凭据。
 ENV_PROD = os.path.join(PROJECT_ROOT, ".env.prod")
+QQ_BOT_NAMES_FILE = data_path("qq_bot_names.json")
 _ENV_WRITE_LOCK = threading.RLock()
 
 
@@ -2419,10 +2499,38 @@ def _read_qq_bots():
     return _read_bots("QQ_BOTS")
 
 
-def _public_qq_bots(bots):
-    """把 QQ Bot 凭据转换为可安全返回给浏览器的 AppID 列表。"""
+def _read_qq_bot_names():
+    """读取 AppID 到界面显示名称的映射；该映射与适配器凭据分开保存。"""
+    with json_file_lock(QQ_BOT_NAMES_FILE):
+        try:
+            with open(QQ_BOT_NAMES_FILE, "r", encoding="utf-8") as stream:
+                names = json.load(stream)
+        except FileNotFoundError:
+            return {}
+    if not isinstance(names, dict) or any(
+        not isinstance(appid, str) or not isinstance(name, str)
+        for appid, name in names.items()
+    ):
+        raise ValueError("QQ Bot 名称配置格式无效")
+    return {appid: name.strip() for appid, name in names.items() if name.strip()}
+
+
+def _write_qq_bot_names(names):
+    def replace(data):
+        data.clear()
+        data.update(names)
+
+    update_json(QQ_BOT_NAMES_FILE, replace, default={}, indent=2)
+
+
+def _public_qq_bots(bots, names=None):
+    """把 QQ Bot 凭据转换为可安全返回给浏览器的 AppID 与名称。"""
+    names = _read_qq_bot_names() if names is None else names
     return [
-        {"appid": str(bot.get("id") or bot.get("token") or "").strip()}
+        {
+            "appid": str(bot.get("id") or bot.get("token") or "").strip(),
+            "name": names.get(str(bot.get("id") or bot.get("token") or "").strip(), ""),
+        }
         for bot in bots
         if isinstance(bot, dict) and str(bot.get("id") or bot.get("token") or "").strip() not in ("", "你的AppID")
     ]
@@ -3116,6 +3224,44 @@ async def api_translation_ai_env_save(request: Request):
     return await run_in_thread_to_completion(_save_ai_env_value, env_name, api_key)
 
 
+@app.get("/api/youtube/api-key")
+def api_youtube_api_key_status():
+    """Return only whether a YouTube Data API Key is configured."""
+    return {"ok": True, "configured": bool(_read_env_secret("YOUTUBE_DATA_API_KEY"))}
+
+
+def _save_youtube_api_key(api_key):
+    value = str(api_key or "").strip()
+    if not value:
+        return JSONResponse({"ok": False, "msg": "请输入 YouTube Data API Key"}, status_code=400)
+    if len(value) > 512:
+        return JSONResponse({"ok": False, "msg": "YouTube Data API Key 长度无效"}, status_code=400)
+    try:
+        _write_ai_env("YOUTUBE_DATA_API_KEY", value)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "msg": localize_user_error(exc)}, status_code=400)
+    except Exception:
+        _log("保存 YouTube Data API Key 失败")
+        return JSONResponse({"ok": False, "msg": "保存 YouTube Data API Key 失败"}, status_code=500)
+    # The bot is restarted from this process, so make the new value authoritative
+    # even when the desktop process inherited an older environment variable.
+    os.environ["YOUTUBE_DATA_API_KEY"] = value
+    _log("YouTube Data API Key 已保存")
+    return {"ok": True, "configured": True, "restart_required": True}
+
+
+@app.post("/api/youtube/api-key")
+async def api_youtube_api_key_save(request: Request):
+    """Save a YouTube Data API Key without returning it to the WebView."""
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
+    if not isinstance(data, dict) or not isinstance(data.get("api_key"), str):
+        return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
+    return await run_in_thread_to_completion(_save_youtube_api_key, data["api_key"])
+
+
 from panel.personal_qq_api import register_routes as register_personal_qq_routes
 register_personal_qq_routes(app, globals())
 from panel.profile_api import register_routes as register_profile_routes
@@ -3129,7 +3275,11 @@ def api_bot_qq_config():
     if parsed is None:
         return {"ok": False, "msg": "无法读取 .env.prod 的 QQ_BOTS 配置"}
     bots, _line_idx, _lines, _end = parsed
-    public_bots = _public_qq_bots(bots)
+    try:
+        public_bots = _public_qq_bots(bots)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        _log("读取 QQ Bot 名称失败: %s" % exc)
+        return {"ok": False, "msg": "无法读取 QQ Bot 名称配置"}
     return {
         "ok": True,
         "appid": public_bots[0]["appid"] if public_bots else "",
@@ -3151,6 +3301,21 @@ def _save_qq_bot_config(data):
         new_bots = _prepare_qq_bots(payload_bots, bots)
     except ValueError as exc:
         return JSONResponse({"ok": False, "msg": str(exc)}, status_code=400)
+    try:
+        old_names = _read_qq_bot_names()
+        new_names = {}
+        for item in payload_bots:
+            appid = str(item.get("appid") or "").strip()
+            name = item.get("name", old_names.get(appid, ""))
+            if name is None:
+                name = old_names.get(appid, "")
+            if not isinstance(name, str) or len(name) > 80:
+                raise ValueError("QQ Bot 名称最多 80 个字符")
+            name = name.strip()
+            if name:
+                new_names[appid] = name
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return JSONResponse({"ok": False, "msg": str(exc) or "读取 QQ Bot 名称失败"}, status_code=400)
     removed_ids = {
         str(bot.get("id") or bot.get("token") or "").strip()
         for bot in bots if isinstance(bot, dict)
@@ -3161,21 +3326,48 @@ def _save_qq_bot_config(data):
     still_bound = sorted(removed_ids & _bound_qq_bot_ids())
     if still_bound:
         return JSONResponse({"ok": False, "msg": "仍有 QQ 群绑定以下 Bot，请先改绑：" + "、".join(still_bound)}, status_code=400)
-    # 原子写回 .env.prod；绝不创建含 AppSecret 的持久化备份。
-    # 失败时清理 .tmp 并返回失败（不重启 Bot），磁盘上旧 .env.prod 保持不变。
-    try:
-        _write_qq_bots(new_bots, lines, line_idx, end_idx)
-    except Exception as exc:
-        _log("写入 .env.prod 失败: %s" % exc)
+    old_credentials = [
+        (str(bot.get("id") or bot.get("token") or "").strip(), str(bot.get("secret") or ""))
+        for bot in bots if isinstance(bot, dict)
+    ]
+    new_credentials = [
+        (str(bot.get("id") or bot.get("token") or "").strip(), str(bot.get("secret") or ""))
+        for bot in new_bots if isinstance(bot, dict)
+    ]
+    restart_required = old_credentials != new_credentials
+    names_changed = old_names != new_names
+    if names_changed:
         try:
-            if os.path.exists(ENV_PROD + ".tmp"):
-                os.remove(ENV_PROD + ".tmp")
-        except Exception:
-            pass
-        return JSONResponse({"ok": False, "msg": "保存 QQ Bot 配置失败"}, status_code=500)
+            _write_qq_bot_names(new_names)
+        except Exception as exc:
+            _log("保存 QQ Bot 名称失败: %s" % exc)
+            return JSONResponse({"ok": False, "msg": "保存 QQ Bot 名称失败"}, status_code=500)
+    # 仅凭据变化时才改写 .env.prod 并要求重启；界面别名单独保存。
+    if restart_required:
+        try:
+            _write_qq_bots(new_bots, lines, line_idx, end_idx)
+        except Exception as exc:
+            _log("写入 .env.prod 失败: %s" % exc)
+            if names_changed:
+                try:
+                    _write_qq_bot_names(old_names)
+                except Exception as rollback_exc:
+                    _log("回滚 QQ Bot 名称失败: %s" % rollback_exc)
+            try:
+                if os.path.exists(ENV_PROD + ".tmp"):
+                    os.remove(ENV_PROD + ".tmp")
+            except Exception:
+                pass
+            return JSONResponse({"ok": False, "msg": "保存 QQ Bot 配置失败"}, status_code=500)
     _log("QQ Bot 配置已更新（数量=%s）" % len(new_bots))
-    public_bots = _public_qq_bots(new_bots)
-    return {"ok": True, "appid": public_bots[0]["appid"] if public_bots else "", "bot_ids": [item["appid"] for item in public_bots]}
+    public_bots = _public_qq_bots(new_bots, new_names)
+    return {
+        "ok": True,
+        "appid": public_bots[0]["appid"] if public_bots else "",
+        "bot_ids": [item["appid"] for item in public_bots],
+        "bots": public_bots,
+        "restart_required": restart_required,
+    }
 
 
 @app.post("/api/bot/qq-config")
@@ -3330,11 +3522,11 @@ _backfill_seq = 0
 
 
 @app.get("/api/backfill/pending")
-def api_backfill_pending():
+def api_backfill_pending(bot_id: str = ""):
     running = bot_status()["running"]
     if not running:
         return {"ok": False, "running": False, "msg": "机器人未运行"}
-    data = bot_api_get("/api/backfill/pending")
+    data = bot_api_get("/api/backfill/pending", bot_id=bot_id)
     if data is None:
         return {"ok": False, "running": True, "msg": "bot 接口不可用"}
     data["running"] = True
@@ -3342,11 +3534,11 @@ def api_backfill_pending():
 
 
 @app.post("/api/backfill/run")
-def api_backfill_run():
+def api_backfill_run(bot_id: str = ""):
     global _backfill_seq
     if not bot_status()["running"]:
         return {"ok": False, "msg": "机器人未运行"}
-    data = bot_api_post("/api/backfill/run")
+    data = bot_api_post("/api/backfill/run", bot_id=bot_id)
     if data is None:
         return {"ok": False, "msg": "bot 接口不可用"}
     if data.get("ok"):
@@ -3355,11 +3547,11 @@ def api_backfill_run():
 
 
 @app.post("/api/backfill/clear")
-def api_backfill_clear():
+def api_backfill_clear(bot_id: str = ""):
     global _backfill_seq
     if not bot_status()["running"]:
         return {"ok": False, "msg": "机器人未运行"}
-    data = bot_api_post("/api/backfill/clear")
+    data = bot_api_post("/api/backfill/clear", bot_id=bot_id)
     if data is None:
         return {"ok": False, "msg": "bot 接口不可用"}
     if data.get("ok"):
@@ -3369,12 +3561,12 @@ def api_backfill_clear():
 
 # ---------------- X RSS 运行状态（代理到 bot 18082） ----------------
 @app.get("/api/xrss/status")
-def api_xrss_status():
+def api_xrss_status(bot_id: str = ""):
     """X → QQ 页状态卡片数据源：bot 未运行直接返回未运行，
     避免前端把「bot 停止」误判成 X RSS 的其他状态"""
     if not bot_status()["running"]:
         return {"ok": False, "bot_running": False}
-    data = bot_api_get("/api/x-rss/status")
+    data = bot_api_get("/api/x-rss/status", bot_id=bot_id)
     if data is None:
         return {"ok": False, "bot_running": True, "msg": "bot 接口不可用"}
     data["bot_running"] = True
@@ -3382,11 +3574,11 @@ def api_xrss_status():
 
 
 @app.get("/api/bilibili/status")
-def api_bilibili_status():
+def api_bilibili_status(bot_id: str = ""):
     """代理 bot 的 Bilibili RSS 运行状态。"""
     if not bot_status()["running"]:
         return {"ok": False, "bot_running": False}
-    data = bot_api_get("/api/bilibili/status")
+    data = bot_api_get("/api/bilibili/status", bot_id=bot_id)
     if data is None:
         return {"ok": False, "bot_running": True, "msg": "bot 接口不可用"}
     data["bot_running"] = True
@@ -3394,23 +3586,41 @@ def api_bilibili_status():
 
 
 @app.get("/api/youtube/status")
-def api_youtube_status():
+def api_youtube_status(bot_id: str = ""):
     """代理 bot 的 YouTube RSS 运行状态。"""
     if not bot_status()["running"]:
         return {"ok": False, "bot_running": False}
-    data = bot_api_get("/api/youtube/status")
+    data = bot_api_get("/api/youtube/status", bot_id=bot_id)
     if data is None:
         return {"ok": False, "bot_running": True, "msg": "bot 接口不可用"}
     data["bot_running"] = True
     return data
 
 
+@app.get("/api/steam/status")
+def api_steam_status(bot_id: str = ""):
+    if not bot_status()["running"]:
+        return {"ok": False, "bot_running": False}
+    data = bot_api_get("/api/steam/status", bot_id=bot_id)
+    if not isinstance(data, dict):
+        return {"ok": False, "bot_running": True, "last_error": "机器人状态接口不可用"}
+    data["bot_running"] = True
+    return data
+
+
+@app.post("/api/steam/clear-paused")
+def api_steam_clear_paused(bot_id: str = ""):
+    if not bot_status()["running"]:
+        return {"ok": False, "msg": "请先启动机器人"}
+    return bot_api_post("/api/steam/clear-paused", bot_id=bot_id) or {"ok": False, "msg": "机器人接口不可用"}
+
+
 @app.get("/api/channel-names")
-def api_channel_names():
+def api_channel_names(bot_id: str = ""):
     """代理 bot 的频道真实名称接口（bot 离线时返回空映射）"""
     if not bot_status()["running"]:
         return {"ok": False, "running": False, "names": {}}
-    data = bot_api_get("/api/channel-names")
+    data = bot_api_get("/api/channel-names", bot_id=bot_id)
     if data is None:
         return {"ok": False, "running": True, "names": {}}
     data["running"] = True
@@ -3418,11 +3628,11 @@ def api_channel_names():
 
 
 @app.get("/api/channels/audit")
-def api_channels_audit():
+def api_channels_audit(bot_id: str = ""):
     """代理 bot 的频道权限快照接口（读取上次扫描结果）"""
     if not bot_status()["running"]:
         return {"ok": False, "running": False, "audit": {}}
-    data = bot_api_get("/api/channels/audit")
+    data = bot_api_get("/api/channels/audit", bot_id=bot_id)
     if data is None:
         return {"ok": False, "running": True, "audit": {}}
     data["running"] = True
@@ -3430,21 +3640,24 @@ def api_channels_audit():
 
 
 @app.post("/api/channels/refresh")
-def api_channels_refresh():
+def api_channels_refresh(bot_id: str = ""):
     """代理 bot 的频道权限刷新接口（重新扫描并更新记录，耗时较长）"""
     if not bot_status()["running"]:
         return {"ok": False, "msg": "机器人未运行"}
-    data = bot_api_post("/api/channels/refresh", timeout=120)
+    data = bot_api_post("/api/channels/refresh", timeout=120, bot_id=bot_id)
     if data is None:
         return {"ok": False, "msg": "bot 接口不可用"}
     return data
 
 
-def _notify_maintenance(alert_id, message):
+def _notify_maintenance(alert_id, message, bot_ids=None):
     import urllib.request
     try:
+        payload = {"id": alert_id, "message": message}
+        if bot_ids is not None:
+            payload["bot_ids"] = list(bot_ids)
         request = urllib.request.Request(BOT_API_BASE + "/api/maintenance/alert",
-            data=json.dumps({"id": alert_id, "message": message}).encode("utf-8"),
+            data=json.dumps(payload).encode("utf-8"),
             headers={"X-WRelay-Token": PANEL_TOKEN, "Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(request, timeout=10) as response:
             return json.load(response)
@@ -3452,7 +3665,15 @@ def _notify_maintenance(alert_id, message):
         return None
 
 
-_maintenance = MaintenanceService(_backup_service, DATA_DIR, bot_api_get, _notify_maintenance, _log)
+def _maintenance_profile_ids():
+    from plugins.bot_profiles import ids
+    return ids(SETTINGS_FILE)
+
+
+_maintenance = MaintenanceService(
+    _backup_service, DATA_DIR, bot_api_get, _notify_maintenance, _log,
+    profile_ids=_maintenance_profile_ids,
+)
 
 
 @app.get("/api/maintenance/ping")

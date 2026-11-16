@@ -1,14 +1,13 @@
-const SVG_FUNNEL = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>';
-const SVG_WARNING = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2.8 20h18.4L12 3z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
-const SVG_TRANSLATE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8l6 6"/><path d="M4 14l6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="M14 18h7"/><path d="M17.5 14l3.5 7"/><path d="M14 21l3.5-7"/></svg>';
-const SVG_ORIGINAL_ON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
-const SVG_ORIGINAL_OFF = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
-const SVG_TRASH = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>';
-const SVG_GRIP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>';
+const SVG_FUNNEL = mcIcon("filter-2", 14);
+const SVG_FAILURE_NOTIFICATION = mcIcon("warning", 18);
+const SVG_ORIGINAL_ON = mcIcon("check", 13);
+const SVG_ORIGINAL_OFF = mcIcon("close", 13);
+const SVG_TRASH = mcIcon("delete-2", 14);
+const SVG_GRIP = mcIcon("menu", 14);
 // 统一笔图标：空心笔、笔尖朝左下角（转发组重命名 / 频道名称编辑共用）
-const SVG_PEN = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>';
-const SVG_PAUSE = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>';
-const SVG_PLAY = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
+const SVG_PEN = mcIcon("edit-2", 12);
+const SVG_PAUSE = mcIcon("pause", 13);
+const SVG_PLAY = mcIcon("play", 13);
 // 更新检查偏好：启动后是否自动检查一次（仅提示，不自动安装）
 const AUTO_UPDATE_CHECK_KEY = "wrelay_auto_update_check";
 function isAutoUpdateCheckEnabled() {
@@ -229,7 +228,7 @@ function localizeUserError(message, fallback) {
 }
 
 // ---------------- 主要界面切换 ----------------
-// 桌面端首次进入运行总览，并记忆页面选择。
+// 桌面端每次启动进入运行总览；普通网页面板恢复上次选择的页面。
 // 三个页面共用同一份 settings 对象（整体保存、整体拉取），切换只改可见性，
 // 不会丢失任何已保存/未保存的修改。
 const IS_DESKTOP_HOST = window.location.protocol === "file:" || new URLSearchParams(window.location.search).get("desktop") === "1";
@@ -238,7 +237,7 @@ const PAGE_STORAGE_KEY = IS_DESKTOP_HOST ? "wrelay_desktop_active_page" : "wrela
 let activePage = IS_DESKTOP_HOST ? "overview" : "discord";
 try {
   const savedPage = localStorage.getItem(PAGE_STORAGE_KEY);
-  if (["overview", "discord", "x", "bilibili", "youtube", "qq", "settings"].includes(savedPage)) activePage = savedPage;
+  if (!IS_DESKTOP_HOST && ["overview", "discord", "x", "bilibili", "youtube", "steam", "qq", "settings"].includes(savedPage)) activePage = savedPage;
 } catch (e) {}
 
 function setActivePage(page) {
@@ -248,10 +247,13 @@ function setActivePage(page) {
     x: ["X → QQ", "管理 X 来源、接收群与转发组"],
     bilibili: ["Bilibili → QQ", "管理 Bilibili 来源、接收群与转发组"],
     youtube: ["YouTube → QQ", "管理 YouTube 频道、接收群与转发组"],
+    steam: ["Steam → QQ", "管理 Steam 来源、接收群与转发组"],
     qq: ["QQ → QQ", "管理授权用户的手动转发目标"],
     settings: ["设置", "应用偏好、连接与维护"],
   };
   activePage = Object.hasOwn(pageInfo, page) ? page : "discord";
+  const chainDetailModal = document.getElementById("chainDetailModal");
+  if (chainDetailModal?.style.display === "flex") closeChainDetailModal();
   document.body.dataset.activePage = activePage;
   try { localStorage.setItem(PAGE_STORAGE_KEY, activePage); } catch (e) {}
   document.getElementById("activePageTitle").textContent = pageInfo[activePage][0];
@@ -261,21 +263,25 @@ function setActivePage(page) {
   document.getElementById("pageX").style.display = activePage === "x" ? "" : "none";
   document.getElementById("pageBilibili").style.display = activePage === "bilibili" ? "" : "none";
   document.getElementById("pageYoutube").style.display = activePage === "youtube" ? "" : "none";
+  document.getElementById("pageSteam").style.display = activePage === "steam" ? "" : "none";
   document.getElementById("pageQQ").style.display = activePage === "qq" ? "" : "none";
   document.getElementById("pageSettings").style.display = activePage === "settings" ? "" : "none";
   const runtimeCards = document.querySelector(".cardrow");
   if (runtimeCards) runtimeCards.style.display = activePage === "settings" ? "none" : "";
   document.getElementById("recentMessageCard").style.display = activePage === "overview" ? "" : "none";
   if (latestMessageTraceData) renderRecentMessage(latestMessageTraceData);
-  // 按页面切换补发与 RSS 状态卡；桌面适配层会将补发卡移到下方卡片区。
+  // 桌面版将补发与 RSS 详情卡收在状态栏入口内；普通网页仍在对应链路页显示。
+  const showInlineChainDetails = !IS_DESKTOP_HOST;
   const backfillCard = document.getElementById("backfillCard");
-  if (backfillCard) backfillCard.style.display = activePage === "discord" ? "" : "none";
+  if (backfillCard) backfillCard.style.display = showInlineChainDetails && activePage === "discord" ? "" : "none";
   const xrssCard = document.getElementById("xrssCard");
-  if (xrssCard) xrssCard.style.display = activePage === "x" ? "" : "none";
+  if (xrssCard) xrssCard.style.display = showInlineChainDetails && activePage === "x" ? "" : "none";
   const bilibiliCard = document.getElementById("bilibiliCard");
-  if (bilibiliCard) bilibiliCard.style.display = activePage === "bilibili" ? "" : "none";
+  if (bilibiliCard) bilibiliCard.style.display = showInlineChainDetails && activePage === "bilibili" ? "" : "none";
   const youtubeCard = document.getElementById("youtubeCard");
-  if (youtubeCard) youtubeCard.style.display = activePage === "youtube" ? "" : "none";
+  if (youtubeCard) youtubeCard.style.display = showInlineChainDetails && activePage === "youtube" ? "" : "none";
+  const steamCard = document.getElementById("steamStatusCard");
+  if (steamCard) steamCard.style.display = showInlineChainDetails && activePage === "steam" ? "" : "none";
   const scheduledCard = document.getElementById("scheduledMessageCard");
   if (scheduledCard) scheduledCard.style.display = activePage === "qq" ? "" : "none";
   document.querySelectorAll('#pageTabs [data-kind="pageTab"]').forEach(function (btn) {
@@ -285,7 +291,254 @@ function setActivePage(page) {
   });
   renderOverviewCounts();
   if (latestStatus) renderStatus(latestStatus);
+  renderChainStatusShortcut();
+  renderPageCredentialShortcut();
+  renderFailureNotificationShortcut();
+  if (activePage === "steam" && window.renderSteamPage) window.renderSteamPage();
 }
+
+function renderPageCredentialShortcut() {
+  const discord = document.getElementById("discordConfigShortcut");
+  const youtube = document.getElementById("youtubeApiKeyShortcut");
+  if (!discord || !youtube) return;
+  const showDiscord = activePage === "discord";
+  const showYoutube = activePage === "youtube";
+  discord.hidden = !showDiscord;
+  youtube.hidden = !showYoutube;
+}
+
+function renderChainStatusShortcut() {
+  const button = document.getElementById("chainStatusShortcut");
+  if (!button) return;
+
+  const pages = {
+    discord: {kind: "backfill", target: "backfillCard"},
+    x: {kind: "rss", name: "X", badge: "xrssBadge", summary: "xrssSummary", target: "xrssCard"},
+    bilibili: {kind: "rss", name: "Bilibili", badge: "bilibiliBadge", summary: "bilibiliSummary", target: "bilibiliCard"},
+    youtube: {kind: "rss", name: "YouTube", badge: "youtubeBadge", summary: "youtubeSummary", target: "youtubeCard"},
+    steam: {kind: "steam", name: "Steam", icon: "rss", status: "steamStatus", target: "steamStatusCard"},
+  };
+  const page = pages[activePage];
+  if (!page) {
+    button.hidden = true;
+    return;
+  }
+
+  button.hidden = false;
+  button.dataset.target = page.target;
+  button.setAttribute("aria-controls", page.target);
+  if (page.kind === "backfill") {
+    button.dataset.state = backfillTotal > 0 ? "pending" : "neutral";
+    button.innerHTML = mcIcon("history-anticlockwise", 18);
+    button.title = "Discord 离线补发 · 当前账号待补发 " + backfillTotal + " 条 · 点击查看设置";
+    button.setAttribute("aria-label", "打开 Discord 离线补发详情");
+  } else if (page.kind === "steam") {
+    const status = document.getElementById(page.status);
+    const badge = document.getElementById("steamBadge");
+    const statusText = [badge && badge.textContent.trim(), status && status.textContent.trim()].filter(Boolean).join("；") || "等待检查";
+    button.dataset.state = ["on", "off", "warn", "pending", "neutral"].find(function (state) {
+      return badge && badge.classList.contains(state);
+    }) || status?.dataset.state || "neutral";
+    button.innerHTML = mcIcon(page.icon, 18);
+    button.title = page.name + "：" + statusText + " · 点击查看状态和设置";
+    button.setAttribute("aria-label", "打开 Steam 运行状态详情");
+  } else {
+    const badge = document.getElementById(page.badge);
+    const summary = document.getElementById(page.summary);
+    const badgeText = badge ? badge.textContent.trim() : "检测中";
+    let state = "neutral";
+    if (badge && badge.classList.contains("on")) {
+      state = "on";
+    } else if (badge && badge.classList.contains("off")) {
+      state = "off";
+    } else if (badge && badge.classList.contains("warn")) {
+      state = "warn";
+    }
+    button.dataset.state = state;
+    button.innerHTML = mcIcon("rss", 18);
+    const detail = [page.name + " RSS：" + badgeText, badge && (badge.title || badge.dataset.wrelayTitle), summary && summary.textContent.trim()]
+      .filter(Boolean).join("；");
+    button.title = detail + " · 点击查看状态和设置";
+    button.setAttribute("aria-label", "打开" + page.name + " RSS 状态详情");
+  }
+}
+
+let chainDetailPlaceholder = null;
+let chainDetailCard = null;
+let chainDetailDisplay = "";
+
+function openChainDetailModal(cardId) {
+  const card = document.getElementById(cardId);
+  const overlay = document.getElementById("chainDetailModal");
+  const body = document.getElementById("chainDetailBody");
+  const title = document.getElementById("chainDetailTitle");
+  if (!card || !overlay || !body || !title) return;
+
+  const heading = card.querySelector(":scope > h2");
+  title.textContent = heading ? heading.textContent.trim() : "链路详情";
+  chainDetailPlaceholder = document.createComment("Chain detail card position");
+  card.before(chainDetailPlaceholder);
+  chainDetailCard = card;
+  chainDetailDisplay = card.style.display;
+  card.style.display = "";
+  body.replaceChildren(card);
+  overlay.style.display = "flex";
+  overlay.querySelector(".modal-x")?.focus();
+}
+
+document.getElementById("chainDetailModal")?.addEventListener("click", function (event) {
+  if (event.target === this) closeChainDetailModal();
+});
+
+function closeChainDetailModal() {
+  const overlay = document.getElementById("chainDetailModal");
+  const body = document.getElementById("chainDetailBody");
+  if (!overlay) return;
+  overlay.style.display = "none";
+  if (chainDetailCard && chainDetailPlaceholder?.parentNode) {
+    chainDetailPlaceholder.replaceWith(chainDetailCard);
+    chainDetailCard.style.display = chainDetailDisplay;
+  } else if (chainDetailCard && body) {
+    body.append(chainDetailCard);
+  }
+  chainDetailCard = null;
+  chainDetailPlaceholder = null;
+}
+
+const chainStatusShortcut = document.getElementById("chainStatusShortcut");
+if (chainStatusShortcut) {
+  chainStatusShortcut.addEventListener("click", function () {
+    const target = chainStatusShortcut.dataset.target;
+    if (target) openChainDetailModal(target);
+  });
+}
+
+function openYoutubeApiKeyModal() {
+  const modal = document.getElementById("youtubeApiKeyModal");
+  const input = document.getElementById("youtubeApiKeyInput");
+  if (!modal) return;
+  if (input) {
+    input.value = "";
+    input.type = "password";
+  }
+  setYoutubeApiKeyVisible(false);
+  modal.style.display = "flex";
+  refreshYoutubeApiKeyState();
+  modal.querySelector(".modal-x")?.focus();
+}
+
+function closeYoutubeApiKeyModal() {
+  const modal = document.getElementById("youtubeApiKeyModal");
+  const input = document.getElementById("youtubeApiKeyInput");
+  if (modal) modal.style.display = "none";
+  if (input) input.value = "";
+  setYoutubeApiKeyVisible(false);
+}
+
+async function refreshYoutubeApiKeyState() {
+  const status = document.getElementById("youtubeApiKeyStatus");
+  if (!status) return;
+  status.textContent = "检查配置中…";
+  try {
+    const result = await jget("/api/youtube/api-key");
+    status.textContent = result.ok
+      ? (result.configured ? "已配置；密钥不会显示" : "尚未配置")
+      : "无法读取配置状态";
+  } catch (_error) {
+    status.textContent = "无法读取配置状态";
+  }
+}
+
+function setYoutubeApiKeyVisible(visible) {
+  const input = document.getElementById("youtubeApiKeyInput");
+  const toggle = input && input.closest(".secret-input-wrap")?.querySelector(".secret-input-toggle");
+  if (!input || !toggle) return;
+  input.type = visible ? "text" : "password";
+  toggle.setAttribute("aria-pressed", String(visible));
+  toggle.setAttribute("aria-label", visible ? "隐藏 API Key" : "显示 API Key");
+  toggle.title = visible ? "隐藏 API Key" : "显示 API Key";
+  toggle.innerHTML = mcIcon(visible ? "eye-close" : "eye", 18);
+}
+
+function secretToggleLabel(input, visible) {
+  const name = input.id === "youtubeApiKeyInput" ? "API Key" : "密钥";
+  return (visible ? "隐藏" : "显示") + " " + name;
+}
+
+function enhanceSecretInput(input) {
+  if (!input || input.type !== "password" || input.closest(".secret-input-wrap") || !input.parentNode) return;
+  const parent = input.parentNode;
+  const wrap = document.createElement("span");
+  wrap.className = "secret-input-wrap";
+  parent.insertBefore(wrap, input);
+  wrap.appendChild(input);
+
+  const existingToggle = input.id === "youtubeApiKeyInput"
+    ? document.getElementById("youtubeApiKeyToggle") : null;
+  const toggle = existingToggle && existingToggle.parentNode === parent
+    ? existingToggle : document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "secret-input-toggle";
+  toggle.setAttribute("aria-label", secretToggleLabel(input, false));
+  toggle.title = secretToggleLabel(input, false);
+  toggle.setAttribute("aria-pressed", "false");
+  toggle.innerHTML = mcIcon("eye", 18);
+  wrap.appendChild(toggle);
+}
+
+function enhanceSecretInputs(root) {
+  if (root.nodeType === Node.ELEMENT_NODE && root.matches('input[type="password"]')) enhanceSecretInput(root);
+  if (root.querySelectorAll) root.querySelectorAll('input[type="password"]').forEach(enhanceSecretInput);
+}
+
+enhanceSecretInputs(document);
+document.addEventListener("click", function (event) {
+  const toggle = event.target.closest(".secret-input-toggle");
+  if (!toggle) return;
+  const input = toggle.closest(".secret-input-wrap")?.querySelector("input");
+  if (!input) return;
+  const visible = input.type === "password";
+  input.type = visible ? "text" : "password";
+  toggle.setAttribute("aria-pressed", String(visible));
+  toggle.setAttribute("aria-label", secretToggleLabel(input, visible));
+  toggle.title = secretToggleLabel(input, visible);
+  toggle.innerHTML = mcIcon(visible ? "eye-close" : "eye", 18);
+});
+new MutationObserver(records => records.forEach(record => record.addedNodes.forEach(node => {
+  if (node.nodeType === Node.ELEMENT_NODE) enhanceSecretInputs(node);
+}))).observe(document.body, {childList: true, subtree: true});
+
+document.getElementById("youtubeApiKeySave")?.addEventListener("click", async function () {
+  const input = document.getElementById("youtubeApiKeyInput");
+  const status = document.getElementById("youtubeApiKeyStatus");
+  const button = this;
+  const apiKey = input ? input.value.trim() : "";
+  if (!apiKey) {
+    if (status) status.textContent = "请输入新 Key；留空会保留当前密钥";
+    input?.focus();
+    return;
+  }
+  button.disabled = true;
+  if (status) status.textContent = "正在保存…";
+  try {
+    const saved = await jpost("/api/youtube/api-key", {api_key: apiKey});
+    if (!saved.ok) {
+      if (status) status.textContent = saved.msg || "保存失败，请重试";
+      return;
+    }
+    if (input) input.value = "";
+    setYoutubeApiKeyVisible(false);
+    if (status) status.textContent = "已保存，正在重启机器人…";
+    let restarted;
+    try { restarted = await jpost("/api/bot/restart"); } catch (_error) { restarted = {ok: false}; }
+    if (!restarted?.ok && status) status.textContent = "Key 已保存；机器人重启失败，请从总览手动重启。";
+    else if (status) status.textContent = "Key 已保存，机器人正在重启。";
+  } catch (_error) {
+    if (status) status.textContent = "保存失败，请检查面板连接后重试。";
+  } finally {
+    button.disabled = false;
+  }
+});
 
 function enabledTotal(field) {
   const items = settings && Array.isArray(settings[field]) ? settings[field] : [];
@@ -295,15 +548,40 @@ function enabledTotal(field) {
   };
 }
 
+function routedEnabledTotal(itemsField, groupsField, memberField, itemKey) {
+  const items = settings && Array.isArray(settings[itemsField]) ? settings[itemsField] : [];
+  const activeTargets = new Set(((settings && Array.isArray(settings.qq_group_openids)) ? settings.qq_group_openids : [])
+    .filter(groupInActiveQQBotWorkspace)
+    .filter(function (group) { return group.enabled !== false; })
+    .map(function (group) { return String(group.openid); }));
+  const routedKeys = new Set();
+  const groups = settings && Array.isArray(settings[groupsField]) ? settings[groupsField] : [];
+  groups.forEach(function (group) {
+    if (!group || group.enabled === false || !Array.isArray(group.groups)
+        || !group.groups.some(function (id) { return activeTargets.has(String(id)); })) return;
+    (Array.isArray(group[memberField]) ? group[memberField] : []).forEach(function (id) {
+      routedKeys.add(String(id));
+    });
+  });
+  const routedItems = items.filter(function (item) {
+    return item && routedKeys.has(String(itemKey(item) || ""));
+  });
+  return {
+    enabled: routedItems.filter(function (item) { return item.enabled !== false; }).length,
+    total: routedItems.length,
+  };
+}
+
 function renderOverviewCounts() {
   const activeGroups = ((settings && settings.qq_group_openids) || []).filter(groupInActiveQQBotWorkspace);
   const groups = {enabled: activeGroups.filter(function (item) { return item.enabled !== false; }).length, total: activeGroups.length};
   const users = enabledTotal("qq_user_openids");
   const routes = [
-    ["overviewDiscordMeta", enabledTotal("discord_channels"), "频道"],
-    ["overviewXMeta", enabledTotal("x_rss_sources"), "来源"],
-    ["overviewBilibiliMeta", enabledTotal("bilibili_sources"), "来源"],
-    ["overviewYoutubeMeta", enabledTotal("youtube_sources"), "来源"],
+    ["overviewDiscordMeta", routedEnabledTotal("discord_channels", "forwarding_groups", "channels", function (item) { return item.id; }), "频道"],
+    ["overviewXMeta", routedEnabledTotal("x_rss_sources", "x_forwarding_groups", "sources", function (item) { return xSourceKey(item.source); }), "来源"],
+    ["overviewBilibiliMeta", routedEnabledTotal("bilibili_sources", "bilibili_forwarding_groups", "sources", function (item) { return item.id || bilibiliSourceId(item.kind, item.value); }), "来源"],
+    ["overviewYoutubeMeta", routedEnabledTotal("youtube_sources", "youtube_forwarding_groups", "sources", function (item) { return item.id || youtubeSourceId(item.value); }), "来源"],
+    ["overviewSteamMeta", routedEnabledTotal("steam_sources", "steam_forwarding_groups", "sources", function (item) { return item.id; }), "来源"],
   ];
   routes.forEach(function (route) {
     const el = document.getElementById(route[0]);
@@ -520,8 +798,174 @@ function openBackupRestore() {
 }
 var maintenanceEnabled = true;
 const MAINTENANCE_DISMISS_MS = 10 * 60 * 1000;
+const MAINTENANCE_BANNER_POSITION_KEY = "wrelay.maintenance-banner-position.v1";
 let maintenanceDismissedUntil = 0;
+let maintenanceBannerPositionRestored = false;
+let maintenancePreview = false;
+let maintenancePreviewKeys = "";
+const MAINTENANCE_PREVIEW_CODE = "wrelayreminder";
+let statusFailurePreview = false;
+let statusFailurePreviewKeys = "";
+let statusCardLastHealthy = false;
+let statusCardLastFailed = false;
+const STATUS_FAILURE_PREVIEW_CODE = "wrelayfail";
+let clearTestPreviewKeys = "";
+const CLEAR_TEST_PREVIEWS_CODE = "wrelayclear";
+
+function clearTestPreviewStates() {
+  maintenancePreviewKeys = "";
+  statusFailurePreviewKeys = "";
+  clearTestPreviewKeys = "";
+  statusFailurePreview = false;
+  if (maintenancePreview) {
+    maintenancePreview = false;
+    const banner = document.getElementById("maintenanceBanner");
+    if (banner) banner.style.display = "none";
+    refreshMaintenance();
+  }
+  setStatusCardAmbient(document.getElementById("badge"), statusCardLastHealthy, statusCardLastFailed);
+}
+
+function setMaintenanceBannerPosition(left, top, persist) {
+  const banner = document.getElementById("maintenanceBanner");
+  if (!banner || getComputedStyle(banner).display === "none") return;
+  let rect = banner.getBoundingClientRect();
+  const margin = 8;
+  const rootRect = document.documentElement.getBoundingClientRect();
+  const viewportRight = Math.min(window.innerWidth, rootRect.right);
+  const sidebar = document.querySelector(".desktop-sidebar");
+  const sidebarRight = sidebar && getComputedStyle(sidebar).display !== "none"
+    ? sidebar.getBoundingClientRect().right : 0;
+  const minLeft = Math.max(margin, sidebarRight + margin);
+  const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+  const maxWidth = Math.max(0, viewportRight - minLeft - margin);
+  if (rect.width > maxWidth) {
+    banner.style.width = maxWidth + "px";
+    rect = banner.getBoundingClientRect();
+  }
+  const maxLeft = Math.max(minLeft, viewportRight - rect.width - margin);
+  const maxTop = Math.max(margin, viewportHeight - rect.height - margin);
+  const position = {
+    left: Math.min(maxLeft, Math.max(minLeft, Number(left) || minLeft)),
+    top: Math.min(maxTop, Math.max(margin, Number(top) || margin)),
+  };
+  banner.style.left = position.left + "px";
+  banner.style.top = position.top + "px";
+  banner.style.right = "auto";
+  banner.style.bottom = "auto";
+  if (persist) {
+    try { localStorage.setItem(MAINTENANCE_BANNER_POSITION_KEY, JSON.stringify(position)); } catch (error) { /* Storage may be disabled. */ }
+  }
+}
+
+function restoreMaintenanceBannerPosition() {
+  if (maintenanceBannerPositionRestored) return;
+  const banner = document.getElementById("maintenanceBanner");
+  if (!banner || getComputedStyle(banner).display === "none") return;
+  maintenanceBannerPositionRestored = true;
+  let position = null;
+  try {
+    const saved = JSON.parse(localStorage.getItem(MAINTENANCE_BANNER_POSITION_KEY) || "null");
+    if (saved && Number.isFinite(Number(saved.left)) && Number.isFinite(Number(saved.top))) {
+      position = {left: Number(saved.left), top: Number(saved.top)};
+    }
+  } catch (error) { /* Ignore an unavailable or invalid saved position. */ }
+  requestAnimationFrame(function () {
+    const rect = banner.getBoundingClientRect();
+    const target = position || {left: rect.left, top: rect.top};
+    setMaintenanceBannerPosition(target.left, target.top, false);
+  });
+}
+
+function initMaintenanceBannerDrag() {
+  const banner = document.getElementById("maintenanceBanner");
+  const handle = banner && banner.querySelector("h2");
+  if (!banner || !handle) return;
+  let drag = null;
+  function moveDrag(event) {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    setMaintenanceBannerPosition(
+      drag.startLeft + event.clientX - drag.startX,
+      drag.startTop + event.clientY - drag.startY,
+      false
+    );
+  }
+  function finishDrag(event) {
+    if (!drag || (event && Number.isFinite(event.pointerId) && event.pointerId !== drag.pointerId)) return;
+    drag = null;
+    banner.classList.remove("is-dragging");
+    const rect = banner.getBoundingClientRect();
+    setMaintenanceBannerPosition(rect.left, rect.top, true);
+  }
+  handle.addEventListener("pointerdown", function (event) {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    let rect = banner.getBoundingClientRect();
+    setMaintenanceBannerPosition(rect.left, rect.top, false);
+    rect = banner.getBoundingClientRect();
+    banner.style.left = rect.left + "px";
+    banner.style.top = rect.top + "px";
+    banner.style.right = "auto";
+    banner.style.bottom = "auto";
+    drag = {pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, startLeft: rect.left, startTop: rect.top};
+    banner.classList.add("is-dragging");
+    try { handle.setPointerCapture(event.pointerId); } catch (error) { /* Pointer capture is not available in every host. */ }
+    event.preventDefault();
+  });
+  window.addEventListener("pointermove", moveDrag, true);
+  window.addEventListener("pointerup", finishDrag, true);
+  window.addEventListener("pointercancel", finishDrag, true);
+  window.addEventListener("blur", function () { finishDrag(null); });
+  window.addEventListener("resize", function () {
+    if (drag || !banner.style.left || getComputedStyle(banner).display === "none") return;
+    const rect = banner.getBoundingClientRect();
+    setMaintenanceBannerPosition(rect.left, rect.top, true);
+  });
+  if (window.ResizeObserver) {
+    new ResizeObserver(function () {
+      if (drag || !banner.style.left || getComputedStyle(banner).display === "none") return;
+      const rect = banner.getBoundingClientRect();
+      setMaintenanceBannerPosition(rect.left, rect.top, false);
+    }).observe(banner);
+  }
+}
+
+initMaintenanceBannerDrag();
+document.addEventListener("keydown", function (event) {
+  const target = event.target;
+  if (event.ctrlKey || event.altKey || event.metaKey || event.isComposing ||
+      (target && (target.isContentEditable || target.closest("input, textarea, select, [contenteditable='true']")))) {
+    maintenancePreviewKeys = "";
+    statusFailurePreviewKeys = "";
+    clearTestPreviewKeys = "";
+    return;
+  }
+  if (event.key.length !== 1 || event.repeat) return;
+  const key = event.key.toLowerCase();
+  maintenancePreviewKeys = (maintenancePreviewKeys + key).slice(-MAINTENANCE_PREVIEW_CODE.length);
+  statusFailurePreviewKeys = (statusFailurePreviewKeys + key).slice(-STATUS_FAILURE_PREVIEW_CODE.length);
+  clearTestPreviewKeys = (clearTestPreviewKeys + key).slice(-CLEAR_TEST_PREVIEWS_CODE.length);
+  if (maintenancePreviewKeys === MAINTENANCE_PREVIEW_CODE) {
+    maintenancePreviewKeys = "";
+    maintenancePreview = true;
+    const banner = document.getElementById("maintenanceBanner");
+    document.getElementById("maintenanceBannerText").textContent = "测试提醒：拖动标题栏，检查位置和窗口边缘。";
+    banner.style.display = "";
+    restoreMaintenanceBannerPosition();
+  }
+  if (statusFailurePreviewKeys === STATUS_FAILURE_PREVIEW_CODE) {
+    statusFailurePreviewKeys = "";
+    statusFailurePreview = !statusFailurePreview;
+    setStatusCardAmbient(document.getElementById("badge"), statusCardLastHealthy, statusCardLastFailed);
+  }
+  if (clearTestPreviewKeys === CLEAR_TEST_PREVIEWS_CODE) clearTestPreviewStates();
+});
 document.getElementById("btnMaintenanceDismiss").addEventListener("click", function () {
+  if (maintenancePreview) {
+    maintenancePreview = false;
+    document.getElementById("maintenanceBanner").style.display = "none";
+    refreshMaintenance();
+    return;
+  }
   maintenanceDismissedUntil = Date.now() + MAINTENANCE_DISMISS_MS;
   document.getElementById("maintenanceBanner").style.display = "none";
 });
@@ -546,8 +990,11 @@ async function refreshMaintenance() {
     detail.classList.toggle("has-alert", alerts.length > 0);
     const banner = document.getElementById("maintenanceBanner");
     if (!alerts.length) maintenanceDismissedUntil = 0;
-    banner.style.display = alerts.length && Date.now() >= maintenanceDismissedUntil ? "" : "none";
-    document.getElementById("maintenanceBannerText").textContent = alerts.length ? alerts[0].message : "";
+    if (!maintenancePreview) {
+      banner.style.display = alerts.length && Date.now() >= maintenanceDismissedUntil ? "" : "none";
+      document.getElementById("maintenanceBannerText").textContent = alerts.length ? alerts[0].message : "";
+    }
+    restoreMaintenanceBannerPosition();
   } catch (error) { /* Retry on the next refresh. */ }
 }
 async function refreshAutomaticBackups() {
@@ -651,9 +1098,15 @@ document.getElementById("log").addEventListener("scroll", function () {
   logFollow = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
 });
 
-function setStatusCardAmbient(badge, healthy) {
+function setStatusCardAmbient(badge, healthy, failed) {
   const card = badge && badge.closest(".card");
-  if (card) card.classList.toggle("status-ambient-active", !!healthy);
+  statusCardLastHealthy = !!healthy;
+  statusCardLastFailed = !!failed;
+  if (card) {
+    const showFailure = statusCardLastFailed || statusFailurePreview;
+    card.classList.toggle("status-failure-active", showFailure);
+    card.classList.toggle("status-ambient-active", statusCardLastHealthy && !showFailure);
+  }
 }
 
 function renderStatus(st) {
@@ -668,6 +1121,7 @@ function renderStatus(st) {
   const selectedBotConnected = selectedBot
     ? (qqBotStatusKnown ? connectedQQBotIds.includes(selectedBot) : !!(h && h.qq))
     : !!(h && h.qq);
+  let statusDetail = "已停止";
   if (st.running) {
     document.getElementById("btnStart").disabled = true;
     document.getElementById("btnStop").disabled = false;
@@ -675,47 +1129,52 @@ function renderStatus(st) {
     if (activePage === "x" || activePage === "qq") {
       // X → QQ / QQ → QQ 页面只关心 QQ 连接状态，不显示无关的 Discord 状态。
       if (h && selectedBotConnected) {
-        b.textContent = "运行中";
+        statusDetail = "运行中";
         b.className = "badge on";
       } else if (h) {
-        b.textContent = selectedBot ? "运行中（当前 QQ Bot 未连接）" : "运行中（QQ 未连接）";
+        statusDetail = selectedBot ? "运行中（当前 QQ Bot 未连接）" : "运行中（QQ 未连接）";
         b.className = "badge warn";
       } else {
-        b.textContent = "运行中（检测中…）";
+        statusDetail = "运行中（检测中…）";
         b.className = "badge warn";
       }
     } else if (h && h.discord && selectedBotConnected) {
-      b.textContent = "运行中";
+      statusDetail = "运行中";
       b.className = "badge on";
     } else if (h) {
-      b.textContent = h.discord
+      statusDetail = h.discord
         ? (selectedBot ? "运行中（当前 QQ Bot 未连接）" : "运行中（QQ 未连接）")
         : selectedBotConnected ? "运行中（Discord 未连接）" : "运行中（未连接）";
       b.className = "badge warn";
     } else {
-      b.textContent = "运行中（检测中…）";
+      statusDetail = "运行中（检测中…）";
       b.className = "badge warn";
     }
   } else {
-    b.textContent = "已停止";
     b.className = "badge neutral";
     document.getElementById("btnStart").disabled = false;
     document.getElementById("btnStop").disabled = true;
     document.getElementById("btnRestart").disabled = true;
   }
+  b.textContent = st.running ? "运行中" : "已停止";
+  b.title = statusDetail;
   const pid = document.getElementById("pidinfo");
   pid.textContent = st.pid ? String(st.pid) : "—";
   pid.title = st.pid ? "PID: " + st.pid : "机器人进程尚未启动";
-  b.title = b.textContent;
   // The compact RSS/QQ pages separate process state from the Bot selector's
   // connection state. Keep all backend-derived decisions and controls unchanged.
   if (document.body.classList.contains("desktop-host") && ["discord", "x", "bilibili", "youtube", "qq"].includes(activePage)) {
-    b.textContent = st.running ? "运行中" : "已停止";
     b.className = st.running ? "badge on" : "badge neutral";
-    b.title = "进程" + b.textContent + "；QQ 连接状态见当前 Bot";
   }
   const needsDiscord = activePage === "discord" || activePage === "overview";
-  setStatusCardAmbient(b, st.running && selectedBotConnected && (!needsDiscord || !!(h && h.discord)));
+  const statusCardHealthy = st.running && selectedBotConnected && (!needsDiscord || !!(h && h.discord));
+  const qqConnectionPending = !!(h && h.qq_connecting);
+  const discordConnectionPending = !!(h && h.discord_connecting);
+  const statusCardFailed = st.running && !!h && (
+    (!selectedBotConnected && !qqConnectionPending)
+    || (needsDiscord && !h.discord && !discordConnectionPending)
+  );
+  setStatusCardAmbient(b, statusCardHealthy, statusCardFailed);
   const stats = st.stats || {};
   const retry = (st.health && st.health.retry) || {};
   const statValues = {
@@ -731,7 +1190,7 @@ function renderStatus(st) {
   });
   const failedStat = document.getElementById("statsFailed");
   if (failedStat && Number(retry.pending_entries) > 0) {
-    failedStat.title += " · 所有账号待重试 " + Number(retry.pending_entries) + " 条";
+    failedStat.title += " · 当前账号待重试 " + Number(retry.pending_entries) + " 条";
   }
   const lvlEl = document.getElementById("logLevel");
   if (lvlEl && st.level) lvlEl.value = st.level;
@@ -789,17 +1248,16 @@ function setOverviewRouteStatus(target, label, detail, state) {
   target.title = detail ? (String(label || "") + " · " + detail) : String(label || "");
 }
 
+let latestTranslationRuntime = {};
+
 function renderTranslationRuntimeStatus(st) {
   const health = (st && st.health) || {};
   const runtime = currentQQBotId() ? ((health.translation_by_bot || {})[currentQQBotId()] || {}) : (health.translation || {});
-  let text = st && st.running ? "当前工作模型：尚未成功翻译" : "当前工作模型：机器人未运行";
-  if (runtime.provider === "ai" && runtime.model) {
-    text = "当前工作模型：" + runtime.model;
-  } else if (runtime.provider === "tencent_tmt") {
-    text = "当前工作模型：腾讯 TMT";
-  }
-  const el = document.getElementById("translationRuntimeStatus");
-  if (el) el.textContent = text;
+  const nextRuntime = runtime && typeof runtime === "object" ? Object.assign({}, runtime) : {};
+  const previousKey = [latestTranslationRuntime.provider, latestTranslationRuntime.profile, latestTranslationRuntime.model, latestTranslationRuntime.at].join("|");
+  const nextKey = [nextRuntime.provider, nextRuntime.profile, nextRuntime.model, nextRuntime.at].join("|");
+  latestTranslationRuntime = nextRuntime;
+  if (previousKey !== nextKey) renderAiModelPriorityList();
 }
 
 // Settings is the sole startup preference entry; keep the existing save endpoint.
@@ -807,7 +1265,7 @@ function renderAutostart(btn, on) {
   if (!btn) return;
   btn.dataset.on = on ? "1" : "0";
   btn.innerHTML = '<span class="settings-switch-track" aria-hidden="true"></span>';
-  btn.dataset.tooltip = "机器人随 Windows 启动：" + (on ? "已开启" : "已关闭");
+  btn.dataset.tooltip = "开机自启：" + (on ? "已开启" : "已关闭");
   btn.removeAttribute("title");
   btn.setAttribute("aria-label", btn.dataset.tooltip);
   btn.setAttribute("aria-pressed", on ? "true" : "false");
@@ -825,17 +1283,37 @@ function renderBackfillToggle(on) {
 
 function renderFailureNotificationToggle(on) {
   const btn = document.getElementById("btnFailureNotificationToggle");
+  if (btn) {
+    btn.dataset.on = on ? "1" : "0";
+    btn.innerHTML = '<span class="settings-switch-track" aria-hidden="true"></span>';
+    btn.setAttribute("role", "switch");
+    btn.setAttribute("aria-checked", String(!!on));
+    btn.setAttribute("aria-label", "失败通知：" + (on ? "已开启" : "已关闭"));
+  }
+  renderFailureNotificationShortcut();
+}
+
+function renderFailureNotificationShortcut() {
+  const btn = document.getElementById("failureNotificationShortcut");
   if (!btn) return;
+  const visible = activePage === "qq";
+  btn.hidden = !visible;
+  if (!visible) return;
+  const on = !!(settings && settings.failure_notification && settings.failure_notification.enabled);
   btn.dataset.on = on ? "1" : "0";
-  btn.innerHTML = '<span class="settings-switch-track" aria-hidden="true"></span>';
+  btn.dataset.state = on ? "on" : "neutral";
+  btn.innerHTML = SVG_FAILURE_NOTIFICATION;
+  btn.title = "失败通知：" + (on ? "已开启" : "已关闭") + " · 投递失败、RSS 连续失败或队列异常时提醒授权 QQ 用户 · 点击切换";
   btn.setAttribute("role", "switch");
-  btn.setAttribute("aria-checked", String(!!on));
-  btn.setAttribute("aria-label", "失败通知：" + (on ? "已开启" : "已关闭"));
+  btn.setAttribute("aria-checked", String(on));
+  btn.setAttribute("aria-label", "接收失败通知：" + (on ? "已开启" : "已关闭"));
 }
 
 function renderStatusSheenToggle(on) {
   const btn = document.getElementById("btnStatusSheenToggle");
   if (!btn) return;
+  const row = btn.closest(".settings-row");
+  if (row) row.classList.toggle("status-sheen-row-active", !!on);
   btn.dataset.on = on ? "1" : "0";
   btn.setAttribute("aria-checked", String(!!on));
   btn.setAttribute("aria-label", "界面动画：" + (on ? "已开启" : "已关闭"));
@@ -956,7 +1434,7 @@ function scheduledOptionMarkup(message, index) {
     '<div class="scheduled-message-entry-header">' +
     '<strong>消息 ' + (index + 1) + '</strong>' +
     '<button type="button" class="foldbtn scheduled-message-fold' + (collapsed ? ' folded' : '') + '" title="折叠/展开" aria-label="折叠/展开" aria-expanded="' + (collapsed ? "false" : "true") + '">' +
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button></div>' +
+    mcIcon("down", 10) + '</button></div>' +
     '<div class="scheduled-message-entry-body">' +
     '<label class="scheduled-message-entry-label">消息正文' +
     '<textarea class="scheduled-message-entry-content" data-field="content" maxlength="20000" placeholder="输入消息正文"></textarea></label>' +
@@ -1642,6 +2120,7 @@ function openFgAddPicker(ctx, kind) {
     },
     {
       defaultChecked: false,
+      rowDeleteIcon: SVG_TRASH,
       onRowEdit: kind === "group" ? function (item) { editGroupDetails(item); } : null,
       labelLinkFn: kind === "source"
         ? function (item) { return xSourceProfileUrl(item.source); }
@@ -1680,7 +2159,7 @@ function openUserAddPicker() {
   );
 }
 
-// 「从已注册项新增」窗口行尾「×」：删除该条目的注册记录（从全局实体列表移除；
+// 「从已注册项新增」窗口行尾垃圾桶：删除该条目的注册记录（从全局实体列表移除；
 // 保存时面板 _normalize_forwarding_groups 会剔除它在各转发组中的悬空引用）。
 // 与表格行内"删除"（仅移出当前转发组、保留全局实体）严格区分。删除后需重新走
 // 注册流程（重新扫描 / 重新注册审核）才能再次加入转发组或白名单。
@@ -1795,6 +2274,7 @@ function renderFgTabs(ctx) {
   const actionRail = document.createElement("div");
   actionRail.className = "fgtab-actions";
   wrap.appendChild(tabList);
+  const keepActionRailOutsideScrollableTabs = IS_DESKTOP_HOST && ["x", "bilibili", "youtube", "qq"].includes(ctx.key);
   const ordered = list.slice();
   ordered.forEach(function (fg) {
     const isActive = fg.id === ctx.activeId;
@@ -1852,16 +2332,22 @@ function renderFgTabs(ctx) {
       }
     }
   });
+  let addButton = null;
   // 达到上限(30)后直接不显示新增按钮，删除一个后自动恢复
   if (list.length < MAX_FG) {
     const add = document.createElement("button");
     add.type = "button";
     add.className = "fgtab-add";
     add.id = ctx.addBtnId;
-    add.textContent = "＋ 添加转发组";
-    tabList.appendChild(add);
+    add.title = "添加转发组";
+    add.setAttribute("aria-label", "添加转发组");
+    add.innerHTML = mcIcon("add", 16);
+    addButton = add;
   }
-  if (actionRail.childElementCount) wrap.appendChild(actionRail);
+  if (addButton) tabList.appendChild(addButton);
+  if (actionRail.childElementCount) {
+    (keepActionRailOutsideScrollableTabs ? wrap : tabList).appendChild(actionRail);
+  }
 }
 async function addForwardingGroup(ctx) {
   const list = getFgList(ctx);
@@ -1926,6 +2412,7 @@ function startFgRename(ctx) {
 }
 
 let qqBotIds = [];
+let qqBotAccounts = [];
 let personalQQConnections = [];
 let connectedQQBotIds = [];
 let qqBotStatusKnown = false;
@@ -1969,7 +2456,12 @@ function renderQQBotWorkspace() {
     const connected = qqBotStatusKnown ? connectedQQBotIds.includes(botId) : qqAggregateConnected;
     const state = !statusKnown ? "状态未知" : connected ? "已连接" : "未连接";
     const personal = personalQQConnections.find(item => "personal:" + item.uin === botId);
-    const label = personal ? (personal.name || "个人 QQ") + " · " + personal.uin + (personal.enabled ? "" : " · 已停用") : botId;
+    const bot = qqBotAccounts.find(item => String(item.appid) === botId);
+    const personalName = personal && String(personal.name || "").trim();
+    const botName = bot && String(bot.name || "").trim();
+    const label = personal
+      ? (personalName || ("个人 QQ · " + personal.uin)) + (personal.enabled ? "" : " · 已停用")
+      : (botName || botId);
     return '<option value="' + escapeHtml(botId) + '"' + (botId === active ? ' hidden' : '') + '>' + escapeHtml(label) + " · " + state + '</option>';
   }).join("");
   select.value = active;
@@ -2019,11 +2511,11 @@ if (qqBotWorkspace) {
       }
       renderSettings();
       renderOverviewCounts();
-      await Promise.all([refreshStatus(), refreshXStatus(), refreshBilibiliStatus(), refreshYoutubeStatus(), refreshBackfill(), refreshMessageTrace()]);
+      await Promise.all([refreshStatus(), refreshXStatus(), refreshBilibiliStatus(), refreshYoutubeStatus(), refreshSteamStatus(), refreshBackfill(), refreshMessageTrace()]);
     } catch (error) {
       activeQQBotId = previous;
       workspaceEpoch += 1;
-      await Promise.all([refreshStatus(), refreshXStatus(), refreshBilibiliStatus(), refreshYoutubeStatus(), refreshBackfill(), refreshMessageTrace()]);
+      await Promise.all([refreshStatus(), refreshXStatus(), refreshBilibiliStatus(), refreshYoutubeStatus(), refreshSteamStatus(), refreshBackfill(), refreshMessageTrace()]);
       showAlert("切换失败", error.message);
     } finally {
       endPanelLoading();
@@ -2034,6 +2526,7 @@ if (qqBotWorkspace) {
 }
 
 function renderSettings() {
+  if (window.renderSteamPage) window.renderSteamPage();
   renderAIControls();
   renderQQBotWorkspace();
   renderFgTabs(FG_DISCORD);
@@ -2080,7 +2573,7 @@ function renderSettings() {
   const chanRows = settings.discord_channels.filter(function (c) { return memberChans[String(c.id)]; });
   if (!chanRows.length) {
     cb.innerHTML =
-      '<tr class="fgempty-row"><td colspan="5" class="fgempty-msg">还未新增频道，点击下方「新增」按钮来新增第一个频道吧！</td></tr>';
+      '<tr class="fgempty-row"><td colspan="6" class="fgempty-msg">还未新增频道，点击下方「新增」按钮来新增第一个频道吧！</td></tr>';
   }
   chanRows.forEach((c) => {
     const tr = document.createElement("tr");
@@ -2094,17 +2587,12 @@ function renderSettings() {
     tr.innerHTML =
       '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
       '<td style="text-align:center"><input type="checkbox" data-kind="chan" data-i="' + gi + '"' + (c.enabled ? " checked" : "") + '></td>' +
-      '<td>' +
-        '<span class="chan-name" data-kind="chanNameDisplay" data-i="' + gi + '">' +
-          '<span class="chan-name-text">' + escapeHtml(c.name || "") + '</span>' +
-          '<span class="chan-name-edit" role="button" tabindex="0" data-kind="chanNameEdit" data-i="' + gi + '" title="编辑频道名称">' + SVG_PEN + '</span>' +
-        '</span>' +
-        (realName ? '<div style="color:var(--name-green);font-size:12px;">' + realNameHtml + '</div>' : '') +
-      '</td>' +
+      '<td><span class="chan-name-text">' + escapeHtml(c.name || "") + '</span></td>' +
+      '<td class="discord-channel-real-name">' + (realName ? realNameHtml : '') + '</td>' +
       '<td>' + renderIdCell(c.id) + '</td>' +
       '<td><div class="table-actions">' +
-        '<button class="sec rowicon translation-toggle-icon' + (c.translation_enabled ? ' translation-active' : '') + '" title="设置此来源的翻译方式" aria-label="设置此来源的翻译方式" data-kind="chanTranslation" data-i="' + gi + '">' + SVG_TRANSLATE + '</button>' +
-        '<button class="sec rowicon' + (channelFilterActive(c) ? ' filter-active' : '') + '" title="设置此来源的消息筛选规则" aria-label="设置此来源的消息筛选规则" data-kind="chanFilter" data-i="' + gi + '">' + SVG_FUNNEL + '</button>' +
+        '<button class="sec rowicon' + (channelFilterActive(c) ? ' filter-active' : '') + '" title="内容筛选" aria-label="内容筛选" data-kind="chanFilter" data-i="' + gi + '">' + SVG_FUNNEL + '</button>' +
+        '<button class="sec rowicon" title="编辑名称与来源地址" aria-label="编辑名称与来源地址" data-kind="chanEdit" data-i="' + gi + '">' + SVG_PEN + '</button>' +
         '<button class="danger rowicon" title="移出当前转发组" aria-label="移出当前转发组" data-kind="fgChanRemove" data-id="' + escapeHtml(String(c.id)) + '">' + SVG_TRASH + '</button>' +
       '</div></td>';
     cb.appendChild(tr);
@@ -2133,7 +2621,6 @@ function renderSettings() {
       '<td>' + renderIdCell(u.openid) + '</td>' +
       '<td><div class="table-actions">' +
         '<button class="sec rowicon" title="编辑用户资料" aria-label="编辑用户资料" data-kind="userEdit" data-i="' + ui + '">' + SVG_PEN + '</button>' +
-        '<button class="sec rowicon' + (u.failure_notification ? ' filter-active' : '') + '" title="接收失败通知" aria-label="接收失败通知" data-kind="failureRecipient" data-i="' + ui + '">' + SVG_WARNING + '</button>' +
         '<button class="danger rowicon" title="删除用户" aria-label="删除用户" data-kind="userDel" data-i="' + ui + '">' + SVG_TRASH + '</button>' +
         '</div></td>';
       ub.appendChild(tr);
@@ -2302,6 +2789,19 @@ function renderQQPage() {
 // 状态仍读写原有全局字段。保存走现有 /api/settings/save 整体流程；
 // 后端 x_rss.py 路由逻辑不在此触碰。
 
+function orderedForwardingGroupItems(memberIds, items, getId, includeItem) {
+  const byId = new Map();
+  (items || []).forEach(function (item) { byId.set(String(getId(item)), item); });
+  const seen = new Set();
+  return (memberIds || []).map(function (id) { return byId.get(String(id)); }).filter(function (item) {
+    if (!item) return false;
+    const id = String(getId(item));
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return !includeItem || includeItem(item);
+  });
+}
+
 function renderXPage() {
   const srcBody = document.getElementById("xSourceBody");
   if (!srcBody || !settings) return;
@@ -2311,11 +2811,9 @@ function renderXPage() {
   // X 转发账号：只渲染当前 X 转发组的账号成员；「启用」仍是全局注册源状态
   const allSources = Array.isArray(settings.x_rss_sources) ? settings.x_rss_sources : [];
   srcBody.innerHTML = "";
-  const memberKeys = {};
-  if (xfg) {
-    (xfg.sources || []).forEach(function (k) { memberKeys[String(k)] = true; });
-  }
-  const srcRows = allSources.filter(function (s) { return memberKeys[xSourceKey(s.source)]; });
+  const srcRows = orderedForwardingGroupItems(
+    xfg && xfg.sources, allSources, function (source) { return xSourceKey(source.source); }
+  );
   if (!srcRows.length) {
     srcBody.innerHTML = '<tr class="fgempty-row"><td colspan="5" class="fgempty-msg">还未新增来源，点击下方「＋ 新增」从已注册来源中加入，或先「注册新源」。</td></tr>';
   }
@@ -2329,20 +2827,15 @@ function renderXPage() {
     tr.innerHTML =
       '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
       '<td style="text-align:center"><input type="checkbox" data-kind="xSource" data-i="' + i + '"' + (s.enabled ? " checked" : "") + '></td>' +
-      '<td>' +
-        '<span class="chan-name" data-kind="xSourceNameDisplay" data-i="' + i + '">' +
-          '<span class="chan-name-text">' + escapeHtml(name) + '</span>' +
-          '<span class="chan-name-edit" role="button" tabindex="0" data-kind="xSourceNameEdit" data-i="' + i + '" title="编辑账号名称">' + SVG_PEN + '</span>' +
-        '</span>' +
-      '</td>' +
+      '<td><span class="chan-name-text">' + escapeHtml(name) + '</span></td>' +
       '<td class="mono">' +
         (profileUrl
           ? '<a class="x-account-link" href="' + escapeHtml(profileUrl) + '" target="_blank" rel="noopener noreferrer" title="打开 X 主页">@' + escapeHtml(handle) + '</a>'
           : '@' + escapeHtml(handle)) +
       '</td>' +
       '<td style="text-align:right"><div class="table-actions">' +
-        '<button class="sec rowicon translation-toggle-icon' + (s.translation_enabled ? ' translation-active' : '') + '" title="设置此来源的翻译方式" aria-label="设置此来源的翻译方式" data-kind="xSourceTranslation" data-i="' + i + '">' + SVG_TRANSLATE + '</button>' +
-        '<button class="sec rowicon' + (xSourceFilterActive(s) ? ' filter-active' : '') + '" title="设置此来源的消息筛选规则" aria-label="设置此来源的消息筛选规则" data-kind="xSourceFilter" data-i="' + i + '">' + SVG_FUNNEL + '</button>' +
+        '<button class="sec rowicon' + (xSourceFilterActive(s) ? ' filter-active' : '') + '" title="内容筛选" aria-label="内容筛选" data-kind="xSourceFilter" data-i="' + i + '">' + SVG_FUNNEL + '</button>' +
+        '<button class="sec rowicon" title="编辑名称与来源地址" aria-label="编辑名称与来源地址" data-kind="xSourceEdit" data-i="' + i + '">' + SVG_PEN + '</button>' +
         '<button class="danger rowicon" data-kind="xFgSourceRemove" data-id="' + escapeHtml(handle) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
     srcBody.appendChild(tr);
   });
@@ -2353,13 +2846,9 @@ function renderXPage() {
   const xgBody = document.getElementById("xXGroupBody");
   const allGroups = settings.qq_group_openids || [];
   xgBody.innerHTML = "";
-  const memberGrps = {};
-  if (xfg) {
-    (xfg.groups || []).forEach(function (o) { memberGrps[String(o)] = true; });
-  }
-  const grpRows = allGroups.filter(function (g) {
-    return memberGrps[String(g.openid)] && groupInActiveQQBotWorkspace(g);
-  });
+  const grpRows = orderedForwardingGroupItems(
+    xfg && xfg.groups, allGroups, function (group) { return group.openid; }, groupInActiveQQBotWorkspace
+  );
   if (!grpRows.length) {
     xgBody.innerHTML = '<tr class="fgempty-row"><td colspan="6" class="fgempty-msg">还未新增群，点击下方「＋ 新增」来新增第一个群吧！</td></tr>';
   }
@@ -2436,15 +2925,13 @@ function renderBilibiliPage() {
   renderFgTabs(FG_BILIBILI);
   const fg = getActiveFg(FG_BILIBILI);
   const allSources = Array.isArray(settings.bilibili_sources) ? settings.bilibili_sources : [];
-  const memberSources = {};
-  if (fg) (fg.sources || []).forEach(function (id) { memberSources[String(id)] = true; });
-  const sourceRows = allSources.filter(function (source) {
-    const sourceId = String(source.id || bilibiliSourceId(source.kind || "up", source.value || ""));
-    return memberSources[sourceId];
-  });
+  const sourceRows = orderedForwardingGroupItems(
+    fg && fg.sources, allSources,
+    function (source) { return String(source.id || bilibiliSourceId(source.kind || "up", source.value || "")); }
+  );
   sourceBody.innerHTML = "";
   if (!sourceRows.length) {
-    sourceBody.innerHTML = '<tr class="fgempty-row"><td colspan="5" class="fgempty-msg">还未新增来源，请先「注册来源」，再加入当前转发组。</td></tr>';
+    sourceBody.innerHTML = '<tr class="fgempty-row"><td colspan="6" class="fgempty-msg">还未新增来源，请先「注册来源」，再加入当前转发组。</td></tr>';
   }
   sourceRows.forEach(function (source) {
     const index = allSources.indexOf(source);
@@ -2455,19 +2942,18 @@ function renderBilibiliPage() {
       '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
       '<td style="text-align:center"><input type="checkbox" data-kind="biliSource" data-i="' + index + '"' + (source.enabled ? " checked" : "") + '></td>' +
       '<td>' + escapeHtml(bilibiliKindText(source)) + '</td>' +
-      '<td><span class="chan-name-text">' + escapeHtml(source.value || "") + '</span></td>' +
-      '<td style="text-align:right"><div class="table-actions"><button class="sec rowicon' + (bilibiliSourceFilterActive(source) ? ' filter-active' : '') + '" data-kind="biliSourceFilterEdit" data-i="' + index + '" title="消息筛选" aria-label="消息筛选">' + SVG_FUNNEL + '</button><button class="danger rowicon" data-kind="biliFgSourceRemove" data-id="' + escapeHtml(sourceId) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
+      '<td><span class="chan-name-text">' + escapeHtml(source.name || "") + '</span></td>' +
+      '<td class="mono" title="' + escapeHtml(source.value || "") + '">' + escapeHtml(source.value || "") + '</td>' +
+      '<td style="text-align:right"><div class="table-actions"><button class="sec rowicon' + (bilibiliSourceFilterActive(source) ? ' filter-active' : '') + '" data-kind="biliSourceFilterEdit" data-i="' + index + '" title="内容筛选" aria-label="内容筛选">' + SVG_FUNNEL + '</button><button class="sec rowicon" data-kind="biliSourceEdit" data-i="' + index + '" title="编辑名称与来源地址" aria-label="编辑名称与来源地址">' + SVG_PEN + '</button><button class="danger rowicon" data-kind="biliFgSourceRemove" data-id="' + escapeHtml(sourceId) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
     sourceBody.appendChild(tr);
   });
   syncHeaderAll("bilibiliSourceAllEnabled", sourceRows, "enabled");
 
   const groupBody = document.getElementById("bilibiliGroupBody");
   const allGroups = settings.qq_group_openids || [];
-  const memberGroups = {};
-  if (fg) (fg.groups || []).forEach(function (id) { memberGroups[String(id)] = true; });
-  const groupRows = allGroups.filter(function (group) {
-    return memberGroups[String(group.openid)] && groupInActiveQQBotWorkspace(group);
-  });
+  const groupRows = orderedForwardingGroupItems(
+    fg && fg.groups, allGroups, function (group) { return group.openid; }, groupInActiveQQBotWorkspace
+  );
   groupBody.innerHTML = "";
   if (!groupRows.length) {
     groupBody.innerHTML = '<tr class="fgempty-row"><td colspan="6" class="fgempty-msg">还未新增群，请加入一个 QQ 接收群。</td></tr>';
@@ -2576,11 +3062,9 @@ function renderYoutubePage() {
   renderFgTabs(FG_YOUTUBE);
   const fg = getActiveFg(FG_YOUTUBE);
   const allSources = Array.isArray(settings.youtube_sources) ? settings.youtube_sources : [];
-  const memberSources = {};
-  if (fg) (fg.sources || []).forEach(function (id) { memberSources[String(id)] = true; });
-  const sourceRows = allSources.filter(function (source) {
-    return memberSources[youtubeSourceId(source.value)];
-  });
+  const sourceRows = orderedForwardingGroupItems(
+    fg && fg.sources, allSources, function (source) { return youtubeSourceId(source.value); }
+  );
   sourceBody.innerHTML = "";
   if (!sourceRows.length) {
     sourceBody.innerHTML = '<tr class="fgempty-row"><td colspan="5" class="fgempty-msg">还未新增频道，请先「注册频道」，再加入当前转发组。</td></tr>';
@@ -2594,16 +3078,13 @@ function renderYoutubePage() {
     tr.innerHTML =
       '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
       '<td style="text-align:center"><input type="checkbox" data-kind="youtubeSource" data-i="' + index + '"' + (source.enabled ? " checked" : "") + '></td>' +
-      '<td><span class="chan-name" data-kind="youtubeSourceNameDisplay" data-i="' + index + '">' +
-        '<span class="chan-name-text">' + escapeHtml(source.name || source.value || "") + '</span>' +
-        '<span class="chan-name-edit" role="button" tabindex="0" data-kind="youtubeSourceNameEdit" data-i="' + index + '" title="编辑频道显示名称">' + SVG_PEN + '</span>' +
-      '</span></td>' +
+      '<td><span class="chan-name-text">' + escapeHtml(source.name || source.value || "") + '</span></td>' +
       '<td class="mono">' + (channelUrl
         ? '<a class="x-account-link" href="' + escapeHtml(channelUrl) + '" target="_blank" rel="noopener noreferrer" title="打开 YouTube 频道">' + escapeHtml(source.value || "") + '</a>'
         : escapeHtml(source.value || "")) + '</td>' +
       '<td style="text-align:right"><div class="table-actions">' +
-        '<button class="sec rowicon translation-toggle-icon' + (source.translation_enabled ? ' translation-active' : '') + '" title="设置此来源的翻译方式" aria-label="设置此来源的翻译方式" data-kind="youtubeSourceTranslation" data-i="' + index + '">' + SVG_TRANSLATE + '</button>' +
-        '<button class="sec rowicon' + (youtubeSourceFilterActive(source) ? ' filter-active' : '') + '" title="设置此来源的消息筛选规则" aria-label="设置此来源的消息筛选规则" data-kind="youtubeSourceFilterEdit" data-i="' + index + '">' + SVG_FUNNEL + '</button>' +
+        '<button class="sec rowicon' + (youtubeSourceFilterActive(source) ? ' filter-active' : '') + '" title="内容筛选" aria-label="内容筛选" data-kind="youtubeSourceFilterEdit" data-i="' + index + '">' + SVG_FUNNEL + '</button>' +
+        '<button class="sec rowicon" title="编辑名称与来源地址" aria-label="编辑名称与来源地址" data-kind="youtubeSourceEdit" data-i="' + index + '">' + SVG_PEN + '</button>' +
         '<button class="danger rowicon" data-kind="youtubeFgSourceRemove" data-id="' + escapeHtml(sourceId) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
     sourceBody.appendChild(tr);
   });
@@ -2611,11 +3092,9 @@ function renderYoutubePage() {
 
   const groupBody = document.getElementById("youtubeGroupBody");
   const allGroups = settings.qq_group_openids || [];
-  const memberGroups = {};
-  if (fg) (fg.groups || []).forEach(function (id) { memberGroups[String(id)] = true; });
-  const groupRows = allGroups.filter(function (group) {
-    return memberGroups[String(group.openid)] && groupInActiveQQBotWorkspace(group);
-  });
+  const groupRows = orderedForwardingGroupItems(
+    fg && fg.groups, allGroups, function (group) { return group.openid; }, groupInActiveQQBotWorkspace
+  );
   groupBody.innerHTML = "";
   if (!groupRows.length) {
     groupBody.innerHTML = '<tr class="fgempty-row"><td colspan="6" class="fgempty-msg">还未新增群，请加入一个 QQ 接收群。</td></tr>';
@@ -2677,6 +3156,34 @@ function appendRssCounters(summary, st, srcText, sourceLabel, includeQueue) {
   summary.append(metrics);
 }
 
+function conciseChainStatusError(st, chain) {
+  const name = String(chain || "来源");
+  if (!st) return "状态读取失败，请稍后重试。";
+  if (st.config_error || st.last_result === "config_failed") return "账号配置异常，请检查配置并重启机器人。";
+  if (st.protection_error || st.last_result === "protection_failed") return "投递队列异常，请检查维护与备份。";
+  if (st.last_result === "parse_failed") return "RSS 内容格式异常，请检查来源地址。";
+  const raw = String(st.protection_error || st.last_error || st.msg || "").toLowerCase();
+  if (/\b429\b|rate.?limit|too many requests/.test(raw)) return "请求受限；稍后重试。";
+  if (/\b404\b/.test(raw) && name === "YouTube") {
+    return st.data_api_enabled === false
+      ? "RSS 失败；可配置 API Key。"
+      : "请求失败；检查频道或 API Key。";
+  }
+  if (/timeout|timed out|connection|network|代理|proxy|dns/.test(raw)) return "网络失败；检查代理。";
+  if (name === "YouTube" && st.last_result === "fetch_failed") {
+    return st.data_api_enabled === false
+      ? "RSS 失败；可试 API Key。"
+      : "请求失败；检查 Key/配额。";
+  }
+  if (st.last_result === "fetch_failed") {
+    return name === "X" || name === "Bilibili"
+      ? "来源请求失败，请检查 RSSHub 地址与网络。"
+      : name + " 请求失败，请检查来源与网络。";
+  }
+  if (st.ok === false) return "状态接口不可用，请检查机器人连接。";
+  return name + " 检查失败，请查看运行日志。";
+}
+
 function renderXStatus(st) {
   const badge = document.getElementById("xrssBadge");
   if (!badge || !st) return;
@@ -2690,8 +3197,8 @@ function renderXStatus(st) {
   if (st.sources_total !== undefined) {
     srcText = st.sources_enabled + " / " + st.sources_total;
   } else if (settings && Array.isArray(settings.x_rss_sources)) {
-    const all = settings.x_rss_sources;
-    srcText = all.filter(function (s) { return s.enabled; }).length + " / " + all.length;
+    const counts = routedEnabledTotal("x_rss_sources", "x_forwarding_groups", "sources", function (item) { return xSourceKey(item.source); });
+    srcText = counts.enabled + " / " + counts.total;
   }
 
   // 徽章：真实运行状态（写死「轮询中」已废弃）。
@@ -2703,7 +3210,7 @@ function renderXStatus(st) {
     badgeCls = "badge neutral";
   } else if (st.ok === false) {
     const configFailed = !!st.config_error || st.last_result === "config_failed";
-    badgeText = configFailed ? "账号配置读取失败" : localizeUserError(st.msg, "检测中…");
+    badgeText = configFailed ? "账号配置读取失败" : "状态不可用";
     badgeCls = configFailed ? "badge off" : "badge warn";
     failed = configFailed;
   } else if (!st.running) {
@@ -2738,7 +3245,8 @@ function renderXStatus(st) {
   }
   badge.textContent = badgeText;
   badge.className = badgeCls;
-  badge.title = st.config_error || st.protection_error || st.last_error || st.msg || badgeText;
+  const errorHint = conciseChainStatusError(st, "X");
+  badge.title = failed || st.ok === false ? errorHint : badgeText;
   setStatusCardAmbient(badge, badgeCls === "badge on");
   const overviewX = document.getElementById("overviewX");
   setOverviewRouteStatus(overviewX, badgeText, "X RSS",
@@ -2752,19 +3260,16 @@ function renderXStatus(st) {
     const sendFailed = Number(st.last_failed_count) || 0;
     const err = failed || sendFailed > 0;
     summary.classList.toggle("err", err || st.ok === false);
-    summary.title = st.protection_error
-      ? localizeUserError(st.protection_error, "投递保护异常")
-      : failed ? localizeUserError(st.last_error, "请求失败") : "";
+    summary.title = failed || st.ok === false ? errorHint : "";
     if (!botUp) {
       summary.textContent = "—";
     } else if (failed) {
       const errorLabel = (st.config_error || st.last_result === "config_failed") ? "账号配置读取失败" : st.protection_error ? "投递保护异常"
         : st.last_result === "parse_failed" ? "解析异常" : "请求异常";
-      const advice = (st.config_error || st.last_result === "config_failed") ? "请检查配置并重启机器人" : "请稍后重试";
-      summary.innerHTML = '<strong>' + errorLabel + '</strong><span>' + advice + '</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
+      summary.innerHTML = '<strong>' + errorLabel + '</strong><span>' + escapeHtml(errorHint) + '</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
     } else if (st.ok === false) {
-      summary.title = localizeUserError(st.msg, "请求异常");
-      summary.innerHTML = '<strong>请求异常</strong><span>请稍后重试</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
+      summary.title = errorHint;
+      summary.innerHTML = '<strong>请求异常</strong><span>' + escapeHtml(errorHint) + '</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
     } else {
       summary.innerHTML = '<span>订阅源 ' + escapeHtml(srcText) + '</span>'
         + '<small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>'
@@ -2775,6 +3280,7 @@ function renderXStatus(st) {
     }
     if (failed || st.ok === false) appendRssCounters(summary, st, srcText, "订阅源", true);
   }
+  renderChainStatusShortcut();
 }
 
 async function refreshXStatus() {
@@ -2796,8 +3302,8 @@ function renderBilibiliStatus(st) {
   if (st.sources_total !== undefined) {
     srcText = st.sources_enabled + " / " + st.sources_total;
   } else if (settings && Array.isArray(settings.bilibili_sources)) {
-    const all = settings.bilibili_sources;
-    srcText = all.filter(function (s) { return s.enabled; }).length + " / " + all.length;
+    const counts = routedEnabledTotal("bilibili_sources", "bilibili_forwarding_groups", "sources", function (item) { return item.id || bilibiliSourceId(item.kind, item.value); });
+    srcText = counts.enabled + " / " + counts.total;
   }
 
   let badgeText, badgeCls, failed = false;
@@ -2806,7 +3312,7 @@ function renderBilibiliStatus(st) {
     badgeCls = "badge neutral";
   } else if (st.ok === false) {
     const configFailed = !!st.config_error || st.last_result === "config_failed";
-    badgeText = configFailed ? "账号配置读取失败" : localizeUserError(st.msg, "检测中…");
+    badgeText = configFailed ? "账号配置读取失败" : "状态不可用";
     badgeCls = configFailed ? "badge off" : "badge warn";
     failed = configFailed;
   } else if (!st.running) {
@@ -2840,7 +3346,8 @@ function renderBilibiliStatus(st) {
   }
   badge.textContent = badgeText;
   badge.className = badgeCls;
-  badge.title = st.config_error || st.protection_error || st.last_error || st.msg || badgeText;
+  const errorHint = conciseChainStatusError(st, "Bilibili");
+  badge.title = failed || st.ok === false ? errorHint : badgeText;
   setStatusCardAmbient(badge, badgeCls === "badge on");
   const overviewBilibili = document.getElementById("overviewBilibili");
   setOverviewRouteStatus(overviewBilibili, badgeText, "Bilibili RSS",
@@ -2850,18 +3357,17 @@ function renderBilibiliStatus(st) {
   if (summary) {
     const sendFailed = Number(st.last_failed_count) || 0;
     summary.classList.toggle("err", failed || sendFailed > 0 || st.ok === false);
-    summary.title = failed ? localizeUserError(st.protection_error || st.last_error, "请求失败") : "";
+    summary.title = failed || st.ok === false ? errorHint : "";
     if (!botUp) {
       summary.textContent = "—";
     } else if (failed) {
       const configFailed = !!st.config_error || st.last_result === "config_failed";
       const protectionFailed = !configFailed && (!!st.protection_error || st.last_result === "protection_failed");
-      const errorLabel = configFailed ? "账号配置读取失败" : protectionFailed ? "投递保护异常" : (st.last_result === "parse_failed" ? "解析异常" : "请求异常");
-      const advice = configFailed ? "请检查配置并重启机器人" : protectionFailed ? "请恢复积压队列文件" : "请稍后重试";
-      summary.innerHTML = '<strong>' + errorLabel + '</strong><span>' + advice + '</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
+      const errorLabel = configFailed ? "配置异常" : protectionFailed ? "队列异常" : (st.last_result === "parse_failed" ? "解析异常" : "原因");
+      summary.innerHTML = '<strong>' + errorLabel + '</strong><span>' + escapeHtml(errorHint) + '</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
     } else if (st.ok === false) {
-      summary.title = localizeUserError(st.msg, "请求异常");
-      summary.innerHTML = '<strong>请求异常</strong><span>请稍后重试</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
+      summary.title = errorHint;
+      summary.innerHTML = '<strong>请求异常</strong><span>' + escapeHtml(errorHint) + '</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
     } else {
       summary.innerHTML = '<span>来源 ' + escapeHtml(srcText) + '</span>'
         + '<small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>'
@@ -2872,6 +3378,7 @@ function renderBilibiliStatus(st) {
     }
     if (failed || st.ok === false) appendRssCounters(summary, st, srcText, "来源", true);
   }
+  renderChainStatusShortcut();
 }
 
 async function refreshBilibiliStatus() {
@@ -2893,8 +3400,8 @@ function renderYoutubeStatus(st) {
   if (st.sources_total !== undefined) {
     srcText = st.sources_enabled + " / " + st.sources_total;
   } else if (settings && Array.isArray(settings.youtube_sources)) {
-    const all = settings.youtube_sources;
-    srcText = all.filter(function (s) { return s.enabled; }).length + " / " + all.length;
+    const counts = routedEnabledTotal("youtube_sources", "youtube_forwarding_groups", "sources", function (item) { return item.id || youtubeSourceId(item.value); });
+    srcText = counts.enabled + " / " + counts.total;
   }
 
   let badgeText, badgeCls, failed = false;
@@ -2903,7 +3410,7 @@ function renderYoutubeStatus(st) {
     badgeCls = "badge neutral";
   } else if (st.ok === false) {
     const configFailed = !!st.config_error || st.last_result === "config_failed";
-    badgeText = configFailed ? "账号配置读取失败" : localizeUserError(st.msg, "检测中…");
+    badgeText = configFailed ? "账号配置读取失败" : "状态不可用";
     badgeCls = configFailed ? "badge off" : "badge warn";
     failed = configFailed;
   } else if (!st.running) {
@@ -2932,7 +3439,8 @@ function renderYoutubeStatus(st) {
   }
   badge.textContent = badgeText;
   badge.className = badgeCls;
-  badge.title = st.config_error || st.protection_error || st.last_error || st.msg || badgeText;
+  const errorHint = conciseChainStatusError(st, "YouTube");
+  badge.title = failed || st.ok === false ? errorHint : badgeText;
   setStatusCardAmbient(badge, badgeCls === "badge on");
   const overviewYoutube = document.getElementById("overviewYoutube");
   setOverviewRouteStatus(overviewYoutube, badgeText, "YouTube RSS",
@@ -2942,18 +3450,17 @@ function renderYoutubeStatus(st) {
   if (summary) {
     const sendFailed = Number(st.last_failed_count) || 0;
     summary.classList.toggle("err", failed || sendFailed > 0 || st.ok === false);
-    summary.title = failed ? localizeUserError(st.protection_error || st.last_error, "请求失败") : "";
+    summary.title = failed || st.ok === false ? errorHint : "";
     if (!botUp) {
       summary.textContent = "—";
     } else if (failed) {
       const configFailed = !!st.config_error || st.last_result === "config_failed";
       const protectionFailed = !configFailed && (!!st.protection_error || st.last_result === "protection_failed");
       const errorLabel = configFailed ? "账号配置读取失败" : protectionFailed ? "投递保护异常" : (st.last_result === "parse_failed" ? "解析异常" : "请求异常");
-      const advice = configFailed ? "请检查配置并重启机器人" : protectionFailed ? "请恢复积压队列文件" : "请稍后重试";
-      summary.innerHTML = '<strong>' + errorLabel + '</strong><span>' + advice + '</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
+      summary.innerHTML = '<strong>' + errorLabel + '</strong><span>' + escapeHtml(errorHint) + '</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
     } else if (st.ok === false) {
-      summary.title = localizeUserError(st.msg, "请求异常");
-      summary.innerHTML = '<strong>请求异常</strong><span>请稍后重试</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
+      summary.title = errorHint;
+      summary.innerHTML = '<strong>请求异常</strong><span>' + escapeHtml(errorHint) + '</span><small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
     } else {
       summary.innerHTML = '<span>来源 ' + escapeHtml(srcText) + '</span>'
         + '<small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>'
@@ -2964,6 +3471,7 @@ function renderYoutubeStatus(st) {
     }
     if (failed || st.ok === false) appendRssCounters(summary, st, srcText, "来源", true);
   }
+  renderChainStatusShortcut();
 }
 
 async function refreshYoutubeStatus() {
@@ -2973,6 +3481,31 @@ async function refreshYoutubeStatus() {
     const data = await jget("/api/youtube/status");
     if (owner === activeQQBotId && epoch === workspaceEpoch) renderYoutubeStatus(data);
   } catch (err) { /* 面板瞬断：保留当前显示，下一轮覆盖 */ }
+}
+
+function renderSteamOverviewStatus(st) {
+  const target = document.getElementById("overviewSteam");
+  if (!target || !st) return;
+  const botUp = st.bot_running === true || (st.bot_running === undefined && st.running === true);
+  let label = "运行中", state = "on";
+  if (st.last_error && st.bot_running !== false) { label = "检查失败"; state = "off"; }
+  else if (!botUp) { label = "未运行"; state = "neutral"; }
+  else if (st.qq_connected === false) { label = "等待 QQ 连接"; state = "warn"; }
+  setOverviewRouteStatus(target, label, "Steam 游戏与商店监控", state);
+  if (st.last_error) target.title += "\n" + conciseChainStatusError(st, "Steam");
+}
+
+async function refreshSteamStatus() {
+  const owner = activeQQBotId;
+  const epoch = workspaceEpoch;
+  try {
+    const data = await jget("/api/steam/status");
+    if (owner === activeQQBotId && epoch === workspaceEpoch) renderSteamOverviewStatus(data);
+  } catch (err) {
+    if (owner === activeQQBotId && epoch === workspaceEpoch) {
+      setOverviewRouteStatus(document.getElementById("overviewSteam"), "状态不可用", "Steam", "warn");
+    }
+  }
 }
 
 // ---------------- 消息追踪（近期投递结果，只读） ----------------
@@ -3006,6 +3539,7 @@ function messageTraceSource(entry) {
     });
     return {name: "YouTube", id: (source && (source.name || source.value)) || id || "未知频道"};
   }
+  if (kind === "steam") return {name: "Steam", id: "自动投递"};
   if (kind === "discord") {
     return {name: "Discord", id: channelNames[id] || id || "未知频道"};
   }
@@ -3383,7 +3917,7 @@ function renderIdCell(value) {
   const prefix = escapeHtml(characters.slice(0, -tailLength).join(""));
   const suffix = escapeHtml(characters.slice(-tailLength).join(""));
   return '<div class="id-cell">' +
-    '<span class="mono id-value" role="button" tabindex="0" data-copy-value="' + safe + '" aria-label="' + safe + '，点击复制"><span class="middle-value-prefix">' + prefix + '</span><span class="middle-value-suffix">' + suffix + '</span></span>' +
+    '<span class="mono id-value" role="button" tabindex="0" data-copy-value="' + safe + '" aria-label="' + safe + '，右键复制；聚焦后按 Enter 或空格复制"><span class="middle-value-prefix">' + prefix + '</span><span class="middle-value-suffix">' + suffix + '</span></span>' +
     '</div>';
 }
 
@@ -3413,28 +3947,18 @@ async function copyTextToClipboard(value) {
 }
 
 async function copyForwardingValue(control) {
-  const previous = Number(control.dataset.copyFeedbackTimer) || 0;
-  if (previous) clearTimeout(previous);
   try {
     await copyTextToClipboard(control.dataset.copyValue);
-    control.classList.add("copied");
     if (window.showWRelayCopyFeedback) window.showWRelayCopyFeedback(control, "已复制");
   } catch (error) {
-    control.classList.remove("copied");
     if (window.showWRelayCopyFeedback) window.showWRelayCopyFeedback(control, "复制失败");
   }
-  control.dataset.copyFeedbackTimer = String(setTimeout(function () {
-    if (control.isConnected) {
-      control.classList.remove("copied");
-      delete control.dataset.copyFeedbackTimer;
-    }
-  }, 1100));
 }
 
 // ---------------- 表格行拖拽排序（鼠标事件实现 + 数据数组持久化） ----------------
-// 作用区域：转发组卡片的「Discord 转发频道 / QQ 接收群」
-// 与「私聊权限」表格。拖拽真正重排 settings 数据并通过 saveAndReload()
-// 走现有保存流程持久化（刷新后保持）；行只能在同一表格内排序。
+// 作用区域：Discord 频道/接收群与授权用户，以及 X、Bilibili、YouTube 当前转发组的来源/接收群。
+// 拖拽重排对应的全局列表或转发组成员数组，再通过 saveAndReload() 持久化；
+// 行只能在同一表格内排序。
 let dndState = null;   // {body, tr, id, startX, startY} —— 正在拖拽的源行
 
 document.addEventListener("mousedown", function (e) {
@@ -3444,6 +3968,7 @@ document.addEventListener("mousedown", function (e) {
   if (!tr) return;
   const body = tr.parentElement;
   if (!body || !body.id) return;
+  if (body.id === "steamSourceBody" || body.id === "steamGroups") return; // Steam 两张表由草稿保存器处理排序
   e.preventDefault();                                     // 防止文本选择干扰拖动
   dndState = {body: body, tr: tr, id: tr.getAttribute("data-id"), startX: e.clientX, startY: e.clientY};
   tr.classList.add("drag-src");
@@ -3537,6 +4062,33 @@ function applyDndOrder(bodyId, newIds) {
     }
     return true;
   }
+  if (bodyId === "bilibiliSourceBody" || bodyId === "bilibiliGroupBody") {
+    const bfg = getActiveFg(FG_BILIBILI);
+    if (!bfg) return false;
+    const field = bodyId === "bilibiliSourceBody" ? "sources" : "groups";
+    const members = (bfg[field] || []).map(String);
+    const visibleMembers = bodyId === "bilibiliGroupBody"
+      ? members.filter(function (id) {
+        const group = (settings.qq_group_openids || []).find(function (item) {
+          return String(item.openid) === id;
+        });
+        return groupInActiveQQBotWorkspace(group);
+      })
+      : members;
+    if (visibleMembers.length !== newIds.length) return false;
+    const mset = {};
+    visibleMembers.forEach(function (id) { mset[id] = true; });
+    if (!newIds.every(function (id) { return mset[String(id)]; })) return false;
+    if (bodyId === "bilibiliGroupBody") {
+      let index = 0;
+      bfg[field] = members.map(function (id) {
+        return mset[id] ? String(newIds[index++]) : id;
+      });
+    } else {
+      bfg[field] = newIds.map(String);
+    }
+    return true;
+  }
   if (bodyId === "youtubeSourceBody" || bodyId === "youtubeGroupBody") {
     // YouTube 转发组成员排序：直接重排当前组的 sources/groups（不动全局注册实体）
     const yfg = getActiveFg(FG_YOUTUBE);
@@ -3613,9 +4165,8 @@ function memberIdSet(arr) {
 }
 
 // ---------------- 转发组 tab 左右拖拽排序（鼠标事件实现 + 数组持久化） ----------------
-// 作用区域：Discord、X、QQ→QQ 页各自的转发组条（.fgtabs）。
-// 按住转发组按钮（.fgtab）左右拖动调整顺序；松手后重排 settings 的
-// forwarding_groups / x_forwarding_groups / qq_forwarding_groups 数组并
+// 作用区域：各链路页的转发组条（.fgtabs）。
+// 按住转发组按钮（.fgtab）左右拖动调整顺序；松手后重排对应 settings 转发组数组并
 // saveAndReload() 持久化（刷新后保持）。
 let fgDnd = null;   // {wrap, btn, startX, startY} —— 正在拖拽的源转发组按钮
 function fgCtxByWrap(wrap) {
@@ -3742,6 +4293,7 @@ function renderBackfill(data) {
   el.style.color = backfillTotal > 0 ? "var(--pending)" : "";
   // 无待补发时禁用「立即补发」与「清空待补发」（disabled 自带半透明）
   updateBackfillButtons();
+  renderChainStatusShortcut();
 }
 
 async function refreshBackfill() {
@@ -3901,10 +4453,10 @@ function showConfirmSelect(title, items, labelFn, onOkSelected, opts) {
       row.appendChild(edit);
     }
     if (opts.onRowDelete) {
-      // 「×」删除按钮：贴近窗口右边缘，删除该条目的注册记录
+      // 删除按钮贴近窗口右边缘；转发组选择窗使用垃圾桶图标。
       const del = document.createElement("button");
       del.type = "button";
-      del.innerHTML = SVG_ORIGINAL_OFF;
+      del.innerHTML = opts.rowDeleteIcon || SVG_ORIGINAL_OFF;
       del.className = "danger rowicon";
       del.style.flex = "none";
       del.title = "删除注册记录";
@@ -4419,8 +4971,6 @@ let filterMessageTypes = [];
 let filterXPostTypes = [];
 let filterBilibiliPostTypes = [];
 let filterBilibiliSourceKind = "up";
-let translationSourceEditScope = "";
-let translationSourceEditIndex = -1;
 
 function filterItemsOf(kind) {
   return kind === "usernames" ? filterUsernames : filterKeywords;
@@ -4482,38 +5032,31 @@ function addFilterItem(kind) {
   input.focus();
 }
 
-// 消息类型按钮：只渲染当前链路实际支持的类型，不支持的类型直接不出现，
-// 避免出现点了没有效果的按钮。样式参照「开机自启」（√/× SVG + 文字，
-// data-on 记录选中态）。
+function makeFilterCheckbox(type, selected, onChange, disabled) {
+  const label = document.createElement("label");
+  label.className = "content-filter-check" + (disabled ? " disabled" : "");
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.checked = selected;
+  input.disabled = !!disabled;
+  input.addEventListener("change", function () {
+    if (onChange(input.checked) === false) input.checked = !input.checked;
+  });
+  label.append(input, document.createTextNode(type));
+  return label;
+}
+
+// 消息类型只渲染当前链路实际支持的选项，并统一用 Steam 来源编辑中的勾选框胶囊。
 function renderFilterTypes() {
   const wrap = document.getElementById("filterTypeList");
   wrap.innerHTML = "";
-  // 按该链路支持集渲染（顺序与 plugins/filter.py 的类型表一致）。
   filterSupportedTypes().forEach(function (t) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "sec flt-type-btn";
-    // 类型名即显示文案（X/Bilibili 的规范名已是「视频」）。
-    btn.dataset.type = t;
-    btn.title = t;
-    btn.addEventListener("click", function () {
+    wrap.appendChild(makeFilterCheckbox(t, filterMessageTypes.indexOf(t) >= 0, function (checked) {
       const idx = filterMessageTypes.indexOf(t);
-      if (idx >= 0) filterMessageTypes.splice(idx, 1);
-      else filterMessageTypes.push(t);
-      renderFilterTypeBtn(btn);
-    });
-    wrap.appendChild(btn);
-    renderFilterTypeBtn(btn);
+      if (checked && idx < 0) filterMessageTypes.push(t);
+      else if (!checked && idx >= 0) filterMessageTypes.splice(idx, 1);
+    }));
   });
-}
-
-function renderFilterTypeBtn(btn) {
-  const on = filterMessageTypes.indexOf(btn.dataset.type) >= 0;
-  btn.dataset.on = on ? "1" : "0";
-  const icon = on
-    ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
-    : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
-  btn.innerHTML = icon + "<span>" + btn.dataset.type + "</span>";
 }
 
 function renderFilterXPostTypes() {
@@ -4523,25 +5066,17 @@ function renderFilterXPostTypes() {
   // 与 Bilibili 投稿类型一致：不支持的类型置灰禁用，且至少保留一种。
   const supported = filterXPostSupportedTypes();
   FILTER_X_POST_TYPES.forEach(function (t) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "sec flt-type-btn";
-    btn.dataset.type = t;
-    btn.title = supported.indexOf(t) < 0 ? t + "（该来源不支持）" : t;
-    btn.disabled = supported.indexOf(t) < 0;
-    btn.addEventListener("click", function () {
-      if (btn.disabled) return;
+    const isSupported = supported.indexOf(t) >= 0;
+    wrap.appendChild(makeFilterCheckbox(t, filterXPostTypes.indexOf(t) >= 0, function (checked) {
       const idx = filterXPostTypes.indexOf(t);
-      if (idx >= 0) {
-        if (filterXPostTypes.length === 1) return;
+      if (!checked && idx >= 0) {
+        if (filterXPostTypes.length === 1) return false;
         filterXPostTypes.splice(idx, 1);
-      } else {
+      } else if (checked && idx < 0) {
         filterXPostTypes.push(t);
       }
-      renderFilterTypeBtnState(btn, filterXPostTypes);
-    });
-    wrap.appendChild(btn);
-    renderFilterTypeBtnState(btn, filterXPostTypes);
+      return true;
+    }, !isSupported));
   });
 }
 
@@ -4550,40 +5085,23 @@ function filterXPostSupportedTypes() {
   return FILTER_X_POST_TYPES;
 }
 
-function renderFilterTypeBtnState(btn, selected) {
-  const on = selected.indexOf(btn.dataset.type) >= 0;
-  btn.dataset.on = on ? "1" : "0";
-  const icon = on
-    ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
-    : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
-  btn.innerHTML = icon + "<span>" + btn.dataset.type + "</span>";
-}
-
 function renderFilterBilibiliPostTypes() {
   const wrap = document.getElementById("filterBilibiliPostTypeList");
   if (!wrap) return;
   wrap.innerHTML = "";
   const supported = filterBilibiliSourceKind === "up" ? FILTER_BILIBILI_POST_TYPES : ["视频"];
   FILTER_BILIBILI_POST_TYPES.forEach(function (t) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "sec flt-type-btn";
-    btn.dataset.type = t;
-    btn.title = t;
-    btn.disabled = supported.indexOf(t) < 0;
-    btn.addEventListener("click", function () {
-      if (btn.disabled) return;
+    const isSupported = supported.indexOf(t) >= 0;
+    wrap.appendChild(makeFilterCheckbox(t, filterBilibiliPostTypes.indexOf(t) >= 0, function (checked) {
       const idx = filterBilibiliPostTypes.indexOf(t);
-      if (idx >= 0) {
-        if (filterBilibiliPostTypes.length === 1) return;
+      if (!checked && idx >= 0) {
+        if (filterBilibiliPostTypes.length === 1) return false;
         filterBilibiliPostTypes.splice(idx, 1);
-      } else {
+      } else if (checked && idx < 0) {
         filterBilibiliPostTypes.push(t);
       }
-      renderFilterTypeBtnState(btn, filterBilibiliPostTypes);
-    });
-    wrap.appendChild(btn);
-    renderFilterTypeBtnState(btn, filterBilibiliPostTypes);
+      return true;
+    }, !isSupported));
   });
 }
 
@@ -4663,12 +5181,45 @@ function renderUnifiedRelayFilter() {
 
 let relayChannelsEditScope = "discord";
 
+const MULTI_LINK_SCOPE_META = Object.freeze({
+  discord: {page: "discord", label: "Discord"},
+  relay: {page: "discord", label: "Discord"},
+  x: {page: "x", label: "X"},
+  xrelay: {page: "x", label: "X"},
+  bilibili: {page: "bilibili", label: "Bilibili"},
+  birelay: {page: "bilibili", label: "Bilibili"},
+});
+
+function renderMultiLinkScopeSwitch(tabs, scopeAttribute, activeScope) {
+  tabs.classList.add("multi-chain-switch");
+  tabs.setAttribute("role", "group");
+  tabs.setAttribute("aria-label", "选择转发链路");
+  tabs.querySelectorAll(".fscope-tab").forEach(function (tab) {
+    const scope = tab.dataset[scopeAttribute];
+    const meta = MULTI_LINK_SCOPE_META[scope];
+    if (!meta) return;
+    const sourceIcon = document.querySelector(
+      '.nav-item[data-page="' + meta.page + '"] .nav-icon svg'
+    );
+    if (sourceIcon) {
+      const icon = sourceIcon.cloneNode(true);
+      icon.setAttribute("class", "multi-link-scope-icon");
+      icon.setAttribute("aria-hidden", "true");
+      icon.setAttribute("focusable", "false");
+      tab.replaceChildren(icon);
+    }
+    const active = scope === activeScope;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-label", meta.label);
+    tab.setAttribute("title", meta.label);
+    tab.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
 function renderRelayScopeTabs() {
   const tabs = document.getElementById("relayScopeTabs");
   if (!tabs) return;
-  tabs.querySelectorAll(".fscope-tab").forEach(function (tab) {
-    tab.classList.toggle("active", tab.dataset.rscope === relayChannelsEditScope);
-  });
+  renderMultiLinkScopeSwitch(tabs, "rscope", relayChannelsEditScope);
 }
 
 function renderRelayChannelsList() {
@@ -4797,6 +5348,7 @@ const FORWARDING_PANE_PAIRS = [
   ["xSourceContent", "xGroupContent"],
   ["bilibiliSourceContent", "bilibiliGroupContent"],
   ["youtubeSourceContent", "youtubeGroupContent"],
+  ["steamSourceContent", "steamGroupContent"],
   ["qqFgGroupContent", "userContent"],
 ];
 
@@ -4855,6 +5407,160 @@ async function saveRelayChannels() {
   await saveAndReload();
 }
 
+function sourceItemsForScope(scope) {
+  if (scope === "channel") return settings.discord_channels || [];
+  if (scope === "xsource") return settings.x_rss_sources || [];
+  if (scope === "bsource") return settings.bilibili_sources || [];
+  if (scope === "youtubeSource") return settings.youtube_sources || [];
+  return [];
+}
+
+function sourceIdForScope(scope, source) {
+  if (scope === "channel") return String(source.id || "");
+  if (scope === "xsource") return xSourceKey(source.source);
+  if (scope === "bsource") return String(source.id || bilibiliSourceId(source.kind || "up", source.value || ""));
+  if (scope === "youtubeSource") return String(source.id || youtubeSourceId(source.value));
+  return "";
+}
+
+function replaceForwardingSourceReference(scope, oldId, newId) {
+  const config = {
+    channel: [settings.forwarding_groups || [], "channels"],
+    xsource: [settings.x_forwarding_groups || [], "sources"],
+    bsource: [settings.bilibili_forwarding_groups || [], "sources"],
+    youtubeSource: [settings.youtube_forwarding_groups || [], "sources"],
+  }[scope];
+  if (!config || oldId === newId) return;
+  config[0].forEach(function (group) {
+    if (!Array.isArray(group[config[1]])) return;
+    group[config[1]] = group[config[1]].map(function (id) {
+      return String(id) === String(oldId) ? newId : id;
+    });
+  });
+}
+
+function openSourceContentEditor(scope, index) {
+  const items = sourceItemsForScope(scope);
+  const source = items[Number(index)];
+  if (!source) return;
+  const body = document.getElementById("confirmBody");
+  body.replaceChildren();
+  const form = document.createElement("div");
+  form.className = "source-content-form";
+  const nameInput = document.createElement("input");
+  const addressInput = document.createElement("input");
+  function field(labelText, input, value, placeholder) {
+    const label = document.createElement("label");
+    label.className = "source-content-field";
+    const caption = document.createElement("span");
+    caption.textContent = labelText;
+    input.type = "text";
+    input.value = value || "";
+    input.maxLength = 300;
+    input.autocomplete = "off";
+    if (placeholder) input.placeholder = placeholder;
+    label.append(caption, input);
+    form.appendChild(label);
+  }
+  field(scope === "bsource" ? "备注名称（可留空）" : "名称（可留空）", nameInput, source.name || (scope === "xsource" ? xSourceKey(source.source) : scope === "youtubeSource" ? source.value : ""));
+  const addressLabel = scope === "channel" ? "Discord 频道 ID 或链接"
+    : scope === "xsource" ? "X 账号或来源地址"
+      : scope === "bsource" ? (source.kind === "up" ? "UP 主 UID" : source.kind === "tag" ? "标签名" : "关键词")
+        : "YouTube 频道 ID、@handle 或地址";
+  const addressValue = scope === "channel" ? source.id
+    : scope === "xsource" ? source.source
+      : source.value;
+  const addressPlaceholder = scope === "channel" ? "频道 ID 或 Discord 频道链接"
+    : scope === "xsource" ? "账号名、@账号或 RSS 地址"
+      : scope === "bsource" ? (source.kind === "up" ? "数字 UID" : "来源值")
+        : "UC...、@handle 或频道主页链接";
+  field(addressLabel, addressInput, addressValue, addressPlaceholder);
+  body.appendChild(form);
+  document.getElementById("confirmTitle").textContent = "编辑来源内容";
+  setConfirmButtons("保存", true);
+  confirmAction = async function () {
+    let nextAddress = addressInput.value.trim();
+    if (!nextAddress) {
+      showAlert("无法保存", "来源地址不能为空。");
+      return;
+    }
+    if (scope === "channel" && /^https?:\/\//i.test(nextAddress)) {
+      try {
+        const segments = new URL(nextAddress).pathname.split("/").filter(Boolean);
+        nextAddress = segments.length >= 3 && segments[0].toLowerCase() === "channels" ? segments[2] : "";
+      } catch (error) { nextAddress = ""; }
+      if (!/^\d{15,22}$/.test(nextAddress)) {
+        showAlert("无法保存", "请输入有效的 Discord 频道 ID 或频道链接。");
+        return;
+      }
+    } else if (scope === "channel" && !/^\d{15,22}$/.test(nextAddress)) {
+      showAlert("无法保存", "请输入有效的 Discord 频道 ID 或频道链接。");
+      return;
+    } else if (scope === "xsource") {
+      if (/^@/.test(nextAddress)) nextAddress = nextAddress.replace(/^@+/, "");
+      if (/\s/.test(nextAddress)) {
+        showAlert("无法保存", "X 来源地址中不能包含空格。");
+        return;
+      }
+    } else if (scope === "bsource" && source.kind === "up" && !/^\d+$/.test(nextAddress)) {
+      showAlert("无法保存", "UP 主来源地址必须是数字 UID。");
+      return;
+    } else if (scope === "youtubeSource") {
+      nextAddress = normalizeYoutubeChannelValue(nextAddress);
+      if (!nextAddress) {
+        showAlert("无法保存", "请输入有效的 YouTube 频道 ID、@handle 或频道地址。");
+        return;
+      }
+    }
+
+    const oldId = sourceIdForScope(scope, source);
+    const nextId = scope === "channel" ? nextAddress
+      : scope === "xsource" ? xSourceKey(nextAddress)
+        : scope === "bsource" ? bilibiliSourceId(source.kind || "up", nextAddress)
+          : youtubeSourceId(nextAddress);
+    const duplicate = items.some(function (item) {
+      if (item === source) return false;
+      if (scope === "bsource") {
+        return String(item.kind || "up") === String(source.kind || "up") && String(item.value || "").toLowerCase() === nextAddress.toLowerCase();
+      }
+      const candidate = sourceIdForScope(scope, item);
+      return scope === "xsource" ? candidate.toLowerCase() === nextId.toLowerCase() : candidate === nextId;
+    });
+    if (duplicate) {
+      showAlert("无法保存", "该来源地址已存在。");
+      return;
+    }
+
+    source.name = nameInput.value.trim();
+    if (scope === "channel") source.id = nextAddress;
+    else if (scope === "xsource") source.source = nextAddress;
+    else if (scope === "bsource") {
+      source.value = nextAddress;
+      source.id = nextId;
+    } else {
+      source.value = nextAddress;
+      source.id = nextId;
+      source.kind = "channel";
+      if (!source.name) source.name = nextAddress;
+    }
+    replaceForwardingSourceReference(scope, oldId, nextId);
+    await saveAndReload();
+  };
+  document.getElementById("confirmModal").style.display = "flex";
+  nameInput.focus();
+}
+
+function syncFilterTranslationInputs() {
+  const enabled = document.getElementById("filterTranslationEnabled");
+  const append = document.getElementById("filterTranslationAppendOriginal");
+  const datetime = document.getElementById("filterTranslationShowDatetime");
+  if (!enabled || !append || !datetime) return;
+  append.disabled = !enabled.checked;
+  datetime.disabled = !enabled.checked;
+  append.closest(".content-filter-check")?.classList.toggle("disabled", append.disabled);
+  datetime.closest(".content-filter-check")?.classList.toggle("disabled", datetime.disabled);
+}
+
 function prepareFilterModal(config, label) {
   const c = config || {};
   document.getElementById("filterChanName").textContent = label;
@@ -4885,6 +5591,13 @@ function prepareFilterModal(config, label) {
   if (xPostTypeFields) xPostTypeFields.style.display = filterEditScope === "xsource" ? "block" : "none";
   const bilibiliPostTypeFields = document.getElementById("filterBilibiliPostTypeFields");
   if (bilibiliPostTypeFields) bilibiliPostTypeFields.style.display = filterEditScope === "bsource" ? "block" : "none";
+  const translationFields = document.getElementById("filterTranslationFields");
+  const isSourceFilter = ["channel", "xsource", "bsource", "youtubeSource"].includes(filterEditScope);
+  if (translationFields) translationFields.style.display = isSourceFilter ? "block" : "none";
+  document.getElementById("filterTranslationEnabled").checked = c.translation_enabled === true;
+  document.getElementById("filterTranslationAppendOriginal").checked = c.translation_append_original !== false;
+  document.getElementById("filterTranslationShowDatetime").checked = c.translation_show_datetime === true;
+  syncFilterTranslationInputs();
   filterBilibiliSourceKind = String(c.kind || "up");
   // 手动转发统一弹窗：用 Tab 分屏编辑 Discord / X / Bilibili 三套筛选。
   renderFilterScopeTabs();
@@ -4930,10 +5643,15 @@ function prepareFilterModal(config, label) {
   document.getElementById("filterModal").style.display = "flex";
 }
 
-// 来源级筛选的漏斗状态应与实际支持集一致，并覆盖关键词、媒体开关及内容类型。
+// 来源级内容筛选按钮在关键词、类型或翻译选项偏离默认值时高亮。
+function sourceTranslationActive(source) {
+  return source.translation_enabled === true || source.translation_append_original === false || source.translation_show_datetime === true;
+}
+
 function sourceFilterActive(source, scope, includeAudience) {
   if (!source) return false;
   const supported = FILTER_SUPPORTED_MESSAGE_TYPES[scope] || FILTER_MESSAGE_TYPES;
+  if (sourceTranslationActive(source)) return true;
   if (filterConfigActive(source, includeAudience !== false, supported, scope)) return true;
   if (scope === "xsource") {
     const types = source.filter_post_types;
@@ -4950,7 +5668,7 @@ function sourceFilterActive(source, scope, includeAudience) {
 }
 
 function channelFilterActive(c) {
-  return filterConfigActive(c);
+  return !!c && (sourceTranslationActive(c) || filterConfigActive(c));
 }
 
 function xSourceFilterActive(source) {
@@ -4999,7 +5717,7 @@ const MANUAL_RELAY_SCOPE_META = {
   birelay: { key: "bilibili_c2c_relay_filter", label: "Bilibili 手动转发", tab: "Bilibili" },
 };
 
-// 统一「消息筛选」二级窗口：三个链路 Tab（Discord / X / Bilibili），
+// 统一「内容筛选」二级窗口：三个链路 Tab（Discord / X / Bilibili），
 // 各自用独立 scope 编辑与保存；每次保存只写当前 Tab 对应的配置键。
 function renderFilterScopeTabs() {
   const tabs = document.getElementById("filterScopeTabs");
@@ -5007,9 +5725,7 @@ function renderFilterScopeTabs() {
   const show = !!MANUAL_RELAY_SCOPE_META[filterEditScope];
   tabs.style.display = show ? "flex" : "none";
   if (!show) return;
-  tabs.querySelectorAll(".fscope-tab").forEach(function (tab) {
-    tab.classList.toggle("active", tab.dataset.scope === filterEditScope);
-  });
+  renderMultiLinkScopeSwitch(tabs, "scope", filterEditScope);
 }
 
 function openUnifiedRelayFilterModal() {
@@ -5031,67 +5747,9 @@ function closeFilterModal() {
   filterEditScope = "channel";
 }
 
-function openTranslationSourceModal(scope, index) {
-  const isX = scope === "xsource";
-  const isYoutube = scope === "youtubeSource";
-  const item = isX
-    ? (settings.x_rss_sources || [])[index]
-    : isYoutube
-      ? (settings.youtube_sources || [])[index]
-      : (settings.discord_channels || [])[index];
-  if (!item) return;
-  translationSourceEditScope = isX ? "xsource" : isYoutube ? "youtubeSource" : "channel";
-  translationSourceEditIndex = index;
-  const label = isX
-    ? "@" + xSourceKey(item.source)
-    : isYoutube
-      ? (item.name || item.value || "")
-      : "# " + (item.name || item.id);
-  document.getElementById("translationSourceName").textContent = label;
-  renderTranslationSettingButton("translationSourceEnabled", item.translation_enabled === true, "启用翻译");
-  renderTranslationSettingButton("translationSourceAppendOriginal", item.translation_append_original !== false, "保留原文");
-  renderTranslationSettingButton("translationSourceShowDatetime", item.translation_show_datetime === true, "显示时间");
-  syncTranslationSourceModalButtons();
-  document.getElementById("translationSourceModal").style.display = "flex";
-}
-
-function renderTranslationSettingButton(id, on, label) {
-  const btn = document.getElementById(id);
-  if (!btn) return;
-  btn.dataset.on = on ? "1" : "0";
-  btn.setAttribute("aria-checked", on ? "true" : "false");
-  btn.innerHTML = pillSwitchMarkup(label, on);
-}
-
-function syncTranslationSourceModalButtons() {
-  const enabled = document.getElementById("translationSourceEnabled");
-  const append = document.getElementById("translationSourceAppendOriginal");
-  if (!enabled || !append) return;
-  append.disabled = enabled.dataset.on !== "1";
-}
-
-function closeTranslationSourceModal() {
-  document.getElementById("translationSourceModal").style.display = "none";
-  translationSourceEditScope = "";
-  translationSourceEditIndex = -1;
-}
-
-async function saveTranslationSourceModal() {
-  const item = translationSourceEditScope === "xsource"
-    ? (settings.x_rss_sources || [])[translationSourceEditIndex]
-    : translationSourceEditScope === "youtubeSource"
-      ? (settings.youtube_sources || [])[translationSourceEditIndex]
-      : (settings.discord_channels || [])[translationSourceEditIndex];
-  if (!item) return;
-  item.translation_enabled = document.getElementById("translationSourceEnabled").dataset.on === "1";
-  item.translation_append_original = document.getElementById("translationSourceAppendOriginal").dataset.on === "1";
-  item.translation_show_datetime = document.getElementById("translationSourceShowDatetime").dataset.on === "1";
-  const saved = await saveAndReload();
-  if (saved) closeTranslationSourceModal();
-}
-
 document.getElementById("filterUsernameAdd").addEventListener("click", function () { addFilterItem("usernames"); });
 document.getElementById("filterKeywordAdd").addEventListener("click", function () { addFilterItem("keywords"); });
+document.getElementById("filterTranslationEnabled").addEventListener("change", syncFilterTranslationInputs);
 document.getElementById("filterUsernameInput").addEventListener("keydown", function (e) {
   if (e.key === "Enter") { e.preventDefault(); addFilterItem("usernames"); }
 });
@@ -5125,6 +5783,9 @@ document.getElementById("filterSave").addEventListener("click", async function (
           ? (settings.youtube_sources || [])[filterEditIndex]
           : settings.discord_channels[filterEditIndex];
     if (!c) return;
+    c.translation_enabled = document.getElementById("filterTranslationEnabled").checked;
+    c.translation_append_original = document.getElementById("filterTranslationAppendOriginal").checked;
+    c.translation_show_datetime = document.getElementById("filterTranslationShowDatetime").checked;
     if (filterEditScope === "xsource") {
       c.filter_keywords = filterKeywords.slice();
       saveSourceMessageTypes(c, "xsource");
@@ -5195,6 +5856,7 @@ function renderQQBotRows() {
   const body = document.getElementById("qqConfigBots");
   body.innerHTML = qqBotDraft.map(function (bot, index) {
     return '<div class="qq-bot-form-row">' +
+      '<label style="font-size:13px;color:var(--muted);">账号名称<input class="qq-bot-name" data-i="' + index + '" maxlength="80" value="' + escapeHtml(bot.name || "") + '" autocomplete="off" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;"></label>' +
       '<label style="font-size:13px;color:var(--muted);">AppID<input class="qq-bot-appid" data-i="' + index + '" value="' + escapeHtml(bot.appid || "") + '" autocomplete="off" spellcheck="false" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;"></label>' +
       '<label style="font-size:13px;color:var(--muted);">AppSecret<input class="qq-bot-secret" data-i="' + index + '" type="password" autocomplete="new-password" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;"></label>' +
       '<button type="button" class="danger qq-bot-remove" data-i="' + index + '" ' + (qqBotDraft.length === 1 && !personalQQConnections.some(item => item.enabled) ? 'disabled title="至少保留一个 Bot"' : 'title="删除此 Bot"') + '>删除</button></div>';
@@ -5209,7 +5871,7 @@ function renderQQBotRows() {
   });
 }
 document.getElementById("qqConfigAddBot").addEventListener("click", function () {
-  qqBotDraft.push({appid: ""});
+  qqBotDraft.push({appid: "", name: ""});
   renderQQBotRows();
 });
 async function openQQConfigModal() {
@@ -5220,7 +5882,8 @@ async function openQQConfigModal() {
     r = await jget("/api/bot/qq-config");
   } catch (e) { r = null; }
   if (r && r.ok) {
-    qqBotDraft = (r.bots || []).map(function (bot) { return {appid: bot.appid || ""}; });
+    qqBotAccounts = (r.bots || []).map(function (bot) { return {appid: bot.appid || "", name: bot.name || ""}; });
+    qqBotDraft = qqBotAccounts.map(function (bot) { return {appid: bot.appid, name: bot.name}; });
     if (!qqBotDraft.length && !personalQQConnections.some(item => item.enabled)) qqBotDraft = [{appid: ""}];
     renderQQBotRows();
   } else {
@@ -5229,9 +5892,10 @@ async function openQQConfigModal() {
 }
 async function saveQQConfig() {
   const bots = qqBotDraft.map(function (bot, index) {
+    const name = document.querySelector('.qq-bot-name[data-i="' + index + '"]').value.trim();
     const appid = document.querySelector('.qq-bot-appid[data-i="' + index + '"]').value.trim();
     const secret = document.querySelector('.qq-bot-secret[data-i="' + index + '"]').value;
-    return {appid: appid, secret: secret};
+    return {appid: appid, name: name, secret: secret};
   });
   if (bots.some(function (bot) { return !bot.appid; })) { showAlert("QQ Bot 配置", "AppID 不能为空"); return; }
   const saveBtn = document.getElementById("qqConfigSave");
@@ -5245,15 +5909,22 @@ async function saveQQConfig() {
     showAlert("保存失败", (r && r.msg) || "保存 QQ Bot 配置失败");
     return;
   }
-  // 保存成功后再重启，使新配置生效；重启失败不回滚配置
-  let rr;
-  try {
-    rr = await jpost("/api/bot/restart");
-  } catch (e) { rr = { ok: false }; }
-  if (!rr || !rr.ok) {
-    saveBtn.disabled = false;
-    showAlert("配置已保存", "配置已保存，但机器人重启失败，请稍后手动重启");
-    return;
+  if (Array.isArray(r.bots)) {
+    qqBotAccounts = r.bots.map(function (bot) { return {appid: bot.appid || "", name: bot.name || ""}; });
+  } else {
+    qqBotAccounts = bots.map(function (bot) { return {appid: bot.appid, name: bot.name}; });
+  }
+  if (r.restart_required !== false) {
+    // 凭据变化后重启使新配置生效；仅改显示名称不重启。
+    let rr;
+    try {
+      rr = await jpost("/api/bot/restart");
+    } catch (e) { rr = { ok: false }; }
+    if (!rr || !rr.ok) {
+      saveBtn.disabled = false;
+      showAlert("配置已保存", "配置已保存，但机器人重启失败，请稍后手动重启");
+      return;
+    }
   }
   closeQQConfigModal();
   qqBotIds = (r.bot_ids || []).map(String).concat(personalQQConnections.map(item => "personal:" + item.uin));
@@ -5271,6 +5942,18 @@ let aiProfileDraft = null;
 function cloneAiProfileDraft() {
   const profiles = aiProfilesForDisplay().map(function (profile) { return Object.assign({}, profile); });
   const active = currentAiProfileId();
+  const profileIds = profiles.map(function (profile) { return String(profile.id || ""); });
+  let priority = Array.isArray(settings && settings.ai_profile_priority)
+    ? settings.ai_profile_priority.map(String).filter(function (id, index, ids) {
+      return profileIds.includes(id) && ids.indexOf(id) === index;
+    })
+    : [];
+  if (!priority.length) {
+    if (profileIds.includes(active)) priority.push(active);
+    profileIds.forEach(function (id) { if (!priority.includes(id)) priority.push(id); });
+  } else {
+    profileIds.forEach(function (id) { if (!priority.includes(id)) priority.push(id); });
+  }
   const apiKeys = {};
   profiles.forEach(function (profile) {
     // 旧版误把密钥填进 api_key_env 时，迁移到临时密码框并恢复合法变量名；
@@ -5280,7 +5963,7 @@ function cloneAiProfileDraft() {
       profile.api_key_env = "WRELAY_AI_API_KEY";
     }
   });
-  return {profiles: profiles, active: active, apiKeys: apiKeys};
+  return {profiles: profiles, active: active, priority: priority, apiKeys: apiKeys};
 }
 
 function activeAiDraftProfile() {
@@ -5292,14 +5975,10 @@ function activeAiDraftProfile() {
 
 function renderAiProfileEditor() {
   if (!aiProfileDraft) return;
-  const select = document.getElementById("aiProfileSelect");
   const profile = activeAiDraftProfile();
-  if (!select || !profile) return;
-  select.innerHTML = aiProfileDraft.profiles.map(function (item) {
-    const model = item.model ? " · " + item.model : "";
-    return '<option value="' + escapeHtml(String(item.id)) + '">' + escapeHtml(String(item.name || item.id)) + escapeHtml(model) + '</option>';
-  }).join("");
-  select.value = String(profile.id);
+  const summary = document.getElementById("aiProfileEditorSummary");
+  if (!summary || !profile) return;
+  summary.textContent = "配置详情：" + (profile.name || profile.id || "当前配置") + (profile.model ? " · " + profile.model : "");
   document.getElementById("aiProfileName").value = profile.name || "";
   document.getElementById("aiBaseUrl").value = profile.base_url || "";
   document.getElementById("aiModel").value = profile.model || "";
@@ -5307,7 +5986,7 @@ function renderAiProfileEditor() {
   document.getElementById("aiApiKey").value = (aiProfileDraft.apiKeys || {})[String(profile.id)] || "";
   document.getElementById("aiProfileDelete").disabled = aiProfileDraft.profiles.length <= 1;
   document.getElementById("aiApiTestStatus").textContent = "";
-  renderAiTestHistory();
+  renderAiModelPriorityList();
 }
 
 function captureAiApiKeyDraft() {
@@ -5315,16 +5994,30 @@ function captureAiApiKeyDraft() {
   const input = document.getElementById("aiApiKey");
   if (!profile || !input || !aiProfileDraft) return;
   aiProfileDraft.apiKeys = aiProfileDraft.apiKeys || {};
-  aiProfileDraft.apiKeys[String(profile.id)] = input.value;
+  const id = String(profile.id);
+  const previous = aiProfileDraft.apiKeys[id] || "";
+  if (previous !== input.value && profile.last_test) {
+    profile.last_test = null;
+    profile.last_tested_model = "";
+  }
+  aiProfileDraft.apiKeys[id] = input.value;
 }
 
 function captureAiProfileEditorFields(profile) {
   if (!profile) return;
+  const changed = profile.base_url !== document.getElementById("aiBaseUrl").value.trim() ||
+    profile.model !== document.getElementById("aiModel").value.trim() ||
+    profile.api_key_env !== document.getElementById("aiApiKeyEnv").value.trim();
   profile.name = document.getElementById("aiProfileName").value.trim();
   profile.base_url = document.getElementById("aiBaseUrl").value.trim();
   profile.model = document.getElementById("aiModel").value.trim();
   profile.api_key_env = document.getElementById("aiApiKeyEnv").value.trim();
   captureAiApiKeyDraft();
+  if (changed) {
+    profile.last_test = null;
+    profile.last_tested_model = "";
+  }
+  renderAiModelPriorityList();
 }
 
 function aiProfileTestPayload(profile) {
@@ -5351,7 +6044,7 @@ function recordAiTestResult(profile, result, fallbackMessage) {
     diagnostic: result && result.diagnostic ? Object.assign({}, result.diagnostic) : null,
   };
   if (ok) profile.last_tested_model = model;
-  renderAiTestHistory();
+  renderAiModelPriorityList();
   return message;
 }
 
@@ -5398,43 +6091,151 @@ function renderAiTestDiagnostic(profile, test) {
   return parts.map(function (part) { return escapeHtml(part); }).join(" · ");
 }
 
-function renderAiTestHistory() {
-  const summary = document.querySelector("#aiApiTestHistory > summary");
-  const list = document.getElementById("aiApiTestHistoryList");
+function renderAiModelPriorityList() {
+  const summary = document.querySelector("#aiModelPriorityMenu > summary");
+  const list = document.getElementById("aiModelPriorityList");
   if (!summary || !list || !aiProfileDraft) return;
-  const entries = aiProfileDraft.profiles
-    .map(function (profile) {
-      const legacyTest = profile.last_tested_model
-        ? {ok: true, model: profile.last_tested_model, message: "历史检测成功"}
-        : null;
-      return {profile: profile, test: profile.last_test || legacyTest};
-    })
-    .filter(function (item) { return item.test && typeof item.test === "object"; });
-  const successCount = entries.filter(function (item) { return item.test.ok === true; }).length;
-  const failureCount = entries.length - successCount;
-  summary.textContent = entries.length
-    ? "检测记录（成功 " + successCount + " · 失败 " + failureCount + "）"
-    : "检测记录（尚未检测）";
-  if (!entries.length) {
-    list.textContent = "尚未检测任何 AI API 配置。";
+  const profilesById = new Map(aiProfileDraft.profiles.map(function (profile) {
+    return [String(profile.id), profile];
+  }));
+  const profileIds = aiProfileDraft.profiles.map(function (profile) { return String(profile.id); });
+  const priority = Array.isArray(aiProfileDraft.priority) ? aiProfileDraft.priority : [];
+  const orderedIds = priority.filter(function (id, index) {
+    return profilesById.has(String(id)) && priority.indexOf(id) === index;
+  }).map(String);
+  profileIds.forEach(function (id) { if (!orderedIds.includes(id)) orderedIds.push(id); });
+  aiProfileDraft.priority = orderedIds;
+
+  let successCount = 0;
+  let failureCount = 0;
+  aiProfileDraft.profiles.forEach(function (profile) {
+    const test = profile.last_test;
+    if (test && test.ok === true) successCount += 1;
+    else if (test && test.ok === false) failureCount += 1;
+    else if (!test && profile.last_tested_model && profile.last_tested_model === profile.model) successCount += 1;
+  });
+  summary.textContent = "模型优先级（可用 " + successCount + " · 失败 " + failureCount + " · 共 " + profileIds.length + "）";
+  if (!orderedIds.length) {
+    list.innerHTML = '<div class="ai-model-priority-empty">尚未添加 AI 模型配置。</div>';
     return;
   }
-  const batch = aiProfileDraft.last_batch_test;
-  const batchSummary = batch
-    ? '<div class="translation-test-batch-summary">最近一次全部检测：成功 ' + Number(batch.success || 0) + "/" + Number(batch.total || 0) + '</div>'
-    : "";
-  list.innerHTML = batchSummary + entries.map(function (item) {
-    const profile = item.profile;
-    const test = item.test;
-    const model = String(test.model || profile.model || "未填写模型");
-    return '<div class="translation-test-entry' + (test.ok === true ? ' ok' : '') + '">' +
-      '<div><strong>' + escapeHtml(String(profile.name || profile.id)) + " · " + escapeHtml(model) + '</strong>' +
-      '<small class="translation-test-diagnostic">' + renderAiTestDiagnostic(profile, test) + '</small></div></div>';
+
+  list.innerHTML = orderedIds.map(function (id, index) {
+    const profile = profilesById.get(id);
+    if (!profile) return "";
+    const legacyTest = profile.last_tested_model && profile.last_tested_model === profile.model
+      ? {ok: true, model: profile.last_tested_model, message: "历史检测成功"}
+      : null;
+    const test = profile.last_test || legacyTest;
+    const state = test && test.ok === true ? "ok" : (test && test.ok === false ? "failed" : "unknown");
+    const isWorking = latestTranslationRuntime.provider === "ai" &&
+      String(latestTranslationRuntime.model || "") === String(profile.model || "") &&
+      (!latestTranslationRuntime.profile || String(latestTranslationRuntime.profile) === String(profile.name || ""));
+    const displayState = isWorking ? "working" : state;
+    const statusText = isWorking ? "工作中" : (state === "ok" ? "可用" : (state === "failed" ? "不可用" : "未检测"));
+    const statusDetail = isWorking ? "最近一次真实翻译成功使用此模型" : (test ? renderAiTestDiagnostic(profile, test) : "检测后显示此模型状态");
+    const orderLabel = index === 0 ? "首选" : "备用 " + index;
+    const selected = String(id) === String(aiProfileDraft.active);
+    return '<div class="ai-model-priority-row' + (selected ? ' selected' : '') + '" data-profile-id="' + escapeHtml(id) + '" role="listitem" tabindex="0" aria-current="' + (selected ? 'true' : 'false') + '" title="点击选择并编辑此配置">' +
+      '<button class="ai-model-priority-handle" type="button" draggable="true" title="拖动调整模型优先级" aria-label="拖动调整模型优先级">' + SVG_GRIP + '</button>' +
+      '<span class="ai-model-priority-rank">' + orderLabel + '</span>' +
+      '<div class="ai-model-priority-copy"><strong>' + escapeHtml(String(profile.model || "未填写模型")) + '</strong>' +
+        '<small>' + escapeHtml(String(profile.name || profile.id)) + '</small></div>' +
+      '<span class="ai-model-priority-status ' + displayState + '" title="' + escapeHtml(statusDetail) + '">' +
+        '<span class="ai-model-priority-status-line"><i aria-hidden="true"></i><span>' + statusText + '</span></span>' +
+        '<small>' + statusDetail + '</small></span></div>';
   }).join("");
+
+  if (list.dataset.dragHandlersAttached === "1") return;
+  list.dataset.dragHandlersAttached = "1";
+  function selectProfileRow(row) {
+    if (!row || !aiProfileDraft) return;
+    const profileId = String(row.dataset.profileId || "");
+    if (!aiProfileDraft.profiles.some(function (profile) { return String(profile.id) === profileId; })) return;
+    captureAiProfileEditorFields(activeAiDraftProfile());
+    aiProfileDraft.active = profileId;
+    const editorDetails = document.getElementById("aiProfileEditorDetails");
+    if (editorDetails) editorDetails.open = true;
+    renderAiProfileEditor();
+  }
+  list.addEventListener("click", function (event) {
+    if (event.target.closest(".ai-model-priority-handle")) return;
+    if (Date.now() <= Number(list.dataset.suppressRowClickUntil || 0)) return;
+    selectProfileRow(event.target.closest(".ai-model-priority-row"));
+  });
+  list.addEventListener("keydown", function (event) {
+    if (event.target.closest(".ai-model-priority-handle")) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const row = event.target.closest(".ai-model-priority-row");
+    if (!row) return;
+    event.preventDefault();
+    selectProfileRow(row);
+  });
+  list.addEventListener("dragstart", function (event) {
+    const handle = event.target.closest(".ai-model-priority-handle");
+    const row = handle && handle.closest(".ai-model-priority-row");
+    if (!row) { event.preventDefault(); return; }
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", row.dataset.profileId || "");
+    row.classList.add("dragging");
+  });
+  list.addEventListener("dragover", function (event) {
+    const row = event.target.closest(".ai-model-priority-row");
+    if (!row) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    list.querySelectorAll(".ai-model-priority-row").forEach(function (item) {
+      item.classList.remove("drop-before", "drop-after");
+    });
+    const rect = row.getBoundingClientRect();
+    row.classList.add(event.clientY < rect.top + rect.height / 2 ? "drop-before" : "drop-after");
+  });
+  list.addEventListener("drop", function (event) {
+    const row = event.target.closest(".ai-model-priority-row");
+    const fromId = event.dataTransfer.getData("text/plain");
+    if (!row || !fromId || !aiProfileDraft) return;
+    event.preventDefault();
+    const targetId = row.dataset.profileId || "";
+    const fromIndex = aiProfileDraft.priority.indexOf(fromId);
+    if (fromIndex < 0 || fromId === targetId) return;
+    const rect = row.getBoundingClientRect();
+    const insertBefore = event.clientY < rect.top + rect.height / 2;
+    const reordered = aiProfileDraft.priority.slice();
+    reordered.splice(fromIndex, 1);
+    let targetIndex = reordered.indexOf(targetId);
+    if (!insertBefore) targetIndex += 1;
+    reordered.splice(targetIndex, 0, fromId);
+    aiProfileDraft.priority = reordered;
+    renderAiModelPriorityList();
+  });
+  list.addEventListener("dragend", function () {
+    list.querySelectorAll(".ai-model-priority-row").forEach(function (item) {
+      item.classList.remove("dragging", "drop-before", "drop-after");
+    });
+    list.dataset.suppressRowClickUntil = String(Date.now() + 500);
+  });
 }
 
 async function persistAiTestRecord(profile) {
   if (!profile || !profile.last_test) return false;
+  const draftKey = aiProfileDraft && aiProfileDraft.apiKeys
+    ? String(aiProfileDraft.apiKeys[String(profile.id)] || "").trim()
+    : "";
+  if (draftKey) return false;
+  const savedProfiles = Array.isArray(settings && settings.ai_profiles) ? settings.ai_profiles : [];
+  const savedProfile = savedProfiles.find(function (item) {
+    return item && String(item.id || "") === String(profile.id || "");
+  });
+  const legacyAi = settings && settings.ai && typeof settings.ai === "object" ? settings.ai : {};
+  const matchesSavedConfig = savedProfile
+    ? String(savedProfile.model || "") === String(profile.model || "") &&
+      String(savedProfile.base_url || "") === String(profile.base_url || "") &&
+      String(savedProfile.api_key_env || "") === String(profile.api_key_env || "")
+    : String(profile.id || "") === "default" && !savedProfiles.length &&
+      String(legacyAi.model || "") === String(profile.model || "") &&
+      String(legacyAi.base_url || "") === String(profile.base_url || "") &&
+      String(legacyAi.api_key_env || "WRELAY_AI_API_KEY") === String(profile.api_key_env || "");
+  if (!matchesSavedConfig) return false;
   try {
     const result = await jpost("/api/translation/ai-test-record", {
       profile_id: String(profile.id || ""),
@@ -5446,17 +6247,17 @@ async function persistAiTestRecord(profile) {
     // cloneAiProfileDraft() 会从保存前的旧内存快照复制，误显示为“尚未检测”。
     settings = settings || {};
     if (!Array.isArray(settings.ai_profiles)) settings.ai_profiles = [];
-    let savedProfile = settings.ai_profiles.find(function (item) {
+    let updatedProfile = settings.ai_profiles.find(function (item) {
       return item && String(item.id || "") === String(profile.id || "");
     });
-    if (!savedProfile && String(profile.id || "") === "default" && !settings.ai_profiles.length) {
-      savedProfile = Object.assign({}, profile);
-      settings.ai_profiles.push(savedProfile);
+    if (!updatedProfile && String(profile.id || "") === "default" && !settings.ai_profiles.length) {
+      updatedProfile = Object.assign({}, profile);
+      settings.ai_profiles.push(updatedProfile);
       settings.ai_active_profile = settings.ai_active_profile || "default";
     }
-    if (savedProfile) {
-      savedProfile.last_test = Object.assign({}, profile.last_test);
-      if (profile.last_test.ok) savedProfile.last_tested_model = profile.last_test.model || "";
+    if (updatedProfile) {
+      updatedProfile.last_test = Object.assign({}, profile.last_test);
+      if (profile.last_test.ok) updatedProfile.last_tested_model = profile.last_test.model || "";
     }
     return true;
   } catch (err) {
@@ -5502,7 +6303,11 @@ async function testAllAiApis() {
   captureAiProfileEditorFields(activeAiDraftProfile());
   button.disabled = true;
   if (currentButton) currentButton.disabled = true;
-  const profiles = aiProfileDraft.profiles.slice();
+  const profilesById = new Map(aiProfileDraft.profiles.map(function (profile) {
+    return [String(profile.id), profile];
+  }));
+  const profiles = aiProfileDraft.priority.map(function (id) { return profilesById.get(String(id)); })
+    .filter(Boolean);
   let successCount = 0;
   for (let i = 0; i < profiles.length; i += 1) {
     status.textContent = "正在检测全部 API（" + (i + 1) + "/" + profiles.length + "）…";
@@ -5514,7 +6319,7 @@ async function testAllAiApis() {
     total: profiles.length,
     at: Date.now(),
   };
-  renderAiTestHistory();
+  renderAiModelPriorityList();
   status.textContent = "";
   button.disabled = false;
   if (currentButton) currentButton.disabled = false;
@@ -5544,18 +6349,25 @@ async function openTranslationConfigModal() {
 async function saveTranslationConfig() {
   const profile = activeAiDraftProfile();
   if (!profile) { showAlert("保存失败", "请先新增或选择一个 AI 配置"); return; }
-  const previousModel = String(profile.model || "").trim();
-  profile.name = document.getElementById("aiProfileName").value.trim();
-  profile.base_url = document.getElementById("aiBaseUrl").value.trim();
-  profile.model = document.getElementById("aiModel").value.trim();
-  profile.api_key_env = document.getElementById("aiApiKeyEnv").value.trim();
-  if (profile.last_tested_model && profile.model !== previousModel) {
-    profile.last_tested_model = "";
-  }
+  captureAiProfileEditorFields(profile);
   captureAiApiKeyDraft();
-  const apiKey = (aiProfileDraft.apiKeys || {})[String(profile.id)] || "";
   if (!profile.name) { showAlert("保存失败", "配置名称不能为空"); return; }
   if (!profile.api_key_env) { showAlert("保存失败", "API 密钥环境变量名不能为空"); return; }
+  const aiEnvUpdates = new Map();
+  for (const item of aiProfileDraft.profiles) {
+    const envName = String(item.api_key_env || "").trim();
+    const draftKey = String((aiProfileDraft.apiKeys || {})[String(item.id)] || "").trim();
+    if (!draftKey) continue;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(envName)) {
+      showAlert("保存失败", "配置「" + String(item.name || item.id) + "」的 API 密钥环境变量名格式不正确");
+      return;
+    }
+    if (aiEnvUpdates.has(envName) && aiEnvUpdates.get(envName) !== draftKey) {
+      showAlert("保存失败", "多个配置使用了同一密钥环境变量，但填写了不同密钥；请为它们设置不同的环境变量名");
+      return;
+    }
+    aiEnvUpdates.set(envName, draftKey);
+  }
   settings.tencent_tmt = settings.tencent_tmt || {};
   const saveBtn = document.getElementById("translationConfigSave");
   const cancelBtn = document.getElementById("translationConfigCancel");
@@ -5574,22 +6386,28 @@ async function saveTranslationConfig() {
     showAlert("保存失败", (envResult && envResult.msg) || "保存腾讯 TMT 密钥失败");
     return;
   }
-  let aiEnvResult;
-  try {
-    aiEnvResult = await jpost("/api/translation/ai-env", {
-      env_name: profile.api_key_env,
-      api_key: apiKey,
-    });
-  } catch (e) { aiEnvResult = {ok: false, msg: "保存失败，请重试"}; }
-  if (!aiEnvResult || !aiEnvResult.ok) {
-    saveBtn.disabled = false;
-    cancelBtn.disabled = false;
-    showAlert("保存失败", (aiEnvResult && aiEnvResult.msg) || "保存 AI API 密钥失败");
-    return;
+  for (const [envName, keyValue] of aiEnvUpdates.entries()) {
+    let aiEnvResult;
+    try {
+      aiEnvResult = await jpost("/api/translation/ai-env", {
+        env_name: envName,
+        api_key: keyValue,
+      });
+    } catch (e) { aiEnvResult = {ok: false, msg: "保存失败，请重试"}; }
+    if (!aiEnvResult || !aiEnvResult.ok) {
+      saveBtn.disabled = false;
+      cancelBtn.disabled = false;
+      showAlert("保存失败", (aiEnvResult && aiEnvResult.msg) || "保存 AI API 密钥失败");
+      return;
+    }
   }
   settings.ai_profiles = aiProfileDraft.profiles;
-  settings.ai_active_profile = aiProfileDraft.active;
-  syncLegacyAiConfig(profile);
+  settings.ai_profile_priority = aiProfileDraft.priority.slice();
+  const primary = aiProfileDraft.profiles.find(function (item) {
+    return String(item.id) === String(aiProfileDraft.priority[0] || "");
+  }) || profile;
+  settings.ai_active_profile = String(primary.id || "");
+  syncLegacyAiConfig(primary);
   const saved = await saveAndReload();
   if (!saved) {
     saveBtn.disabled = false;
@@ -5654,14 +6472,15 @@ async function saveDiscordConfig() {
   await refreshStatus();
 }
 
-document.addEventListener("click", async function (e) {
+document.addEventListener("contextmenu", async function (e) {
   const value = e.target.closest(".fgsection :is(.middle-value, .id-value)[data-copy-value]");
-  if (value && !(e.ctrlKey || e.metaKey || e.altKey || e.shiftKey)) {
-    e.preventDefault();
-    e.stopPropagation();
-    await copyForwardingValue(value);
-    return;
-  }
+  if (!value) return;
+  e.preventDefault();
+  e.stopPropagation();
+  await copyForwardingValue(value);
+});
+
+document.addEventListener("click", async function (e) {
   const btn = e.target.closest("button");
   if (!btn) return;
   if (btn.id === "btnStatusSheenToggle") {
@@ -5694,7 +6513,6 @@ document.addEventListener("click", async function (e) {
       bilibiliSourceModal: closeBilibiliSourceModal,
       youtubeSourceModal: closeYoutubeSourceModal,
       filterModal: closeFilterModal,
-      translationSourceModal: closeTranslationSourceModal,
       relayChannelsModal: closeRelayChannelsModal,
       translationChainsModal: closeTranslationChainsModal,
       qqWhitelistModal: closeQQWhitelistModal,
@@ -5702,6 +6520,7 @@ document.addEventListener("click", async function (e) {
       qqConfigModal: closeQQConfigModal,
       personalQQModal: function () { window.WRelayPersonalQQ.close(); },
       discordConfigModal: closeDiscordConfigModal,
+      youtubeApiKeyModal: closeYoutubeApiKeyModal,
       scheduledMessageContentModal: function () {
         scheduledMessageDraft = null;
         scheduledCollapsed.clear();
@@ -5710,6 +6529,7 @@ document.addEventListener("click", async function (e) {
       messageTraceModal: closeMessageTraceModal,
       diagnosticModal: closeDiagnosticModal,
       backupRestoreModal: closeBackupRestore,
+      chainDetailModal: closeChainDetailModal,
     };
     const closer = closeMap[btn.dataset.close];
     if (closer) closer();
@@ -5734,6 +6554,7 @@ document.addEventListener("click", async function (e) {
   }
   if (btn.id === "aiProfileAdd") {
     if (!aiProfileDraft) aiProfileDraft = cloneAiProfileDraft();
+    captureAiProfileEditorFields(activeAiDraftProfile());
     const source = activeAiDraftProfile() || {};
     const id = "ai_" + Date.now();
     aiProfileDraft.profiles.push({
@@ -5745,11 +6566,14 @@ document.addEventListener("click", async function (e) {
       timeout_seconds: Number(source.timeout_seconds) > 0 ? source.timeout_seconds : 25,
       max_output_tokens: Number(source.max_output_tokens) > 0 ? source.max_output_tokens : 800,
     });
+    aiProfileDraft.priority.push(id);
     aiProfileDraft.apiKeys = aiProfileDraft.apiKeys || {};
     aiProfileDraft.apiKeys[id] = "";
     aiProfileDraft.last_batch_test = null;
     aiProfileDraft.active = id;
     renderAiProfileEditor();
+    const editorDetails = document.getElementById("aiProfileEditorDetails");
+    if (editorDetails) editorDetails.open = true;
     return;
   }
   if (btn.id === "aiApiTest") {
@@ -5767,6 +6591,9 @@ document.addEventListener("click", async function (e) {
     });
     showConfirmDlg("删除翻译配置", "删除当前翻译配置及其密钥草稿？保存后生效。", function () {
       if (index >= 0) aiProfileDraft.profiles.splice(index, 1);
+      aiProfileDraft.priority = aiProfileDraft.priority.filter(function (id) {
+        return String(id) !== String(aiProfileDraft.active);
+      });
       if (aiProfileDraft.apiKeys) delete aiProfileDraft.apiKeys[String(aiProfileDraft.active)];
       aiProfileDraft.last_batch_test = null;
       aiProfileDraft.active = String((aiProfileDraft.profiles[Math.max(0, index - 1)] || aiProfileDraft.profiles[0]).id);
@@ -5822,7 +6649,7 @@ document.addEventListener("click", async function (e) {
     }
     return;
   }
-  if (btn.id === "btnFailureNotificationToggle") {
+  if (btn.id === "btnFailureNotificationToggle" || btn.id === "failureNotificationShortcut") {
     if (!settings) return;
     settings.failure_notification = Object.assign(
       {cooldown_seconds: 900},
@@ -5830,21 +6657,6 @@ document.addEventListener("click", async function (e) {
       {enabled: btn.dataset.on !== "1"},
     );
     await saveAndReload();
-    return;
-  }
-  if (btn.id === "translationSourceEnabled") {
-    const on = btn.dataset.on !== "1";
-    renderTranslationSettingButton("translationSourceEnabled", on, "启用翻译");
-    syncTranslationSourceModalButtons();
-    return;
-  }
-  if (btn.id === "translationSourceAppendOriginal") {
-    if (btn.disabled) return;
-    renderTranslationSettingButton("translationSourceAppendOriginal", btn.dataset.on !== "1", "保留原文");
-    return;
-  }
-  if (btn.id === "translationSourceShowDatetime") {
-    renderTranslationSettingButton("translationSourceShowDatetime", btn.dataset.on !== "1", "显示时间");
     return;
   }
   if (btn.id === "btnUnifiedRelaySources") {
@@ -5865,10 +6677,6 @@ document.addEventListener("click", async function (e) {
   }
   if (btn.dataset.scope && MANUAL_RELAY_SCOPE_META[btn.dataset.scope]) {
     switchRelayFilterTab(btn.dataset.scope);
-    return;
-  }
-  if (btn.id === "translationSourceSave") {
-    await saveTranslationSourceModal();
     return;
   }
   if (btn.id === "relayChannelsSave") {
@@ -5972,6 +6780,14 @@ document.addEventListener("click", async function (e) {
   }
   if (btn.id === "btnDiscordConfig") {
     openDiscordConfigModal();
+    return;
+  }
+  if (btn.id === "discordConfigShortcut") {
+    openDiscordConfigModal();
+    return;
+  }
+  if (btn.id === "btnYoutubeApiKeyConfig" || btn.id === "youtubeApiKeyShortcut") {
+    openYoutubeApiKeyModal();
     return;
   }
   if (btn.id === "discordConfigSave") {
@@ -6080,12 +6896,20 @@ document.addEventListener("click", async function (e) {
     openBilibiliSourceFilterModal(Number(btn.dataset.i));
     return;
   }
+  if (k === "biliSourceEdit") {
+    openSourceContentEditor("bsource", Number(btn.dataset.i));
+    return;
+  }
   if (k === "youtubeFgSourceRemove") {
     removeFgMember(FG_YOUTUBE, btn.dataset.id, "sources");
     return;
   }
   if (k === "youtubeSourceFilterEdit") {
     openYoutubeSourceFilterModal(Number(btn.dataset.i));
+    return;
+  }
+  if (k === "youtubeSourceEdit") {
+    openSourceContentEditor("youtubeSource", Number(btn.dataset.i));
     return;
   }
   if (k === "youtubeFgGroupRemove") {
@@ -6107,13 +6931,6 @@ document.addEventListener("click", async function (e) {
   } else if (k === "groupEdit") {
     const group = (settings.qq_group_openids || []).find(function (item) { return String(item.openid) === btn.dataset.id; });
     if (group) editGroupDetails(group);
-    return;
-  } else if (k === "failureRecipient") {
-    const u = settings.qq_user_openids[Number(btn.dataset.i)];
-    if (u) {
-      u.failure_notification = !u.failure_notification;
-      await saveAndReload();
-    }
     return;
   } else if (k === "userEdit") {
     const u = settings.qq_user_openids[Number(btn.dataset.i)];
@@ -6137,16 +6954,14 @@ document.addEventListener("click", async function (e) {
       settings.qq_user_openids.splice(idx, 1);
       await saveAndReload();
     }, "删除");
-  } else if (k === "chanTranslation") {
-    openTranslationSourceModal("channel", Number(btn.dataset.i));
-  } else if (k === "xSourceTranslation") {
-    openTranslationSourceModal("xsource", Number(btn.dataset.i));
-  } else if (k === "youtubeSourceTranslation") {
-    openTranslationSourceModal("youtubeSource", Number(btn.dataset.i));
   } else if (k === "chanFilter") {
     openFilterModal(Number(btn.dataset.i));
   } else if (k === "xSourceFilter") {
     openXSourceFilterModal(Number(btn.dataset.i));
+  } else if (k === "chanEdit") {
+    openSourceContentEditor("channel", Number(btn.dataset.i));
+  } else if (k === "xSourceEdit") {
+    openSourceContentEditor("xsource", Number(btn.dataset.i));
   } else if (k === "fgChanRemove") {
     removeFgMember(FG_DISCORD, btn.dataset.id, "channels");
   } else if (btn.id === "btnAddUser") {
@@ -6243,7 +7058,7 @@ document.addEventListener("click", async function (e) {
     let r;
     try { r = await jpost("/api/autostart/set", {enabled: enabled}); }
     catch (err) { r = {ok: false}; }
-    if (!r || !r.ok) showAlert("设置失败", "设置机器人随 Windows 启动失败");
+    if (!r || !r.ok) showAlert("设置失败", "设置开机自启失败");
     renderAutostart(stateButton, r && r.ok ? !!r.enabled : stateButton.dataset.on === "1");
     stateButton.disabled = false;
     btn.disabled = false;
@@ -6315,13 +7130,13 @@ const keyboardModalClosers = {
   bilibiliSourceModal: closeBilibiliSourceModal,
   youtubeSourceModal: closeYoutubeSourceModal,
   filterModal: closeFilterModal,
-  translationSourceModal: closeTranslationSourceModal,
   relayChannelsModal: closeRelayChannelsModal,
   translationChainsModal: closeTranslationChainsModal,
   qqWhitelistModal: closeQQWhitelistModal,
   translationConfigModal: closeTranslationConfigModal,
   qqConfigModal: closeQQConfigModal,
   discordConfigModal: closeDiscordConfigModal,
+  youtubeApiKeyModal: closeYoutubeApiKeyModal,
   scheduledMessageContentModal: function () {
     scheduledMessageDraft = null;
     scheduledCollapsed.clear();
@@ -6337,11 +7152,11 @@ const keyboardModalSaveButtons = {
   bilibiliSourceModal: "bilibiliSourceSave",
   youtubeSourceModal: "youtubeSourceSave",
   filterModal: "filterSave",
-  translationSourceModal: "translationSourceSave",
   relayChannelsModal: "relayChannelsSave",
   translationConfigModal: "translationConfigSave",
   qqConfigModal: "qqConfigSave",
   discordConfigModal: "discordConfigSave",
+  youtubeApiKeyModal: "youtubeApiKeySave",
   scheduledMessageContentModal: "scheduledMessageContentConfirm",
 };
 
@@ -6404,11 +7219,6 @@ document.addEventListener("keydown", async function (event) {
     return;
   }
   const active = document.activeElement;
-  if (active && ["chanName", "xSourceName", "youtubeSourceName"].includes(active.dataset.kind)) {
-    event.preventDefault();
-    active.blur();
-    return;
-  }
   if (active && ["backfillLimit", "xRsshubBase", "xPollInterval", "bilibiliRsshubBase", "bilibiliPollInterval", "youtubePollInterval"].includes(active.id)) {
     event.preventDefault();
     active.dispatchEvent(new Event("change", {bubbles: true}));
@@ -6421,14 +7231,6 @@ document.addEventListener("change", async function (e) {
   const el = e.target;
   if (el.id === "themeMode") {
     applyTheme(el.value === THEME_LIGHT ? THEME_LIGHT : THEME_DARK);
-    return;
-  }
-  if (el.id === "aiProfileSelect") {
-    if (aiProfileDraft) {
-      captureAiApiKeyDraft();
-      aiProfileDraft.active = el.value;
-      renderAiProfileEditor();
-    }
     return;
   }
   if (el.id === "translationProvider" || el.id === "translationFallback") {
@@ -6625,88 +7427,6 @@ document.addEventListener("change", async function (e) {
   }
 });
 
-document.addEventListener("blur", async function (e) {
-  const el = e.target;
-  if (el.dataset.kind === "chanName") {
-    settings.discord_channels[Number(el.dataset.i)].name = el.value;
-    await saveAndReload();
-  } else if (el.dataset.kind === "xSourceName") {
-    const source = (settings.x_rss_sources || [])[Number(el.dataset.i)];
-    if (source) {
-      source.name = el.value;
-      await saveAndReload();
-    }
-  } else if (el.dataset.kind === "youtubeSourceName") {
-    const source = (settings.youtube_sources || [])[Number(el.dataset.i)];
-    if (source) {
-      source.name = el.value.trim() || source.value;
-      await saveAndReload();
-    }
-  }
-}, true);
-
-// 频道名称：正常状态显示「名称 ✎」，点击 ✎ 才显示输入框进入编辑；
-// 失焦后沿用上方既有 chanName 保存逻辑（保存并重渲染，自动恢复为「名称 ✎」）。
-function startChanNameEdit(i) {
-  const c = settings.discord_channels[Number(i)];
-  if (!c) return;
-  const holder = document.querySelector('.chan-name[data-kind="chanNameDisplay"][data-i="' + i + '"]');
-  if (!holder) return;
-  const input = document.createElement("input");
-  input.type = "text";
-  input.value = c.name || "";
-  input.dataset.kind = "chanName";
-  input.dataset.i = String(i);
-  holder.replaceWith(input);
-  input.focus();
-  input.select();
-}
-function startXSourceNameEdit(i) {
-  const source = (settings.x_rss_sources || [])[Number(i)];
-  if (!source) return;
-  const holder = document.querySelector('.chan-name[data-kind="xSourceNameDisplay"][data-i="' + i + '"]');
-  if (!holder) return;
-  const input = document.createElement("input");
-  input.type = "text";
-  input.value = source.name || "";
-  input.dataset.kind = "xSourceName";
-  input.dataset.i = String(i);
-  holder.replaceWith(input);
-  input.focus();
-  input.select();
-}
-function startYoutubeSourceNameEdit(i) {
-  const source = (settings.youtube_sources || [])[Number(i)];
-  if (!source) return;
-  const holder = document.querySelector('.chan-name[data-kind="youtubeSourceNameDisplay"][data-i="' + i + '"]');
-  if (!holder) return;
-  const input = document.createElement("input");
-  input.type = "text";
-  input.value = source.name || source.value || "";
-  input.dataset.kind = "youtubeSourceName";
-  input.dataset.i = String(i);
-  holder.replaceWith(input);
-  input.focus();
-  input.select();
-}
-document.addEventListener("click", function (e) {
-  const edit = e.target.closest('[data-kind="chanNameEdit"]');
-  if (edit) {
-    startChanNameEdit(edit.dataset.i);
-    return;
-  }
-  const xEdit = e.target.closest('[data-kind="xSourceNameEdit"]');
-  if (xEdit) {
-    startXSourceNameEdit(xEdit.dataset.i);
-    return;
-  }
-  const youtubeEdit = e.target.closest('[data-kind="youtubeSourceNameEdit"]');
-  if (youtubeEdit) {
-    startYoutubeSourceNameEdit(youtubeEdit.dataset.i);
-    return;
-  }
-});
-
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
 let lastBackfillSeq = 0;
@@ -6796,7 +7516,11 @@ async function refreshStatus() {
       await refreshBackfill();
     }
   } catch (err) {
-    document.getElementById("badge").textContent = "管理功能不可用";
+    const badge = document.getElementById("badge");
+    badge.textContent = "不可用";
+    badge.className = "badge warn";
+    badge.title = err && err.message ? "管理功能不可用：" + err.message : "管理功能不可用";
+    setStatusCardAmbient(badge, false);
   }
 }
 
@@ -6805,7 +7529,7 @@ function setupForwardingValueClipping() {
   const tableIds = [
     "chanList", "groupList", "userList", "xSourceList", "xGroupList", "xUserList",
     "bilibiliSourceList", "bilibiliGroupList", "youtubeSourceList",
-    "youtubeGroupList", "qqFgGroupList",
+    "youtubeGroupList", "qqFgGroupList", "steamSourceList", "steamGroupList",
   ];
   const bodies = tableIds.map(id => document.querySelector("#" + id + " tbody")).filter(Boolean);
   const observer = new MutationObserver(formatValues);
@@ -6833,7 +7557,7 @@ function setupForwardingValueClipping() {
             wrapper.dataset.copyValue = value;
             wrapper.setAttribute("role", "button");
             wrapper.setAttribute("tabindex", "0");
-            wrapper.setAttribute("aria-label", value + "，点击复制");
+            wrapper.setAttribute("aria-label", value + "，右键复制；聚焦后按 Enter 或空格复制");
             prefix.className = "middle-value-prefix";
             suffix.className = "middle-value-suffix";
             prefix.textContent = characters.slice(0, -tailLength).join("");
@@ -6866,6 +7590,8 @@ async function init() {
     setActivePage(activePage);
     const qqConfig = await jget("/api/bot/qq-config");
     qqBotIds = qqConfig && qqConfig.ok && Array.isArray(qqConfig.bot_ids) ? qqConfig.bot_ids.map(String) : [];
+    qqBotAccounts = qqConfig && qqConfig.ok && Array.isArray(qqConfig.bots)
+      ? qqConfig.bots.map(function (bot) { return {appid: bot.appid || "", name: bot.name || ""}; }) : [];
     const personalConfig = await jget("/api/personal-qq/config");
     if (personalConfig.ok) {
       personalQQConnections = personalConfig.connections || [];
@@ -6913,6 +7639,9 @@ async function init() {
   // YouTube 状态卡片：同样使用轻量轮询
   await refreshYoutubeStatus();
   setInterval(refreshYoutubeStatus, 10000);
+  // Steam 状态同时更新总览卡片；详情卡片仍由 Steam 页按需显示
+  await refreshSteamStatus();
+  setInterval(refreshSteamStatus, 10000);
   await refreshMaintenance();
   setInterval(refreshMaintenance, 10000);
   await refreshMessageTrace();

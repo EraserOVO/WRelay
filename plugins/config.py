@@ -320,22 +320,35 @@ def _bilibili_auto_resolve_enabled_from(data):
     return config.get("enabled") is True
 
 
-def get_ai_config():
+def get_ai_configs():
+    """Return AI profiles in configured primary-to-fallback order."""
     data = _load_settings()
-    config = dict(data.get("ai") or {})
+    legacy = dict(data.get("ai") or {})
     profiles = data.get("ai_profiles")
+    if not isinstance(profiles, list) or not profiles:
+        return [legacy]
+
+    by_id = {
+        str(profile.get("id") or ""): profile
+        for profile in profiles
+        if isinstance(profile, dict) and str(profile.get("id") or "")
+    }
+    ordered_ids = []
+    priority = data.get("ai_profile_priority")
+    if isinstance(priority, list):
+        ordered_ids.extend(
+            profile_id for profile_id in priority
+            if isinstance(profile_id, str) and profile_id in by_id
+        )
     active_id = str(data.get("ai_active_profile") or "").strip()
-    selected = None
-    if isinstance(profiles, list):
-        for profile in profiles:
-            if not isinstance(profile, dict):
-                continue
-            if active_id and str(profile.get("id") or "") == active_id:
-                selected = profile
-                break
-        if selected is None and profiles:
-            selected = profiles[0] if isinstance(profiles[0], dict) else None
-    if selected is not None:
+    if active_id in by_id and active_id not in ordered_ids:
+        ordered_ids.insert(0, active_id)
+    ordered_ids.extend(profile_id for profile_id in by_id if profile_id not in ordered_ids)
+
+    configs = []
+    for profile_id in ordered_ids:
+        profile = by_id[profile_id]
+        config = dict(legacy)
         for key in (
             "base_url",
             "model",
@@ -343,11 +356,17 @@ def get_ai_config():
             "timeout_seconds",
             "max_output_tokens",
         ):
-            if key in selected:
-                config[key] = selected[key]
-        config["_profile_id"] = str(selected.get("id") or "")
-        config["_profile_name"] = str(selected.get("name") or "")
-    return config
+            if key in profile:
+                config[key] = profile[key]
+        config["_profile_id"] = profile_id
+        config["_profile_name"] = str(profile.get("name") or "")
+        configs.append(config)
+    return configs or [legacy]
+
+
+def get_ai_config():
+    """Return the first configured AI profile for legacy callers."""
+    return get_ai_configs()[0]
 
 
 def get_tencent_tmt_config():
@@ -913,7 +932,6 @@ def _failure_notification_recipients_from(data):
         for item in items
         if isinstance(item, dict)
         and item.get("enabled") is True
-        and item.get("failure_notification") is True
         and item.get("openid")
         and not str(item["openid"]).startswith("personal:")
     ]
@@ -925,7 +943,7 @@ def get_failure_notification_config():
 
 
 def get_failure_notification_recipients():
-    """返回明确勾选接收失败通知的已启用私聊用户。"""
+    """返回所有已启用的 QQ 授权私聊用户。"""
     return _failure_notification_recipients_from(_load_settings())
 
 
@@ -2069,3 +2087,36 @@ def get_youtube_status_snapshot():
         "protection": normalize_protection_config(data.get("youtube_protection")),
         "forwarding_groups": _ensure_youtube_forwarding_groups(data),
     }
+
+
+def get_steam_polling_snapshot():
+    """Return one coherent account-scoped Steam configuration and its routes."""
+    from copy import deepcopy
+    from plugins import bot_profiles
+    if not os.path.exists(SETTINGS_FILE):
+        _ensure_settings_file()
+    data = SettingsModel.from_data(bot_profiles.read(SETTINGS_FILE), DISCORD_CHANNELS, QQ_GROUP_OPENIDS).to_dict()
+    error = validate_settings(data, validate_forwarding_groups=True)
+    if error:
+        raise ValueError("Steam 配置读取失败：" + error)
+    all_sources = [deepcopy(item) for item in data.get("steam_sources", [])
+                   if isinstance(item, dict) and item.get("id")]
+    sources = [item for item in all_sources if item.get("enabled") is True]
+    enabled = list(dict.fromkeys(_enabled_group_openids(data)))
+    routes = {item["id"]: set() for item in all_sources}
+    for group in data.get("steam_forwarding_groups", []):
+        if not isinstance(group, dict) or group.get("enabled", True) is False:
+            continue
+        targets = set(group.get("groups", [])) & set(enabled)
+        for source in group.get("sources", []):
+            if source in routes:
+                routes[source].update(targets)
+    routed_ids = {source_id for source_id, targets in routes.items() if targets}
+    routed_sources = [item for item in all_sources if item["id"] in routed_ids]
+    return {"sources": sources,
+            "sources_total": len(routed_sources),
+            "sources_enabled": sum(item.get("enabled") is True for item in routed_sources),
+            "routes": {key: [group for group in enabled if group in targets] for key, targets in routes.items()},
+            "region": data.get("steam_region", "CN"),
+            "interval": data.get("steam_poll_interval", 900),
+            "protection": deepcopy(data.get("steam_protection") or {})}

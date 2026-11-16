@@ -60,6 +60,7 @@ TESTS = (
     "test_youtube_parser.py",
     "test_youtube_config.py",
     "test_youtube_delivery.py",
+    "test_steam.py",
     "test_bilibili_manual_opus.py",
     "test_relay_filter_supported_types.py",
     "test_bilibili_view_error_text.py",

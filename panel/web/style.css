@@ -52,7 +52,7 @@
     --badge-warn-bg: #6b5b2e; --badge-warn-fg: #ffe9b0;
     --danger-bg: #c0392b; --danger-fg: #ffffff; --danger-icon: #bd777b;
     --warn-bg: #d97706; --warn-fg: #ffffff;
-    --filter-active-bg: #3d5afe; --filter-active-border: #536dfe;
+    --filter-active-bg: var(--primary); --filter-active-border: var(--primary-border);
   }
   /* 日间模式：整体浅色低饱和，文字/卡片/边框/输入框/按钮同步调整 */
   body.theme-light {
@@ -93,7 +93,7 @@
     --badge-warn-bg: #fdeeda; --badge-warn-fg: #7c5200;
     --danger-bg: #ffdcd8; --danger-fg: #b3261e; --danger-icon: #a74642;
     --warn-bg: #ffeed3; --warn-fg: #7c5200;
-    --filter-active-bg: #dbe4ff; --filter-active-border: #b9c9f7;
+    --filter-active-bg: var(--primary); --filter-active-border: var(--primary-border);
   }
   * { box-sizing: border-box; }
   body {
@@ -113,19 +113,43 @@
     background: var(--card-bg); border-radius: 10px;
     padding: 16px 18px; margin-bottom: 16px;
   }
-  /* Healthy status cards: decorative layers stay behind controls and inside the card. */
-  :is(.overview-status-card, #xrssCard, #bilibiliCard, #youtubeCard) {
+  /* Keep sheen layers behind controls and within their active surface. */
+  :is(#xrssCard, #bilibiliCard, #youtubeCard, .fgtab.active:not(.paused), #pageSettings .settings-row.status-sheen-row-active) {
     position: relative;
     isolation: isolate;
-    --status-ambient-color: #9fbfd6;
-    --status-sheen-color: color-mix(in srgb, var(--status-ambient-color) 14%, transparent);
+    --status-ambient-color: #83b7f0;
+    --status-sheen-color: color-mix(in srgb, var(--status-ambient-color) 18%, transparent);
+    --status-tab-sheen-color: color-mix(in srgb, var(--status-ambient-color) 9%, transparent);
   }
-  body.theme-light :is(.overview-status-card, #xrssCard, #bilibiliCard, #youtubeCard) {
-    --status-ambient-color: #7e9fb9;
-    /* White cards need a little more contrast for the moving band to remain visible. */
-    --status-sheen-color: color-mix(in srgb, var(--status-ambient-color) 22%, transparent);
+  .overview-status-card {
+    position: relative;
+    isolation: isolate;
+    --status-ambient-color: #83b7f0;
+    --status-sheen-color: color-mix(in srgb, var(--status-ambient-color) 18%, transparent);
   }
-  :is(.overview-status-card, #xrssCard, #bilibiliCard, #youtubeCard).status-ambient-active::before {
+  body.theme-light :is(#xrssCard, #bilibiliCard, #youtubeCard, .fgtab.active:not(.paused), #pageSettings .settings-row.status-sheen-row-active) {
+    --status-ambient-color: #9bbcf0;
+    /* A lighter source and a clearer band keep the sweep visible on white cards. */
+    --status-sheen-color: color-mix(in srgb, var(--status-ambient-color) 26%, transparent);
+    --status-tab-sheen-color: color-mix(in srgb, var(--status-ambient-color) 16%, transparent);
+  }
+  body.theme-light .overview-status-card {
+    --status-ambient-color: #648fd8;
+    --status-sheen-color: color-mix(in srgb, var(--status-ambient-color) 26%, transparent);
+  }
+  #pageSettings .settings-row.status-sheen-row-active {
+    --status-ambient-color: var(--success);
+  }
+  /* Match the healthy process sweep to the running badge's theme-aware green. */
+  .overview-status-card.status-ambient-active,
+  body.theme-light .overview-status-card.status-ambient-active {
+    --status-ambient-color: var(--success);
+  }
+  body.theme-light .overview-status-card.status-ambient-active,
+  body.theme-light #pageSettings .settings-row.status-sheen-row-active {
+    --status-ambient-color: color-mix(in srgb, var(--success) 45%, white);
+  }
+  :is(.overview-status-card.status-ambient-active, #xrssCard.status-ambient-active, #bilibiliCard.status-ambient-active, #youtubeCard.status-ambient-active, .fgtab.active:not(.paused), #pageSettings .settings-row.status-sheen-row-active)::before {
     content: "";
     position: absolute;
     inset: 0;
@@ -133,23 +157,54 @@
     border-radius: inherit;
     pointer-events: none;
   }
-  :is(.overview-status-card, #xrssCard, #bilibiliCard, #youtubeCard).status-ambient-active::before {
+  :is(.overview-status-card.status-ambient-active, #xrssCard.status-ambient-active, #bilibiliCard.status-ambient-active, #youtubeCard.status-ambient-active, .fgtab.active:not(.paused), #pageSettings .settings-row.status-sheen-row-active)::before {
     background-image: linear-gradient(110deg,
       transparent 40%, var(--status-sheen-color) 50%, transparent 60%);
     background-size: 300% 100%;
     background-repeat: no-repeat;
     animation: status-gradient-sheen 8s ease-in-out infinite;
   }
+  /* Extend the settings-row sheen to the settings card's inside edges. */
+  #pageSettings .settings-row.status-sheen-row-active::before {
+    left: -19px;
+    right: -19px;
+    border-radius: 0;
+  }
+  .overview-status-card.status-failure-active::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    background-color: color-mix(in srgb, var(--error) 28%, transparent);
+    animation: status-failure-pulse 4s ease-in-out infinite;
+  }
+  @keyframes status-failure-pulse {
+    0%, 100% { opacity: 0; }
+    50% { opacity: 1; }
+  }
+  /* Keep the selected group tab's sweep broad and subdued. */
+  .fgtab.active:not(.paused)::before {
+    background-image: linear-gradient(110deg,
+      transparent 10%, var(--status-tab-sheen-color) 50%, transparent 90%);
+    background-size: 220% 100%;
+  }
   @keyframes status-gradient-sheen {
     0% { background-position: 100% 0; }
     65%, 100% { background-position: 0% 0; }
   }
-  body.status-sheen-disabled :is(.overview-status-card, #xrssCard, #bilibiliCard, #youtubeCard).status-ambient-active::before {
+  body.status-sheen-disabled :is(.overview-status-card.status-ambient-active, #xrssCard.status-ambient-active, #bilibiliCard.status-ambient-active, #youtubeCard.status-ambient-active, .fgtab.active:not(.paused), #pageSettings .settings-row.status-sheen-row-active)::before {
+    content: none;
+    animation: none;
+  }
+  body.status-sheen-disabled .overview-status-card.status-failure-active::before {
     content: none;
     animation: none;
   }
   @media (prefers-reduced-motion: reduce) {
-    :is(.overview-status-card, #xrssCard, #bilibiliCard, #youtubeCard).status-ambient-active::before { content: none; animation: none; }
+    :is(.overview-status-card.status-ambient-active, #xrssCard.status-ambient-active, #bilibiliCard.status-ambient-active, #youtubeCard.status-ambient-active, .fgtab.active:not(.paused), #pageSettings .settings-row.status-sheen-row-active)::before { content: none; animation: none; }
+    .overview-status-card.status-failure-active::before { content: none; animation: none; }
   }
   .card h2 { font-size: 15px; margin: 0 0 12px; color: #818DF9; }
   body.theme-light .card h2 { color: #5E6CD8; }
@@ -226,11 +281,11 @@
   @media (max-width: 680px) {
     .bilibili-rss-config-row, .x-rss-config-row { flex-wrap: wrap; }
   }
-  #btnBilibiliProtection, #btnXProtection {
+#btnBilibiliProtection, #btnXProtection, #btnSteamProtection {
     width: 34px; height: 34px; padding: 0; border-radius: 9px;
     display: inline-flex; align-items: center; justify-content: center;
   }
-  #btnBilibiliProtection svg, #btnXProtection svg { width: 18px; height: 18px; flex: none; }
+#btnBilibiliProtection svg, #btnXProtection svg, #btnSteamProtection svg { width: 18px; height: 18px; flex: none; }
   .bilibili-protection-modal-form {
     display: flex; flex-direction: column; gap: 12px; padding: 2px 0;
   }
@@ -627,8 +682,8 @@
     content: "";
     display: block; width: 100%; height: 100%;
     background: var(--btn-fg);
-    -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>') center / 70% no-repeat;
-    mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>') center / 70% no-repeat;
+    -webkit-mask: url('data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20fill%3D%22black%22%20d%3D%22M9.171%2016.072%2019.778%205.465c.409-.359%201.01-.404%201.414%200%20.404.405.359%201.005%200%201.415L9.878%2018.193c-.204.179-.429.293-.707.293s-.503-.114-.707-.293l-5.657-5.657c-.297-.339-.393-.8-.159-1.207.34-.588%201.092-.629%201.574-.207Z%22%2F%3E%3C%2Fsvg%3E') center / 70% no-repeat;
+    mask: url('data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20fill%3D%22black%22%20d%3D%22M9.171%2016.072%2019.778%205.465c.409-.359%201.01-.404%201.414%200%20.404.405.359%201.005%200%201.415L9.878%2018.193c-.204.179-.429.293-.707.293s-.503-.114-.707-.293l-5.657-5.657c-.297-.339-.393-.8-.159-1.207.34-.588%201.092-.629%201.574-.207Z%22%2F%3E%3C%2Fsvg%3E') center / 70% no-repeat;
   }
   /* 各页转发组/白名单表统一首两列宽度，避免表格宽度差异造成左侧控件错位。 */
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
@@ -695,12 +750,45 @@
   .filter-scope-tabs {
     display: flex; gap: 8px; flex-wrap: wrap;
   }
-  .fscope-tab { flex: 1 1 auto; text-align: center; }
-  .fscope-tab.active {
-    background: var(--primary);
-    border-color: var(--primary-border);
+  .filter-scope-tabs.multi-chain-switch {
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 2px;
+    width: max-content;
+    max-width: 100%;
+    padding: 3px;
+    border: 1px solid var(--field-border);
+    border-radius: 999px;
+    background: var(--sec-bg);
+  }
+  .filter-scope-tabs.multi-chain-switch .fscope-tab {
+    display: grid;
+    place-items: center;
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted);
+  }
+  .filter-scope-tabs.multi-chain-switch .fscope-tab:hover:not(.active) {
+    background: color-mix(in srgb, var(--card-bg) 72%, var(--sec-bg));
+    color: var(--fg);
+  }
+  .filter-scope-tabs.multi-chain-switch .fscope-tab.active {
+    background: var(--card-bg);
+    border-color: var(--field-border);
     color: var(--btn-fg);
-    font-weight: 600;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
+  }
+  .multi-link-scope-icon {
+    display: block;
+    width: 20px;
+    height: 20px;
   }
   .relay-channels-dialog {
     position: relative; width: min(620px, calc(100vw - 32px));
@@ -797,17 +885,6 @@
     color: var(--muted);
   }
   .auto-translation-check { color: var(--fg); }
-  .translation-runtime-banner {
-    display: flex; align-items: center; gap: 10px;
-    margin: 0 0 12px; padding: 7px 10px;
-    border: 1px solid var(--table-border); border-radius: 6px;
-    background: var(--sec-bg); color: var(--muted);
-    font-size: 12px; font-weight: 600; line-height: 1.4;
-  }
-  .translation-runtime-banner::before {
-    content: ""; width: 6px; height: 6px; flex: none;
-    border-radius: 50%; background: var(--muted);
-  }
   .translation-test-history {
     margin: 0 0 12px; border: 1px solid var(--table-border);
     border-radius: 6px; background: var(--field-bg);
@@ -819,8 +896,58 @@
   }
   .translation-test-history-list {
     border-top: 1px solid var(--table-border); padding: 6px 9px;
-    max-height: 150px; overflow-y: auto;
+    max-height: min(32vh, 270px); overflow-y: auto;
   }
+  .ai-model-priority-list { display: flex; flex-direction: column; }
+  .ai-model-priority-row {
+    display: grid; grid-template-columns: 28px 62px minmax(0, 1fr) minmax(150px, 250px);
+    align-items: center; gap: 9px; min-height: 42px; padding: 6px 2px;
+    border-bottom: 1px solid var(--table-border); transition: opacity .12s ease, background-color .12s ease;
+    cursor: pointer;
+  }
+  .ai-model-priority-row:last-child { border-bottom: 0; }
+  .ai-model-priority-row:hover { background: color-mix(in srgb, var(--sec-bg) 70%, transparent); }
+  .ai-model-priority-row.selected { background: color-mix(in srgb, var(--primary-border) 12%, transparent); }
+  .ai-model-priority-row.dragging { opacity: .4; }
+  .ai-model-priority-row.drop-before { box-shadow: inset 0 2px var(--primary-border); }
+  .ai-model-priority-row.drop-after { box-shadow: inset 0 -2px var(--primary-border); }
+  .ai-model-priority-handle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 30px; min-height: 30px; padding: 0; border: 0;
+    background: transparent; color: var(--muted); cursor: grab; touch-action: none;
+  }
+  .ai-model-priority-handle:hover { color: var(--fg); background: transparent; }
+  .ai-model-priority-handle:active { cursor: grabbing; }
+  .ai-model-priority-handle svg { display: block; pointer-events: none; }
+  .ai-model-priority-rank {
+    color: var(--muted); font-size: 11px; font-weight: 600; white-space: nowrap;
+  }
+  .ai-model-priority-row:first-child .ai-model-priority-rank { color: var(--fg); }
+  .ai-model-priority-copy { min-width: 0; }
+  .ai-model-priority-copy strong {
+    display: block; overflow: hidden; color: var(--fg); font-size: 12px;
+    font-weight: 600; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ai-model-priority-copy small {
+    display: block; overflow: hidden; color: var(--muted); font-size: 11px;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ai-model-priority-status { min-width: 0; color: var(--muted); }
+  .ai-model-priority-status-line { display: inline-flex; align-items: center; gap: 6px; }
+  .ai-model-priority-status i {
+    width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--disabled);
+  }
+  .ai-model-priority-status.ok i { background: var(--success); }
+  .ai-model-priority-status.working i { background: var(--success); }
+  .ai-model-priority-status.failed i { background: var(--danger); }
+  .ai-model-priority-status.ok { color: var(--fg); }
+  .ai-model-priority-status.working { color: var(--fg); }
+  .ai-model-priority-status.failed { color: var(--fg); }
+  .ai-model-priority-status small {
+    display: block; overflow: hidden; color: var(--muted); font-size: 10px;
+    line-height: 1.35; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ai-model-priority-empty { padding: 8px 2px; color: var(--muted); }
   .translation-test-batch-summary {
     padding: 3px 0 6px; color: var(--fg); font-weight: 600;
     border-bottom: 1px solid var(--table-border);
@@ -902,13 +1029,13 @@
     white-space: nowrap;
   }
   .ai-profile-toolbar {
-    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap;
+    margin: 0 0 8px;
     color: var(--muted); font-size: 13px;
   }
-  .ai-profile-toolbar select {
-    flex: 1 1 180px; min-width: 0; height: 32px;
-    background: var(--field-bg); border: 1px solid var(--field-border);
-    border-radius: 5px; color: var(--field-fg); padding: 5px 8px;
+  .ai-profile-editor-fields {
+    padding: 1px 9px 9px;
+    border-top: 1px solid var(--table-border);
   }
   .ai-profile-toolbar button { padding: 6px 10px; font-size: 12px; }
   /* 「翻译链路」与「翻译设置」二级窗口中的开关：一排一个，胶囊轨道贴右。 */
@@ -989,7 +1116,7 @@
   body.desktop-host .backup-dialog { width: auto; padding: 0; background: transparent; border: 0; border-radius: 0; box-shadow: none; }
   .diagnostic-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-right: 28px; }
   .diagnostic-toolbar h3 { margin: 0; color: var(--card-heading); font-size: 16px; }
-  .diagnostic-list { margin-top: 12px; border-top: 1px solid var(--field-border); }
+  .diagnostic-list { margin-top: 12px; border-top: 0; }
   .diagnostic-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 2px; border-bottom: 1px solid var(--field-border); font-size: 13px; }
   .diagnostic-result { font-size: 12px; font-weight: 600; }
   .diagnostic-result.ok { color: var(--badge-on-fg); }
@@ -1007,7 +1134,6 @@
   .backup-file-select { display: inline-flex; align-items: center; cursor: pointer; }
   .backup-file-select input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   .backup-warning { color: var(--danger); }
-  #chanBody input[data-kind="chanName"] { width: 25%; }
   button.rowicon {
     width: 28px; height: 28px; padding: 0;
     flex: 0 0 28px;
@@ -1024,16 +1150,7 @@
   button.rowicon.filter-active:hover {
     background: var(--filter-active-border);
   }
-  button.rowicon.translation-active {
-    background: var(--primary);
-    border-color: var(--primary-border);
-    color: var(--btn-fg);
-  }
-  button.rowicon.translation-active:hover { background: var(--primary-border); }
-  /* 单条来源的翻译设置改为胶囊开关一排一个（外观由 .pill-switch 统一提供）。 */
-  .translation-setting-toggle:disabled { opacity: .45; cursor: not-allowed; }
-
-  /* ---------- 频道筛选弹窗（用户名/关键词列表 + 消息类型按钮） ---------- */
+  /* ---------- 内容筛选弹窗（用户名/关键词列表 + 勾选框筛选项） ---------- */
   .flt-col-title { font-size: 13px; color: var(--muted); }
   .flt-col-hint { font-size: 11px; color: var(--muted); opacity: .85; }
   .flt-list {
@@ -1062,23 +1179,24 @@
   }
   .flt-chip-x svg { width: 12px; height: 12px; pointer-events: none; }
   .flt-chip-x:hover { color: var(--danger-fg); background: var(--danger-bg); }
-  /* 消息类型按钮：样式参照「开机自启」（图标+文字，data-on 高亮选中态） */
-  .flt-type-btn {
-    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  /* 来源内容筛选项和 Steam 来源编辑共用同一套勾选框胶囊。 */
+  .content-filter-checks { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 4px 0; }
+  .content-filter-check {
+    display: inline-flex; align-items: center; gap: 7px; min-height: 32px;
+    padding: 5px 9px; border: 1px solid var(--panel-border);
+    border-radius: 999px; background: var(--card-bg); color: var(--fg);
+    font-size: 13px; line-height: 1.35; cursor: pointer;
   }
-  .flt-type-btn svg { flex: none; }
-  .flt-type-btn[data-on="1"] {
-    background: var(--primary);
-    border-color: var(--primary-border);
-    /* 选中态蓝色背景下的文字/图标颜色统一为 --btn-fg（与「关于作者」按钮中央图案同源） */
-    color: var(--btn-fg);
-  }
+  .content-filter-check input { flex: 0 0 18px; width: 18px; height: 18px; margin: 0; }
+  .content-filter-check:focus-within { border-color: var(--primary-border); }
+  .content-filter-check.disabled { opacity: .45; cursor: not-allowed; }
+  .source-content-form { display: flex; flex-direction: column; gap: 12px; }
+  .source-content-field { display: flex; min-width: 0; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; }
+  .source-content-field input { width: 100%; min-width: 0; box-sizing: border-box; }
+  .source-row-detail { margin-top: 2px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
   /* 置灰禁用：该来源不支持的类型（Bilibili 投稿类型、X 推文类型共用）。
      消息类型不适用：该链路不支持的类型直接不渲染。 */
-  #filterBilibiliPostTypeList .flt-type-btn:disabled,
-  #filterXPostTypeList .flt-type-btn:disabled { opacity: .45; cursor: not-allowed; }
-
-  /* Bilibili 来源注册保持紧凑；筛选弹窗复用共用的消息筛选样式。 */
+  /* Bilibili 来源注册保持紧凑；各来源筛选统一使用内容筛选样式。 */
   body .modal-overlay > .modal-shell.bilibili-source-modal { --modal-width: 560px; }
   .bilibili-source-modal .modal-body { min-height: 0; }
   .bilibili-source-form-grid {
@@ -1161,9 +1279,10 @@
   button.fg-toggle.paused { background: var(--sec-bg); color: var(--muted); border-color: var(--field-border); }
   .fgtab-add {
     background: transparent; border: 1px dashed var(--field-border); color: var(--muted);
-    /* 与 .fgtab 相同内边距/字号：外框高度与转发组一致（虚线边框额外占 2px 高度） */
-    padding: 6px 14px; font-size: 13px; line-height: 20px; min-height: 34px;
+    width: 36px; min-width: 36px; height: 36px; min-height: 36px; flex: 0 0 36px;
+    box-sizing: border-box; padding: 0; display: inline-flex; align-items: center; justify-content: center;
   }
+  .fgtab-add svg { display: block; width: 16px; height: 16px; }
   .fgtab-add:hover { color: var(--hover-fg); border-color: var(--muted); }
   /* 预留：转发组行内重命名输入框（app.js 阶段使用） */
   .fgtab input.fg-rename { width: 92px; padding: 3px 6px; font-size: 12px; }
@@ -1202,6 +1321,8 @@
   .discord-channel-link:hover { color: var(--hover-fg); text-decoration: underline; }
   .x-account-link { color: var(--card-heading); text-decoration: none; }
   .x-account-link:hover { color: var(--hover-fg); text-decoration: underline; }
+  .steam-source-link { color: var(--card-heading); text-decoration: none; }
+  .steam-source-link:hover { color: var(--hover-fg); text-decoration: underline; }
   .tablewrap { overflow-x: auto; }
   .tablewrap table { min-width: 540px; }
   /* 「启用」表头弱化 */
@@ -1297,7 +1418,7 @@
   }
   #fgBody > .fgsection + .fgsection { border: 1px solid var(--panel-border); margin-top: 0; }
   #fgBody > .fgsection h3.fgh3 { color: var(--fg); font-size: 15px; font-weight: 700; }
-  #fgBody #chanList td:nth-child(4), #fgBody #groupList td:nth-child(5) {
+  #fgBody #chanList td:nth-child(5), #fgBody #groupList td:nth-child(5) {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .overview-intro { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 3px 0 16px; }
@@ -1318,6 +1439,7 @@
   .bili-icon { background: #4a365e; color: #e9d7ff; }
   .youtube-icon { background: #5a3034; color: #ffd9dd; }
   .qq-icon { background: #304b61; color: #d1f0ff; }
+  .steam-icon { background: #2d4359; color: #dbe7f3; }
   .overview-route-copy { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
   .overview-route-copy strong { color: var(--fg); font-size: 16px; }
   .overview-route-copy b { overflow: hidden; color: #aebfff; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
@@ -1330,6 +1452,7 @@
   body.theme-light .overview-route-icon.bili-icon { background: #f7effb; color: #b17ac8; }
   body.theme-light .overview-route-icon.youtube-icon { background: #fdf0f1; color: #dc7886; }
   body.theme-light .overview-route-icon.qq-icon { background: #ebf6fb; color: #65a6c2; }
+  body.theme-light .overview-route-icon.steam-icon { background: #eef2f6; color: #536a80; }
   .recent-message-row { display: flex; align-items: center; gap: 18px; min-height: 44px; }
   #recentMessageText { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
   #recentMessageTime { flex: none; color: var(--muted); font-size: 13px; }
@@ -1430,6 +1553,10 @@
     width: var(--row-icon-size); height: var(--row-icon-size); flex-basis: var(--row-icon-size);
     border-radius: 7px;
   }
+  body.desktop-host button.foldbtn {
+    width: var(--row-icon-size); height: var(--row-icon-size); min-width: var(--row-icon-size);
+    box-sizing: border-box; aspect-ratio: 1;
+  }
   .rowicon svg { width: 15px; height: 15px; }
   button.danger.rowicon { color: var(--danger-fg); }
   .cardrow { gap: var(--space-4); }
@@ -1457,74 +1584,111 @@
   /* Table sizing is shared across all route pages. IDs get their own clipped cell. */
   .fgsection .tablewrap { min-width: 0; width: 100%; overflow-x: hidden; }
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) {
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList,
+      #steamSourceList, #steamGroupList) {
     width: 100%; min-width: 0 !important; table-layout: fixed; font-size: 13px;
   }
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) th,
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList,
+      #steamSourceList, #steamGroupList) th,
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) td {
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList,
+      #steamSourceList, #steamGroupList) td {
     overflow: hidden; padding: 7px 6px; vertical-align: middle;
   }
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) th { height: 36px; font-size: 12px; }
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList,
+      #steamSourceList, #steamGroupList) th { height: 36px; font-size: 12px; }
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) tr:not(.fgempty-row) { height: 44px; }
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList,
+      #steamSourceList, #steamGroupList) tr:not(.fgempty-row) { height: 44px; }
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) tbody tr:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList,
+      #steamSourceList, #steamGroupList) tbody tr:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) th:first-child,
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList,
+      #steamSourceList, #steamGroupList) th:first-child,
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) td.drag-handle { width: 34px !important; }
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList,
+      #steamSourceList, #steamGroupList) td.drag-handle { width: 34px !important; }
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) th:nth-child(2),
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList,
+      #steamSourceList, #steamGroupList) th:nth-child(2),
   :is(#chanList, #groupList, #userList, #xSourceList, #xGroupList, #xUserList,
-      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) td:nth-child(2) { width: 38px !important; }
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList,
+      #steamSourceList, #steamGroupList) td:nth-child(2) { width: 38px !important; }
   /* Keep drag and enable controls at the X source table's shared column positions. */
   :is(#chanList, #groupList, #xSourceList, #xGroupList,
-      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) > thead > tr > th:first-child,
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList,
+      #steamSourceList, #steamGroupList) > thead > tr > th:first-child,
   :is(#chanList, #groupList, #xSourceList, #xGroupList,
-      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) > tbody > tr:not(.fgempty-row) > td.drag-handle {
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList,
+      #steamSourceList, #steamGroupList) > tbody > tr:not(.fgempty-row) > td.drag-handle {
     box-sizing: border-box;
     width: 34px !important; min-width: 34px !important; max-width: 34px !important;
     padding-left: 6px !important; padding-right: 6px !important;
   }
   :is(#chanList, #groupList, #xSourceList, #xGroupList,
-      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) > thead > tr > th:nth-child(2),
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList,
+      #steamSourceList, #steamGroupList) > thead > tr > th:nth-child(2),
   :is(#chanList, #groupList, #xSourceList, #xGroupList,
-      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) > tbody > tr:not(.fgempty-row) > td:nth-child(2) {
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList,
+      #steamSourceList, #steamGroupList) > tbody > tr:not(.fgempty-row) > td:nth-child(2) {
     box-sizing: border-box;
     width: 38px !important; min-width: 38px !important; max-width: 38px !important;
     padding-left: 6px !important; padding-right: 6px !important;
   }
   :is(#chanList, #groupList, #xSourceList, #xGroupList,
-      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) > colgroup > col.fg-drag-col {
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList,
+      #steamSourceList, #steamGroupList) > colgroup > col.fg-drag-col {
     width: 34px !important;
   }
   :is(#chanList, #groupList, #xSourceList, #xGroupList,
-      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList) > colgroup > col.fg-enable-col {
+      #bilibiliSourceList, #bilibiliGroupList, #youtubeSourceList, #youtubeGroupList, #qqFgGroupList,
+      #steamSourceList, #steamGroupList) > colgroup > col.fg-enable-col {
     width: 38px !important;
   }
-  #chanList th:nth-child(3) { width: 25% !important; }
-  #chanList th:nth-child(4) { width: 34% !important; }
-  #chanList th:nth-child(5) { width: 112px !important; }
-  :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList) th:nth-child(3) { width: 20% !important; }
-  :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList) th:nth-child(4) { width: 16% !important; }
-  :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList) th:nth-child(5) { width: 34% !important; }
-  :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList) th:nth-child(6) { width: 84px !important; }
+  #chanList th:nth-child(3) { width: 22% !important; }
+  #chanList th:nth-child(4) { width: 24% !important; }
+  #chanList th:nth-child(5) { width: auto !important; }
+  #chanList th:nth-child(6) { width: 120px !important; }
+  :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList, #steamGroupList) th:nth-child(3) { width: 20% !important; }
+  :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList, #steamGroupList) th:nth-child(4) { width: 16% !important; }
+  :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList, #steamGroupList) th:nth-child(5) { width: 34% !important; white-space: nowrap; }
+  :is(#groupList, #xGroupList, #bilibiliGroupList, #youtubeGroupList, #qqFgGroupList, #steamGroupList) th:nth-child(6) { width: 84px !important; }
+  /* QQ → QQ 转发群的拖拽列与启用列固定为其它链路的列宽。 */
+  #qqFgGroupList > colgroup > col.fg-drag-col,
+  #qqFgGroupList > thead > tr > th:first-child,
+  #qqFgGroupList > tbody > tr:not(.fgempty-row) > td:first-child {
+    box-sizing: border-box;
+    width: 34px !important; min-width: 34px !important; max-width: 34px !important;
+    padding-left: 6px !important; padding-right: 6px !important;
+  }
+  #qqFgGroupList > colgroup > col.fg-enable-col,
+  #qqFgGroupList > thead > tr > th:nth-child(2),
+  #qqFgGroupList > tbody > tr:not(.fgempty-row) > td:nth-child(2) {
+    box-sizing: border-box;
+    width: 38px !important; min-width: 38px !important; max-width: 38px !important;
+    padding-left: 6px !important; padding-right: 6px !important;
+  }
   :is(#userList, #xUserList) th:nth-child(3) { width: 22% !important; }
   :is(#userList, #xUserList) th:nth-child(4) { width: 18% !important; }
   :is(#userList, #xUserList) th:nth-child(5) { width: auto !important; }
   :is(#userList, #xUserList) th:nth-child(6) { width: 120px !important; }
   #xSourceList th:nth-child(3) { width: 23% !important; }
   #xSourceList th:nth-child(4) { width: auto !important; }
-  #xSourceList th:nth-child(5) { width: 112px !important; }
+  #xSourceList th:nth-child(5) { width: 120px !important; }
   #bilibiliSourceList th:nth-child(3) { width: 14% !important; }
-  #bilibiliSourceList th:nth-child(4) { width: auto !important; }
-  #bilibiliSourceList th:nth-child(5) { width: 80px !important; }
+  #bilibiliSourceList th:nth-child(4) { width: 24% !important; }
+  #bilibiliSourceList th:nth-child(5) { width: auto !important; }
+  #bilibiliSourceList th:nth-child(6) { width: 120px !important; }
+  #steamSourceList th:nth-child(3) { width: 14% !important; }
+  #steamSourceList th:nth-child(4) { width: 24% !important; }
+  #steamSourceList th:nth-child(5) { width: auto !important; }
+  #steamSourceList th:nth-child(6) { width: 120px !important; }
   #youtubeSourceList th:nth-child(3) { width: 28% !important; }
   #youtubeSourceList th:nth-child(4) { width: auto !important; }
-  #youtubeSourceList th:nth-child(5) { width: 112px !important; }
+  #youtubeSourceList th:nth-child(5) { width: 120px !important; }
   .mono { min-width: 0; }
   td .mono { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .id-cell { display: flex; align-items: center; gap: 4px; min-width: 0; }
@@ -1539,7 +1703,7 @@
   /* Group tabs first, actions stay in a separate rail. */
   .fgtabs { align-items: center; gap: 8px; }
   .fgtab-list { display: flex; flex: 1 1 auto; min-width: 0; flex-wrap: wrap; align-items: center; gap: 8px; }
-  .fgtab-actions { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; padding-left: 10px; border-left: 1px solid var(--panel-border); }
+  .fgtab-actions { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; margin-left: auto; padding-left: 10px; border-left: 1px solid var(--panel-border); }
   .fgtab { min-height: 36px; }
   .fgtab-actions .rowicon { width: 32px; height: 32px; flex-basis: 32px; }
   .fgtab-add { min-height: 36px; }
@@ -1658,19 +1822,34 @@
   .x-account-link { color: var(--primary-border); }
   body.theme-light .x-account-link { color: #4a5fd4; }
 
-  /* Selected forwarding groups share one subdued brand treatment. Paused is neutral. */
+  /* Selected forwarding groups remain distinct from idle and paused groups. */
   .fgtab.active {
-    background: color-mix(in srgb, var(--primary) 24%, var(--card-bg));
-    border-color: color-mix(in srgb, var(--primary) 52%, var(--field-border));
+    background: color-mix(in srgb, var(--primary) 44%, var(--card-bg));
+    border-color: color-mix(in srgb, var(--primary-border) 72%, var(--field-border));
     color: var(--fg);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 24%, transparent);
   }
-  .fgtab.active:hover { background: color-mix(in srgb, var(--primary) 30%, var(--card-bg)); }
+  .fgtab.active:hover { background: color-mix(in srgb, var(--primary) 52%, var(--card-bg)); }
   .fgtab.paused, .fgtab.active.paused {
     background: var(--sec-bg); border-color: var(--field-border); color: var(--muted);
   }
   .fgtab.active.paused {
-    background: color-mix(in srgb, var(--primary) 24%, var(--card-bg));
-    border-color: color-mix(in srgb, var(--primary) 52%, var(--field-border)); color: var(--fg);
+    background: color-mix(in srgb, var(--primary) 44%, var(--card-bg));
+    border-color: color-mix(in srgb, var(--primary-border) 72%, var(--field-border));
+    color: var(--fg);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 24%, transparent);
+  }
+  body.theme-light .fgtab.active,
+  body.theme-light .fgtab.active.paused {
+    background: color-mix(in srgb, var(--primary) 82%, var(--card-bg));
+    border-color: var(--primary-border);
+    color: var(--fgtab-active-fg);
+    box-shadow: inset 0 0 0 1px rgb(88 101 242 / 9%);
+  }
+  body.theme-light .fgtab.active:hover,
+  body.theme-light .fgtab.active.paused:hover {
+    background: color-mix(in srgb, var(--primary) 92%, var(--card-bg));
+    border-color: var(--primary-border);
   }
   .fgtab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fgtab-state {
@@ -1791,7 +1970,7 @@
   .table-actions .rowicon { transition: background-color .12s ease, color .12s ease, opacity .12s ease; opacity: .7; }
   .table-actions .rowicon:hover, .table-actions .rowicon:focus-visible { opacity: 1; }
   .table-actions .rowicon:disabled { opacity: .48; }
-  .table-actions .rowicon.filter-active, .table-actions .rowicon.translation-active { opacity: 1; }
+  .table-actions .rowicon.filter-active { opacity: 1; }
   button.danger.rowicon {
     background: transparent; border-color: transparent; color: var(--danger-icon);
   }
@@ -1860,15 +2039,12 @@
     opacity: 1;
   }
 
-  body.desktop-host[data-active-page="overview"] .cardrow > .card:first-child {
-    padding-bottom: 14px;
-  }
   body.desktop-host[data-active-page="overview"] .robot-status-summary {
     display: grid;
     grid-template-columns: max-content 150px repeat(4, 80px);
     width: max-content;
     max-width: 100%;
-    min-height: 36px;
+    min-height: 38px;
     align-items: center;
     column-gap: 14px;
     row-gap: 0;
@@ -1961,6 +2137,29 @@
     transform: none;
     border-color: var(--field-border);
     background: color-mix(in srgb, var(--card-bg) 96%, var(--fg));
+  }
+  body.desktop-host[data-active-page="overview"] #overviewSummaryCard {
+    min-width: 0;
+    margin-bottom: 16px;
+    padding: 12px 18px;
+  }
+  body.desktop-host[data-active-page="overview"] #overviewSummaryCard > h2 {
+    display: flex;
+    min-height: var(--control-height);
+    align-items: center;
+    margin: 0 0 14px;
+  }
+  body.desktop-host[data-active-page="overview"] #overviewSummaryCard .overview-grid {
+    margin-bottom: 0;
+  }
+  body.desktop-host[data-active-page="overview"] #overviewSummaryCard .overview-route[data-page="discord"] {
+    background: color-mix(in srgb, var(--field-bg) 45%, var(--card-bg));
+  }
+  body.desktop-host[data-active-page="overview"] #overviewSummaryCard .overview-route[data-page="discord"]:hover {
+    background: color-mix(in srgb, color-mix(in srgb, var(--field-bg) 45%, var(--card-bg)) 96%, var(--fg));
+  }
+  body.desktop-host[data-active-page="overview"] #overviewSummaryCard .overview-route[data-page="discord"]:active {
+    background: color-mix(in srgb, color-mix(in srgb, var(--field-bg) 45%, var(--card-bg)) 92%, var(--fg));
   }
   body.desktop-host[data-active-page="overview"] #pageOverview .overview-route:active {
     background: color-mix(in srgb, var(--card-bg) 92%, var(--fg));
@@ -2080,33 +2279,32 @@
   }
   body.desktop-host[data-active-page="overview"] .page-header-actions { display: none; }
   body.desktop-host[data-active-page="overview"] #activePageDescription { margin-top: 4px; }
-  body.desktop-host[data-active-page="overview"] .cardrow { gap: 0; margin-bottom: 18px; }
+  body.desktop-host[data-active-page="overview"] .cardrow { gap: 16px; margin-bottom: 16px; }
   body.desktop-host[data-active-page="overview"] .cardrow > .overview-status-card {
     display: grid;
     flex: 1 1 100%;
     min-height: 0;
     grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: "heading heading" "summary actions";
+    grid-template-areas: "summary actions";
     align-items: center;
-    align-content: start;
+    align-content: center;
     column-gap: 16px;
-    row-gap: 5px;
-    margin: 0 0 12px;
-    padding: 13px 18px;
+    row-gap: 0;
+    margin: 0;
+    padding: 12px 18px;
   }
   body.desktop-host[data-active-page="overview"] .overview-status-card > h2 {
-    grid-area: heading;
-    margin: 0;
+    display: none !important;
   }
   body.desktop-host[data-active-page="overview"] .overview-status-card > .robot-status-summary {
     grid-area: summary;
     display: grid;
-    width: min(100%, max(690px, 70%));
+    width: min(100%, 1000px);
     max-width: 100%;
-    min-height: 36px;
-    grid-template-columns: minmax(88px, max-content) minmax(168px, 210px) repeat(4, minmax(58px, 1fr));
+    min-height: 38px;
+    grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
     align-items: center;
-    column-gap: 10px;
+    column-gap: 24px;
     row-gap: 0;
   }
   body.desktop-host[data-active-page="overview"] .overview-status-card > .robot-status-summary > .badge {
@@ -2129,19 +2327,16 @@
     display: flex;
     width: 100%;
     min-width: 0;
-    align-items: flex-start;
-    padding-left: 10px;
-    border-left: 1px solid color-mix(in srgb, var(--field-border) 36%, transparent);
-    text-align: left;
-  }
-  body.desktop-host[data-active-page="overview"] .overview-status-card .qq-bot-workspace-field select {
-    padding-right: 32px;
+    align-items: center;
+    padding-left: 0;
+    border-left: 0;
+    text-align: center;
   }
   body.desktop-host[data-active-page="overview"] .overview-status-card .robot-stat strong {
     width: 100%;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow: visible;
+    text-overflow: clip;
   }
   body.desktop-host[data-active-page="overview"] .overview-status-card > .robot-status-actions {
     grid-area: actions;
@@ -2151,6 +2346,10 @@
     align-items: center;
     gap: 0;
     margin: 0;
+    min-height: 36px;
+    box-sizing: border-box;
+    padding-left: 12px;
+    border-left: 1px solid var(--field-border);
   }
   body.desktop-host[data-active-page="overview"] .overview-status-card .robot-core-actions { gap: 6px; }
   body.desktop-host[data-active-page="overview"] .overview-status-card .panel-action-icon {
@@ -2317,20 +2516,20 @@
   }
 /* Shared desktop workspace template: opt in on the four forwarding pages. */
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) .page-header > .page-header-actions { display: none; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) > .cardrow { display: flex; flex-direction: column; gap: 16px; margin-bottom: 16px; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .overview-status-card {
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"]) > .cardrow { display: flex; flex-direction: column; gap: 16px; margin-bottom: 16px; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"]) .overview-status-card {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
   gap: 8px 16px; padding: 12px 18px; min-height: 0; flex: none; margin-bottom: 8px;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .overview-status-card > h2 { display: none !important; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .robot-status-summary {
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"]) .overview-status-card > h2 { display: none !important; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"]) .robot-status-summary {
   width: min(100%, 1000px); grid-template-columns: minmax(88px, max-content) minmax(180px, 240px) repeat(4, minmax(58px, 1fr));
   gap: 12px; min-width: 0;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .robot-status-summary > .badge { justify-self: start; max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) #qqBotWorkspace { width: 100%; padding-right: 30px; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .robot-status-actions { margin: 0; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .robot-stat strong { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"]) .robot-status-summary > .badge { justify-self: start; max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"]) #qqBotWorkspace { width: 100%; padding-right: 8px; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"]) .robot-status-actions { margin: 0; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"]) .robot-stat strong { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 /* 离线补发卡内容：上限/待补发在上，胶囊与操作按钮贴底。 */
 body.desktop-host[data-active-page="discord"] #pageDiscord .func-cards > #backfillCard #backfillContent {
   display: flex; flex-direction: column; flex: 1; min-width: 0;
@@ -2364,11 +2563,11 @@ body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data
   margin-left: 0;
 }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) > .card:first-child { padding: 18px; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) { gap: 12px 16px; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) > .fgsection { padding: 14px; margin: 0; border: 0; border-radius: var(--radius-control); }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) .fgh3 { margin: 0 0 12px; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) .tablewrap { overflow: visible; flex: 1; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) th { color: var(--muted); }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="steam"], [data-active-page="qq"]) :is(#fgBody, #xFgBody, #bilibiliFgBody, #steamWorkspace, #qqFgBody) { gap: 12px 16px; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="steam"], [data-active-page="qq"]) :is(#fgBody, #xFgBody, #bilibiliFgBody, #steamWorkspace, #qqFgBody) > .fgsection { padding: 14px; margin: 0; border: 0; border-radius: var(--radius-control); }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="steam"], [data-active-page="qq"]) :is(#fgBody, #xFgBody, #bilibiliFgBody, #steamWorkspace, #qqFgBody) .fgh3 { margin: 0 0 12px; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="steam"], [data-active-page="qq"]) :is(#fgBody, #xFgBody, #bilibiliFgBody, #steamWorkspace, #qqFgBody) .tablewrap { overflow: visible; flex: 1; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="steam"], [data-active-page="qq"]) :is(#pageDiscord, #pageX, #pageBilibili, #pageSteam, #pageQQ) th { color: var(--muted); }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) .discord-settings-section,
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(:is(#relayLinkCard, #xRelayLinkCard), :is(#autoTranslationCard, #xAutoTranslationCard)) {
   padding: 16px 0; margin: 0; border: 0; border-bottom: 1px solid var(--panel-border);
@@ -2399,11 +2598,11 @@ body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data
 @media (max-width: 1100px) {
   body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#autoTranslationCard, #xAutoTranslationCard) { grid-template-columns: 1fr auto; }
   body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#autoTranslationCard, #xAutoTranslationCard) h2 { grid-column: 1 / -1; }
-  body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .robot-status-summary { grid-template-columns: minmax(88px, max-content) minmax(170px,1fr) repeat(4,minmax(50px,1fr)); gap: 8px; }
+  body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"]) .robot-status-summary { grid-template-columns: minmax(88px, max-content) minmax(170px,1fr) repeat(4,minmax(50px,1fr)); gap: 8px; }
 }
 @media (max-width: 760px) {
-  body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .robot-status-summary { grid-template-columns: repeat(4,minmax(0,1fr)); }
-  body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .robot-status-summary > :is(.badge, .qq-bot-workspace-field) { grid-column: span 2; }
+  body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"]) .robot-status-summary { grid-template-columns: repeat(4,minmax(0,1fr)); }
+  body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"]) .robot-status-summary > :is(.badge, .qq-bot-workspace-field) { grid-column: span 2; }
   body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(:is(#relayLinkCard, #xRelayLinkCard), :is(#autoTranslationCard, #xAutoTranslationCard)) { display: flex; flex-wrap: wrap; }
 }
 /* Module-specific additions use the shared Discord workspace above. */
@@ -2411,10 +2610,10 @@ body.desktop-host:is([data-active-page="x"], [data-active-page="bilibili"]) :is(
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 body.desktop-host :is(#xFgBody, #bilibiliFgBody) > :is(.fgtabs, .hint) { grid-column: 1 / -1; }
-body.desktop-host:is([data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"]) :is(#xFgBody, #bilibiliFgBody, #qqFgBody) > .fgsection {
+body.desktop-host:is([data-active-page="x"], [data-active-page="bilibili"], [data-active-page="steam"], [data-active-page="qq"]) :is(#xFgBody, #bilibiliFgBody, #steamWorkspace, #qqFgBody) > .fgsection {
   min-width: 0; background: var(--field-bg);
 }
-body.desktop-host :is(#xFgBody, #bilibiliFgBody, #qqFgBody) .fgh3 { color: var(--fg); font-size: 15px; font-weight: 700; }
+body.desktop-host :is(#xFgBody, #bilibiliFgBody, #steamWorkspace, #qqFgBody) .fgh3 { color: var(--fg); font-size: 15px; font-weight: 700; }
 /* QQ 授权用户：与 X/Bilibili 一样把转发组工作区做成左右两个分栏，
    左「QQ 转发群」、右「QQ 授权用户」，各带自己的底部操作栏。 */
 body.desktop-host[data-active-page="qq"] #qqFgBody {
@@ -2438,7 +2637,7 @@ body.desktop-host:is([data-active-page="x"], [data-active-page="bilibili"], [dat
   min-height: 0; flex: none;
 }
 body.desktop-host :is(#xrssCard, #bilibiliCard, #scheduledMessageCard) > h2 { margin: 0; }
-body.desktop-host :is(#xrssCard, #bilibiliCard, #youtubeCard) > .rss-config-row:has(input) {
+body.desktop-host :is(#xrssCard, #bilibiliCard, #youtubeCard, #steamStatusCard) > .rss-config-row:has(input) {
   grid-column: 1 / -1; margin-top: 0 !important; flex-wrap: wrap;
 }
 body.desktop-host :is(#xrssCard, #bilibiliCard, #youtubeCard) .xrss-summary { min-width: 0; overflow-wrap: anywhere; }
@@ -2467,14 +2666,98 @@ body.desktop-host:is([data-active-page="x"], [data-active-page="bilibili"], [dat
 .overview-state[data-state="neutral"] { color: var(--muted); }
 .message-trace-result.pending { background: var(--badge-warn-bg); color: var(--badge-warn-fg); }
 button.hintbtn { display: inline-grid; place-items: center; width: 24px; height: 24px; min-width: 24px; padding: 0; flex: 0 0 24px; color: var(--muted); border-radius: var(--radius-control); }
+/* ---------- Steam → QQ workspace ---------- */
+#pageSteam > .card {
+  background: var(--card-bg); border: 1px solid var(--panel-border);
+  border-radius: var(--radius-card); padding: 12px 18px; box-sizing: border-box;
+}
+#pageSteam > .steam-workspace-card {
+  padding: 12px 18px;
+}
+#pageSteam > .steam-workspace-card > h2 {
+  display: flex; align-items: center; min-height: var(--control-height);
+  box-sizing: border-box; margin: 0 0 12px;
+}
+#pageSteam > .card > .hint { margin: 0 0 10px; line-height: 1.5; }
+#steamWorkspace {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px; align-items: stretch; min-width: 0;
+}
+#steamWorkspace > .fgtabs { grid-column: 1 / -1; flex-wrap: nowrap; min-width: 0; margin: 0 0 10px; }
+#steamFgTabs .fgtab-list { flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; overflow-x: auto; }
+#steamFgTabs .fgtab-list > button { flex-shrink: 0; }
+#steamFgTabs .fgtab-actions { flex: 0 0 auto; margin-left: auto; padding-left: 12px; border-left: 1px solid var(--panel-border); }
+#steamFgTabs .fgtab-actions .rowicon { width: 36px; height: 36px; flex-basis: 36px; border-radius: 8px; }
+#steamFgTabs .fgtab-actions .fg-delete { background: transparent; border-color: transparent; color: var(--danger-icon); }
+#steamFgTabs .fgtab-actions .fg-delete:hover,
+#steamFgTabs .fgtab-actions .fg-delete:focus-visible { background: var(--badge-off-bg); color: var(--badge-off-fg); }
+#steamFgTabs input.fg-rename { width: 110px; min-width: 80px; min-height: 32px; box-sizing: border-box; padding: 4px 8px; }
+#steamWorkspace > .steam-pane { display: flex; min-width: 0; min-height: 180px; flex-direction: column; }
+.steam-field { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
+.steam-field-label { color: var(--muted); font-size: 13px; line-height: 1.4; }
+.steam-field .steam-input {
+  width: 100%; min-width: 0; min-height: var(--control-height); height: var(--control-height);
+  box-sizing: border-box; padding: 6px 10px;
+  background: var(--field-bg); border: 1px solid var(--field-border);
+  border-radius: var(--radius-control); color: var(--field-fg); font: inherit;
+  font-size: 14px; color-scheme: dark;
+}
+body.theme-light .steam-field .steam-input { color-scheme: light; }
+.steam-field .steam-input:focus-visible {
+  outline: 2px solid var(--primary-border); outline-offset: 1px;
+  border-color: var(--primary-border);
+}
+.steam-target-wrap { flex: 1 1 auto; min-width: 0; }
+#steamGroupList th:nth-child(5) { white-space: nowrap; }
+.steam-status-actions {
+  display: flex; align-items: center; flex: 0 0 auto; gap: 8px; min-width: 0; margin: 0;
+}
+.steam-status-actions > button { flex: 0 0 auto; height: 36px; min-height: 36px; padding: 0 10px; font-size: 13px; white-space: nowrap; }
+#btnSteamProtection { width: 34px; height: 34px; min-width: 34px; margin-left: auto; padding: 0; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; }
+#btnSteamProtection svg { width: 18px; height: 18px; flex: none; }
+.steam-status-line { width: 100%; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.steam-status-copy {
+  display: inline-flex; flex: 1 1 320px; flex-wrap: wrap; align-items: baseline; gap: 3px 8px;
+  min-width: 0; margin: 0; color: var(--muted); line-height: 1.45; overflow-wrap: anywhere;
+}
+.steam-status-copy::before { content: none; }
+.steam-status-copy.err { color: var(--badge-off-fg); font-weight: 600; }
+.steam-rss-config-row { flex-wrap: nowrap; gap: 12px; }
+#steamRegion { flex: 0 0 150px !important; width: 150px !important; min-width: 130px; box-sizing: border-box; }
+.steam-rss-config-row input[type="number"] { flex: 0 0 76px; width: 76px !important; }
+@media (max-width: 680px) {
+  .steam-rss-config-row { flex-wrap: wrap; }
+  .steam-rss-config-row .bilibili-card-actions { margin-left: auto; }
+}
+.steam-protection-hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.steam-register-form { display: flex; flex-direction: column; gap: 12px; }
+.steam-draft-actions:not([hidden]) { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--panel-border); border-radius: var(--radius-control); }
+.steam-draft-actions > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.steam-draft-warning:not([hidden]) {
+  padding: 9px 11px; border: 1px solid var(--badge-warn-fg);
+  border-radius: var(--radius-control); background: var(--badge-warn-bg);
+  color: var(--badge-warn-fg); line-height: 1.5;
+}
+@media (max-width: 1280px) {
+  #steamWorkspace { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 520px) {
+  #pageSteam > .card { padding: 12px; }
+}
 .help-icon { display: block; width: 16px; height: 16px; }
 button.hintbtn:is(:hover, :focus-visible) { color: var(--fg); background: var(--sec-bg); }
 .ui-tooltip { position: fixed; z-index: 10000; max-width: min(360px, calc(100vw - 16px)); padding: 8px 12px; border: 1px solid var(--field-border); border-radius: var(--radius-control); background: var(--modal-bg); color: var(--fg); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; pointer-events: none; }
 .ui-tooltip[hidden] { display: none; }
+[data-wrelay-title]:disabled { pointer-events: auto; }
+.ui-tooltip-copy-feedback { display: flex; align-items: center; gap: 6px; white-space: nowrap; opacity: 1; transition: opacity 240ms ease; }
+.ui-tooltip-copy-feedback.is-fading { opacity: 0; }
+.ui-tooltip-copy-icon { display: inline-flex; flex: 0 0 16px; width: 16px; height: 16px; align-items: center; justify-content: center; }
+.ui-tooltip-copy-icon .mingcute-icon { display: block; width: 16px; height: 16px; }
+@media (prefers-reduced-motion: reduce) { .ui-tooltip-copy-feedback { transition: none; } }
 .id-value:focus-visible, [role="button"]:focus-visible { outline: 2px solid var(--primary-border); outline-offset: 2px; border-radius: 3px; }
 button.danger:not(#confirmOk), #btnClearLog, .scheduled-message-remove { background: transparent; border-color: transparent; color: var(--danger-icon); }
 button.danger:not(#confirmOk):is(:hover, :focus-visible):not(:disabled), #btnClearLog:is(:hover, :focus-visible), .scheduled-message-remove:is(:hover, :focus-visible) { background: var(--badge-off-bg); border-color: var(--danger-icon); color: var(--badge-off-fg); }
-body.desktop-host :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) > .fgsection { background: color-mix(in srgb, var(--field-bg) 45%, var(--card-bg)); border-color: var(--panel-border); }
+body.desktop-host :is(#fgBody, #xFgBody, #bilibiliFgBody, #steamWorkspace, #qqFgBody) > .fgsection { background: color-mix(in srgb, var(--field-bg) 45%, var(--card-bg)); border-color: var(--panel-border); }
 body.desktop-host :is(#backfillCard, #xrssCard, #bilibiliCard, #youtubeCard, #scheduledMessageCard) { column-gap: 16px; padding-block: 12px; border-bottom-color: var(--panel-border); }
 body.desktop-host :is(#backfillCard, #xrssCard, #bilibiliCard, #youtubeCard, #scheduledMessageCard) input { min-height: var(--control-height); }
 body.desktop-host[data-active-page="qq"] #scheduledMessageCard { grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; }
@@ -2490,9 +2773,9 @@ body.desktop-host .discord-log-heading > button { flex-shrink: 0; }
 
 /* Final desktop density: constrain settings content, not route workspaces. */
 body.desktop-host :is(.discord-whitelist, #relayLinkCard, #xRelayLinkCard, #bilibiliRelayLinkCard, #autoTranslationCard, #xAutoTranslationCard) { max-width: 1200px; width: 100%; box-sizing: border-box; }
-body.desktop-host :is(#backfillCard, #xrssCard, #bilibiliCard, #youtubeCard, #scheduledMessageCard) { row-gap: 8px; }
-body.desktop-host :is(#xrssCard, #bilibiliCard, #youtubeCard) > .rss-config-row:has(input) { align-items: center; gap: 12px; max-width: 1200px; padding-top: 4px; }
-body.desktop-host :is(#xrssCard, #bilibiliCard, #youtubeCard) .rss-config-row label { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+body.desktop-host :is(#backfillCard, #xrssCard, #bilibiliCard, #youtubeCard, #steamStatusCard, #scheduledMessageCard) { row-gap: 8px; }
+body.desktop-host :is(#xrssCard, #bilibiliCard, #youtubeCard, #steamStatusCard) > .rss-config-row:has(input) { align-items: center; gap: 12px; max-width: 1200px; padding-top: 4px; }
+body.desktop-host :is(#xrssCard, #bilibiliCard, #youtubeCard, #steamStatusCard) .rss-config-row label { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 body.desktop-host #scheduledMessageSummary.is-empty strong { color: var(--muted); font-weight: 400; }
 body :is(button, a, input, select, textarea, summary, [tabindex]):focus-visible { outline: 2px solid var(--primary-border); outline-offset: 2px; }
 body :is(button, a, summary, [role="button"]):focus:not(:focus-visible) { outline: none; }
@@ -2504,11 +2787,14 @@ body :is(button, a, summary, [role="button"]):focus:not(:focus-visible) { outlin
 body.desktop-host :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) :is(td .rowicon, .iconbtn, .chan-name-edit) {
   color: var(--muted); background: transparent; border-color: transparent; opacity: .88;
 }
-body.desktop-host :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) td .rowicon:is(.translation-active, .filter-active) {
-  color: var(--fg); background: var(--sec-bg); border-color: var(--field-border); opacity: .9;
+body.desktop-host :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) td .rowicon.filter-active {
+  color: var(--btn-fg); background: var(--filter-active-bg); border-color: var(--filter-active-border); opacity: 1;
 }
 body.desktop-host :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) :is(td .rowicon, .iconbtn, .chan-name-edit):is(:hover, :focus-visible, :active):not(:disabled) {
   color: var(--fg); background: var(--sec-bg); border-color: var(--field-border); opacity: 1;
+}
+body.desktop-host :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) td .rowicon.filter-active:is(:hover, :focus-visible, :active):not(:disabled) {
+  color: var(--btn-fg); background: var(--filter-active-bg); border-color: var(--filter-active-border); opacity: 1;
 }
 body.desktop-host :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) td .rowicon.danger { color: var(--danger-icon); opacity: .68; }
 body.desktop-host :is(#pageDiscord, #pageX, #pageBilibili, #pageQQ) td .rowicon.danger:is(:hover, :focus-visible, :active):not(:disabled) {
@@ -2687,7 +2973,7 @@ body.desktop-host[data-active-page="qq"] #scheduledMessageCard > h2 {
 }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
   :is(#backfillCard, #xrssCard, #bilibiliCard, #scheduledMessageCard) { margin-bottom: 0; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"])
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
   .overview-status-card { margin-bottom: 0; }
 body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
   .discord-whitelist { margin: 0 0 16px; }
@@ -2711,30 +2997,30 @@ body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data
   #logCard.discord-log-collapsed > h2 { margin: 0; }
 
 /* Shared forwarding-pane footer: equal-height action rail with a stable left/right split. */
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
-  :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) > .fgsection {
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="steam"], [data-active-page="qq"])
+  :is(#fgBody, #xFgBody, #bilibiliFgBody, #steamWorkspace, #qqFgBody) > .fgsection {
   display: flex;
   flex-direction: column;
   min-height: 0;
   padding: 0 14px;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
-  :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) > .fgsection > .tablewrap,
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
-  :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) > .fgsection > div[id$="Content"] {
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="steam"], [data-active-page="qq"])
+  :is(#fgBody, #xFgBody, #bilibiliFgBody, #steamWorkspace, #qqFgBody) > .fgsection > .tablewrap,
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="steam"], [data-active-page="qq"])
+  :is(#fgBody, #xFgBody, #bilibiliFgBody, #steamWorkspace, #qqFgBody) > .fgsection > div[id$="Content"] {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
-  :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) > .fgsection > div[id$="Content"] {
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="steam"], [data-active-page="qq"])
+  :is(#fgBody, #xFgBody, #bilibiliFgBody, #steamWorkspace, #qqFgBody) > .fgsection > div[id$="Content"] {
   display: flex;
   flex-direction: column;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
-  :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) .tablewrap { flex: 1 1 auto; min-height: 0; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
-  :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) .addrow {
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="steam"], [data-active-page="qq"])
+  :is(#fgBody, #xFgBody, #bilibiliFgBody, #steamWorkspace, #qqFgBody) .tablewrap { flex: 1 1 auto; min-height: 0; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="steam"], [data-active-page="qq"])
+  :is(#fgBody, #xFgBody, #bilibiliFgBody, #steamWorkspace, #qqFgBody) .addrow {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   align-items: center;
@@ -2747,9 +3033,9 @@ body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data
   margin: 0 !important;
   padding: 11px 0;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"])
-  :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #qqFgBody) .pane-main-actions,
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"])
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+  :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #steamWorkspace, #qqFgBody) .pane-main-actions,
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
   :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #qqFgBody) .discord-external-actions {
   display: flex;
   align-items: center;
@@ -2759,19 +3045,19 @@ body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data
   min-width: 0;
   box-sizing: border-box;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"])
-  :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #qqFgBody) .pane-main-actions { justify-content: flex-start; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"])
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+  :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #steamWorkspace, #qqFgBody) .pane-main-actions { justify-content: flex-start; }
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
   :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #qqFgBody) .discord-external-actions {
   justify-content: flex-end;
   margin-left: 0;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"])
-  :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #qqFgBody) :is(.pane-main-actions > button, .discord-external-actions > button) {
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+  :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #steamWorkspace, #qqFgBody) :is(.pane-main-actions > button, .discord-external-actions > button) {
   flex: 0 0 auto;
   white-space: nowrap;
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"])
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
   :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #qqFgBody) .discord-external-actions .linkbtn { margin-left: 0 !important; }
 
 /* Expanded logs retain the shared Card surface and use a distinct console inset. */
@@ -2813,8 +3099,8 @@ body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data
   #logCard:not(.discord-log-collapsed) .log-actions #logLevel { height: var(--control-height); box-sizing: border-box; }
 
 /* Shared pane headers and desktop SettingsRow layout. */
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="qq"])
-  :is(#fgBody, #xFgBody, #bilibiliFgBody, #qqFgBody) .fgh3 {
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="steam"], [data-active-page="qq"])
+  :is(#fgBody, #xFgBody, #bilibiliFgBody, #steamWorkspace, #qqFgBody) .fgh3 {
   display: flex; align-items: center; margin: 0; padding: 16px 0 13px;
 }
 body.desktop-host .discord-log-heading { justify-content: flex-end; }
@@ -2840,6 +3126,8 @@ body.theme-light #pageSettings :is(select, option) { color-scheme: light; }
 body select { border-radius: var(--radius-control); }
 @supports (appearance: base-select) {
   body select:not([multiple]):not([size]) {
+    --select-option-inline-padding: 8px;
+    --select-picker-radius: var(--radius-control);
     appearance: base-select;
     display: flex;
     align-items: center;
@@ -2854,35 +3142,76 @@ body select { border-radius: var(--radius-control); }
     white-space: nowrap;
   }
   body select:not([multiple]):not([size])::picker-icon {
+    content: "";
+    --mingcute-down-mask: url('data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20fill%3D%22black%22%20d%3D%22m12%2013.586%204.95-4.95c.481-.422%201.233-.381%201.573.207.235.407.139.868-.159%201.207l-5.657%205.657c-.204.179-.429.293-.707.293s-.503-.114-.707-.293L5.636%2010.05c-.179-.204-.293-.429-.293-.707%200-.927%201.053-1.281%201.707-.707Z%22%2F%3E%3C%2Fsvg%3E');
+    width: 16px;
+    height: 16px;
     flex: none;
     align-self: center;
-    margin-inline: auto 0;
+    margin-inline-start: auto;
+    margin-inline-end: 0;
+    transform: rotate(-90deg);
+    transition: transform .14s ease;
+    border: 0;
     color: var(--muted);
+    background-color: currentColor;
+    -webkit-mask: var(--mingcute-down-mask) center / contain no-repeat;
+    mask: var(--mingcute-down-mask) center / contain no-repeat;
+  }
+  body select:not([multiple]):not([size]):open::picker-icon {
+    transform: rotate(0deg);
   }
   body select:not([multiple]):not([size])::picker(select) {
     appearance: base-select;
+    position-area: block-end span-inline-end;
+    position-try-order: normal;
+    position-try-fallbacks: flip-block;
+    box-sizing: border-box;
+    max-block-size: calc(100svb - 16px);
     margin-block: 4px;
     padding: 2px;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     border: 1px solid var(--field-border);
-    border-radius: 10px;
+    border-radius: var(--select-picker-radius, var(--radius-control));
     background: var(--field-bg);
     color: var(--field-fg);
     box-shadow: 0 10px 26px rgb(16 24 40 / 18%);
   }
+  body #steamRegion:not([multiple]):not([size])::picker(select) {
+    position-area: block-end span-inline-start;
+    position-try-fallbacks: none;
+    max-block-size: min(42svb, 320px);
+  }
   body select:not([multiple]):not([size]) option {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    box-sizing: border-box;
     min-height: 30px;
     width: 100%;
-    padding: 6px 12px;
+    padding-block: 6px;
+    padding-inline: max(0px, calc(var(--select-option-inline-padding, 8px) - 3px));
     border-radius: 6px;
     background: var(--field-bg);
     color: var(--field-fg);
+    text-align: start;
+    transition: background-color .14s ease, color .14s ease;
   }
+  body select:not([multiple]):not([size]) option[hidden] { display: none; }
+  body select:not([multiple]):not([size]) option::checkmark { display: none; }
+  body .modal-shell select:not([multiple]):not([size]) { --select-option-inline-padding: 10px; }
+  body .scheduled-picker-select:not([multiple]):not([size]) { --select-option-inline-padding: 10px; }
+  #pageSettings select:not([multiple]):not([size]) { --select-option-inline-padding: 12px; }
+  body .auto-translation-field select:not([multiple]):not([size]),
+  body .scheduled-message-entry select:not([multiple]):not([size]),
   body select:not([multiple]):not([size])::picker(select) option:hover,
   body select:not([multiple]):not([size])::picker(select) option:focus,
   body select:not([multiple]):not([size]) option:hover,
   body select:not([multiple]):not([size]) option:focus {
-    background: color-mix(in srgb, var(--primary) 68%, var(--field-bg));
+    background: color-mix(in srgb, var(--sec-bg) 78%, var(--fg));
+    color: var(--hover-fg);
   }
 }
 
@@ -2896,13 +3225,18 @@ body.desktop-host #log { color-scheme: dark; scrollbar-color: var(--field-border
 body.desktop-host #log::-webkit-scrollbar { width: 8px; height: 8px; }
 body.desktop-host #log::-webkit-scrollbar-track { background: var(--log-bg); }
 body.desktop-host #log::-webkit-scrollbar-thumb { background: var(--field-border); border-radius: 8px; }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .overview-status-card .robot-status-summary {
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"]) .overview-status-card .robot-status-summary {
   display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: 24px; width: min(100%, 1000px);
 }
-body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"]) .robot-status-actions { display: none; }
 .desktop-connection-group { display: grid; grid-template-columns: max-content 240px; align-items: center; gap: 12px; min-width: 0; }
 .desktop-connection-group .qq-bot-workspace-field { max-width: 240px; }
 .desktop-statistics-group { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: center; gap: 12px; min-width: 0; }
+
+/* Desktop icon-only actions keep square hit targets, even when their glyph differs by context. */
+body.desktop-host :is(.panel-action-icon, button.iconbtn, button.rowicon, button.foldbtn, button.hintbtn, button.modal-x) {
+  box-sizing: border-box;
+  aspect-ratio: 1;
+}
 
 body.desktop-host .desktop-connection-group #qqBotWorkspace { box-sizing: border-box; }
 body.desktop-host .desktop-connection-group .badge { max-width: none; }
@@ -2910,15 +3244,23 @@ body.desktop-host .desktop-connection-group .badge { max-width: none; }
   .desktop-connection-group { grid-template-columns: max-content 200px; }
 }
 
-/* Global controls have one home: process actions in Overview, maintenance in Settings. */
+@media (max-width: 680px) {
+  .ai-model-priority-row {
+    grid-template-columns: 24px 54px minmax(0, 1fr);
+    gap: 6px;
+  }
+  .ai-model-priority-status { grid-column: 3; margin-top: -2px; }
+}
+
+/* Process actions share the overview/link status row; maintenance remains in Settings. */
 .discord-log-heading { display: none; }
-body:not([data-active-page="overview"]) .robot-status-actions { display: none; }
+body:not(.desktop-host):not([data-active-page="overview"]) .robot-status-actions { display: none; }
 .profile-config-menu { position: relative; display: inline-flex; }
 .profile-config-options { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 120px; padding: 6px; border: 1px solid var(--panel-border); border-radius: 8px; background: var(--card-bg); box-shadow: 0 8px 24px #0004; }
 .profile-config-options[hidden] { display: none; }
 .profile-config-options button { display: block; width: 100%; white-space: nowrap; }
 .profile-config-options button + button { margin-top: 4px; }
-body[data-active-page="overview"] .robot-core-actions :is(#btnStart, #btnStop, #btnRestart):disabled { display: none; }
+  body[data-active-page="overview"] .robot-core-actions :is(#btnStart, #btnStop):disabled { display: none; }
 /* 设置页开关与「启用补发」一致：只保留轨道，外围不再有圆角底色或描边。 */
 #pageSettings :is(.settings-switch, #btnSettingsAutostart) {
   flex: 0 0 32px; width: 32px; min-width: 32px; height: 18px; min-height: 18px;
@@ -3042,14 +3384,15 @@ body.desktop-host[data-active-page="qq"] #pageQQ .func-cards > #autoTranslationC
 body.desktop-host[data-active-page="qq"] #pageQQ .func-cards > #autoTranslationCard .auto-translation-fields { flex-wrap: wrap; }
 body.desktop-host[data-active-page="qq"] #pageQQ .func-cards > #autoTranslationCard .auto-translation-field { min-width: 0; flex: 1 1 150px; }
 
-/* Keep process and RSS run-state pills at the same size across every page. */
-#badge, #xrssBadge, #bilibiliBadge, #youtubeBadge {
+/* Keep process, RSS and Steam run-state pills at the same size across every page. */
+#badge, #xrssBadge, #bilibiliBadge, #youtubeBadge, #steamBadge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: 36px;
   padding: 4px 9px;
 }
+body #steamStatusCard .rss-status-line > #steamBadge { flex: none; }
 
 /* ---------- YouTube → QQ 页面 ---------- */
 /* 顶部运行状态、RSS 状态与卡片表面沿用五个功能页共用的模板（见上方共享规则），
@@ -3075,6 +3418,7 @@ body.desktop-host[data-active-page="youtube"] #pageYoutube > .card {
   background: var(--card-bg); border: 1px solid var(--panel-border);
   border-radius: var(--radius-card); padding: 12px 18px; box-sizing: border-box;
 }
+#pageYoutube > .card { background-color: var(--card-bg); }
 body.desktop-host[data-active-page="youtube"] #pageYoutube > .card > h2 {
   display: flex; align-items: center; min-height: var(--control-height); margin: 0 0 12px;
 }
@@ -3123,11 +3467,14 @@ body.desktop-host[data-active-page="youtube"] #pageYoutube th { color: var(--mut
 body.desktop-host[data-active-page="youtube"] #pageYoutube :is(td .rowicon, .iconbtn) {
   color: var(--muted); background: transparent; border-color: transparent; opacity: .88;
 }
-body.desktop-host[data-active-page="youtube"] #pageYoutube td .rowicon:is(.translation-active, .filter-active) {
-  color: var(--fg); background: var(--sec-bg); border-color: var(--field-border); opacity: .9;
+body.desktop-host[data-active-page="youtube"] #pageYoutube td .rowicon.filter-active {
+  color: var(--btn-fg); background: var(--filter-active-bg); border-color: var(--filter-active-border); opacity: 1;
 }
 body.desktop-host[data-active-page="youtube"] #pageYoutube :is(td .rowicon, .iconbtn, .chan-name-edit):is(:hover, :focus-visible, :active):not(:disabled) {
   color: var(--fg); background: var(--sec-bg); border-color: var(--field-border); opacity: 1;
+}
+body.desktop-host[data-active-page="youtube"] #pageYoutube td .rowicon.filter-active:is(:hover, :focus-visible, :active):not(:disabled) {
+  color: var(--btn-fg); background: var(--filter-active-bg); border-color: var(--filter-active-border); opacity: 1;
 }
 body.desktop-host[data-active-page="youtube"] #pageYoutube td .rowicon.danger {
   color: var(--danger-icon); opacity: .68;
@@ -3145,7 +3492,7 @@ body.desktop-host[data-active-page="youtube"] #pageYoutube td .rowicon.danger:is
 /* ---------- 状态卡统一：机器人状态卡与各页 RSS 状态卡 ---------- */
 /* 所有功能页与总览页的机器人状态卡共用同一张卡片表面（描边、圆角、内边距）。 */
 body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
-    [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="qq"])
+    [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
   .cardrow > .overview-status-card {
   background: var(--card-bg);
   border: 1px solid var(--panel-border);
@@ -3155,15 +3502,22 @@ body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"]
 }
 
 /* ---------- 维护告警浮层：沿用卡片外观，动作贴左下角 ---------- */
-.maintenance-banner {
+body > .maintenance-banner {
   position: fixed; bottom: 16px; right: 24px; z-index: 900;
+  margin: 0;
+  box-sizing: border-box;
+  width: min(440px, calc(100vw - 16px));
+  min-width: 0;
+  max-height: calc(100vh - 16px);
+  overflow: auto;
   display: flex; flex-direction: column; gap: 8px;
-  min-width: 300px; max-width: 440px;
+  max-width: calc(100vw - 16px);
   background: var(--card-bg); border: 1px solid var(--panel-border);
   border-radius: var(--radius-card); padding: 12px 16px;
   box-shadow: 0 10px 28px rgba(0, 0, 0, .35);
 }
-.maintenance-banner > h2 { margin: 0; font-size: 15px; color: var(--card-heading); }
+.maintenance-banner > h2 { width: 100%; box-sizing: border-box; margin: 0; font-size: 15px; color: var(--card-heading); cursor: move; user-select: none; touch-action: none; }
+.maintenance-banner.is-dragging > h2 { cursor: grabbing; }
 .maintenance-banner .maintenance-dismiss { width: 32px; height: 32px; border: 1px solid transparent; border-radius: var(--radius-control); color: var(--muted); }
 .maintenance-banner .maintenance-dismiss:hover { background: var(--sec-bg); color: var(--fg); border-color: var(--field-border); }
 .maintenance-banner .maintenance-dismiss svg { width: 18px; height: 18px; pointer-events: none; }
@@ -3205,15 +3559,19 @@ body.theme-light .panel-loading img { filter: brightness(2.4) saturate(0.95); op
 body.theme-light :is(.page-header h1, .card h2, .card h3, .fgh3, .overview-route-copy strong, .overview-kicker, .modal-shell h3, .settings-item-copy strong) {
   color: #3d4d62;
 }
-body.theme-light.desktop-host :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #qqFgBody) .fgh3 {
+body.theme-light.desktop-host :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #steamWorkspace, #qqFgBody) .fgh3 {
   color: #3d4d62;
 }
 body.theme-light .sidebar-brand,
 body.theme-light #pageTabs .nav-item,
 body.theme-light #pageTabs .nav-item.active { color: #3d4d62; }
 body.theme-light #pageTabs .nav-item.active .nav-icon { color: #3349b8; }
+body.theme-light #pageTabs .nav-item:not(.active):hover {
+  background: color-mix(in srgb, var(--primary) 58%, var(--card-bg));
+  border-color: color-mix(in srgb, var(--primary-border) 42%, var(--card-bg));
+}
 body.theme-light .overview-state[data-state="on"] { color: #087f4d; }
-body.theme-light.desktop-host :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #qqFgBody) > .fgsection {
+body.theme-light.desktop-host :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFgBody, #steamWorkspace, #qqFgBody) > .fgsection {
   background: #f3f5fa;
   border: 1px solid #dfe4ef;
   border-radius: var(--radius-control);
@@ -3227,6 +3585,7 @@ body.theme-light.desktop-host :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFg
 }
 .fgsection .chan-name { max-width: 100%; }
 .fgsection .chan-name-text { min-width: 0; overflow: hidden; }
+  .fgsection .discord-channel-real-name a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .id-cell .id-value { display: flex; }
 .fgsection .middle-value-prefix, .id-cell .middle-value-prefix {
   min-width: 0;
@@ -3235,18 +3594,17 @@ body.theme-light.desktop-host :is(#fgBody, #xFgBody, #bilibiliFgBody, #youtubeFg
   white-space: nowrap;
 }
 .fgsection .middle-value-suffix, .id-cell .middle-value-suffix { flex: none; white-space: nowrap; }
-.fgsection :is(.middle-value, .id-value)[data-copy-value] { cursor: copy; }
+.fgsection :is(.middle-value, .id-value)[data-copy-value] { cursor: context-menu; }
 .fgsection :is(.middle-value, .id-value)[data-copy-value]:focus-visible {
   outline: 2px solid var(--primary-border);
   outline-offset: 2px;
 }
-.fgsection :is(.middle-value, .id-value).copied { color: var(--success); }
 body.theme-light :is(.overview-status-card, #xrssCard, #bilibiliCard, #youtubeCard) .badge.on {
   color: #087f4d;
   background: #ecf9ef;
 }
 body.theme-light .overview-status-card #btnRestart:not(:hover):not(:focus-visible):not(:disabled) {
-  color: #7187a2;
+  color: var(--sec-fg);
 }
 body.theme-light.desktop-host[data-active-page="overview"] .overview-status-card #btnStop:not(:hover):not(:focus-visible):not(:disabled) {
   color: #c7818d;
@@ -3261,4 +3619,312 @@ body.theme-light.desktop-host[data-active-page="overview"] .overview-status-card
 }
 @media (max-width: 1120px) {
   .panel-loading { left: var(--sidebar-compact-width); }
+}
+
+/* Keep the title block from shifting the first card across desktop pages. */
+@media (min-width: 841px) {
+  body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+      [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"]) .page-header {
+    box-sizing: border-box;
+    height: 58px;
+    min-height: 58px;
+    margin-bottom: 16px;
+    align-items: center;
+  }
+  body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+      [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+      .cardrow > .overview-status-card {
+    box-sizing: border-box;
+    height: 64px;
+    min-height: 64px;
+  }
+  body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+      [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+      .cardrow > .overview-status-card > .robot-status-summary {
+    min-height: 38px;
+  }
+  body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+      [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+      .desktop-connection-group {
+    grid-template-columns: 72px minmax(0, 240px);
+  }
+  body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+      [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+      .desktop-connection-group .badge {
+    width: max-content;
+    min-width: 0;
+    max-width: 100%;
+    justify-self: start;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  body.desktop-host[data-active-page="overview"] .overview-status-card > .robot-status-actions {
+    box-sizing: border-box;
+    width: 133px;
+    min-width: 133px;
+    flex: 0 0 133px;
+  }
+  body.desktop-host[data-active-page="overview"] .overview-status-card .robot-core-actions {
+    box-sizing: border-box;
+    width: 120px;
+    min-width: 120px;
+    flex: 0 0 120px;
+    flex-wrap: nowrap;
+  }
+}
+@media (min-width: 841px) and (max-width: 1120px) {
+  body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+      [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+      .desktop-connection-group {
+    grid-template-columns: 72px minmax(0, 200px);
+  }
+}
+
+/* The status row stays single-line: the fixed connection and three action slots
+   stay put while only the statistics area absorbs width changes. */
+body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+    [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+    .cardrow > .overview-status-card {
+  min-width: 0;
+  grid-template-columns: minmax(336px, 1fr) 133px;
+  grid-template-areas: "summary actions";
+  grid-auto-flow: column;
+  column-gap: 0;
+  row-gap: 0;
+  flex-wrap: nowrap;
+}
+body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+    [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+    .overview-status-card > .robot-status-summary {
+  grid-area: summary;
+  width: 100%;
+  max-width: none;
+  min-width: 336px;
+  grid-template-columns: 324px minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 0;
+  flex-wrap: nowrap;
+}
+body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+    [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+    .desktop-connection-group {
+  grid-template-columns: 72px 240px;
+  width: 324px;
+  min-width: 324px;
+  max-width: 324px;
+  box-sizing: border-box;
+}
+body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+    [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+    .desktop-statistics-group {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: center;
+  justify-items: stretch;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding-left: 8px;
+  border-left: 1px solid var(--field-border);
+  box-sizing: border-box;
+}
+body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+    [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+    .desktop-statistics-group .robot-stat {
+  align-items: center;
+  justify-content: center;
+  padding-left: 0;
+  border-left: 0;
+  text-align: center;
+  min-width: 0;
+  overflow: visible;
+}
+body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+    [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+    .desktop-statistics-group .robot-stat :is(small, strong) {
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+    [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+    .overview-status-card > .robot-status-actions {
+  grid-area: actions;
+  display: flex !important;
+  align-items: center;
+  justify-self: end;
+  align-self: center;
+  flex-direction: row;
+  width: 133px;
+  min-width: 133px;
+  flex: 0 0 133px;
+  min-height: 36px;
+  margin: 0;
+  padding: 0 0 0 12px;
+  border-left: 1px solid var(--field-border);
+  border-right: 0;
+  justify-content: flex-end;
+  box-sizing: border-box;
+}
+body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+    [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+    .overview-status-card .robot-core-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 36px);
+  align-items: center;
+  justify-content: end;
+  gap: 6px;
+  width: 120px;
+  min-width: 120px;
+  flex: 0 0 120px;
+  flex-wrap: nowrap;
+}
+body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+    [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+    .overview-status-card .robot-action-slot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  box-sizing: border-box;
+}
+body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+    [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+    .overview-status-card .robot-action-slot > :is(button, .profile-config-menu) {
+  grid-area: 1 / 1;
+}
+body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+    [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+    .overview-status-card .robot-action-slot > .profile-config-menu {
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+}
+body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+    [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+    .overview-status-card .robot-core-actions :is(#btnStart, #btnStop):disabled {
+  display: none;
+}
+body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+    [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+    .overview-status-card > .robot-status-actions .panel-action-icon {
+  width: var(--icon-button-size);
+  height: var(--icon-button-size);
+  min-width: var(--icon-button-size);
+  border-radius: var(--radius-control);
+}
+body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+    [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+    :is(.chain-status-shortcut, .page-key-shortcut):not([hidden]) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-control);
+  background: var(--sec-bg);
+  color: var(--sec-fg);
+  font-size: 0;
+  line-height: 1;
+  white-space: nowrap;
+}
+.chain-status-shortcut[hidden], .page-key-shortcut[hidden] { display: none !important; }
+.chain-status-shortcut svg, .page-key-shortcut svg { width: 18px; height: 18px; flex: 0 0 18px; }
+.page-key-shortcut svg { width: 20px; height: 20px; flex-basis: 20px; }
+.chain-status-shortcut > span { display: none; }
+#chainStatusShortcut[data-state="on"] {
+  border-color: color-mix(in srgb, var(--badge-on-fg) 32%, var(--field-border));
+  background: var(--badge-on-bg);
+  color: var(--badge-on-fg);
+}
+#failureNotificationShortcut[data-state="on"] {
+  border-color: var(--filter-active-border);
+  background: var(--filter-active-bg);
+  color: var(--btn-fg);
+}
+#chainStatusShortcut[data-state="warn"],
+#chainStatusShortcut[data-state="pending"] {
+  border-color: color-mix(in srgb, var(--badge-warn-fg) 30%, var(--field-border));
+  background: var(--badge-warn-bg);
+  color: var(--badge-warn-fg);
+}
+#chainStatusShortcut[data-state="off"] {
+  border-color: color-mix(in srgb, var(--badge-off-fg) 30%, var(--field-border));
+  background: var(--badge-off-bg);
+  color: var(--badge-off-fg);
+}
+#chainStatusShortcut[data-state="neutral"] { color: var(--muted); }
+.chain-status-shortcut:not(:disabled):hover,
+.chain-status-shortcut:not(:disabled):focus-visible,
+.page-key-shortcut:not(:disabled):hover,
+.page-key-shortcut:not(:disabled):focus-visible {
+  border-color: var(--primary-border);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 45%, transparent);
+}
+body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data-active-page="bilibili"],
+    [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+    .overview-status-card .robot-action-slot > :is(.profile-config-menu, #btnStart, #btnStop, #btnRestart) {
+  visibility: hidden;
+}
+
+body .modal-overlay > .chain-detail-modal {
+  --modal-width: 760px;
+  height: auto;
+  min-height: 0;
+  max-height: 85vh;
+}
+#chainDetailBody.modal-body {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+body .chain-detail-modal #chainDetailBody > :is(#backfillCard, #xrssCard, #bilibiliCard, #youtubeCard, #steamStatusCard) {
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: 0;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+body .chain-detail-modal #chainDetailBody > #backfillCard #backfillContent { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+body .chain-detail-modal #chainDetailBody > #backfillCard .bf-row { margin: 0; padding: 0; gap: 8px 16px; flex-wrap: wrap; }
+body .chain-detail-modal #chainDetailBody > #backfillCard .backfill-actions { margin: 0; padding-top: 0; width: 100%; gap: 8px; flex-wrap: wrap; }
+body .chain-detail-modal #chainDetailBody > #backfillCard .backfill-actions > button { flex: 0 0 auto; white-space: nowrap; }
+body .chain-detail-modal #chainDetailBody > #backfillCard .bf-right-group { margin-left: auto; }
+body .chain-detail-modal .modal-body > .card > h2 { display: none !important; }
+
+@media (max-width: 1450px) {
+  body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+      [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+      .desktop-statistics-group { gap: 4px; }
+  body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+      [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+      .desktop-statistics-group .robot-stat small { font-size: 10px; white-space: nowrap; }
+  body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+      [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+      .desktop-statistics-group .robot-stat strong { font-size: 11px; }
+}
+
+@media (max-width: 1120px) {
+  body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+      [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+      .desktop-statistics-group { gap: 0; padding-left: 4px; }
+  body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+      [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+      .desktop-statistics-group .robot-stat small { font-size: 9px; }
+  body.desktop-host:is([data-active-page="overview"], [data-active-page="discord"], [data-active-page="x"],
+      [data-active-page="bilibili"], [data-active-page="youtube"], [data-active-page="steam"], [data-active-page="qq"])
+      .desktop-statistics-group .robot-stat strong { font-size: 10px; }
 }

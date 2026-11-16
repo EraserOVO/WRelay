@@ -26,13 +26,12 @@ STYLE_CSS = (WEB / "style.css").read_text(encoding="utf-8")
 
 CARD_MODALS = [
     "scheduledMessageContentModal", "relayChannelsModal", "translationChainsModal",
-    "backupRestoreModal", "runtimeLogModal", "translationSourceModal",
+    "backupRestoreModal", "runtimeLogModal",
 ]
 PILL_BUTTONS = [
     "btnTranslationDiscord", "btnTranslationX", "btnTranslationBilibili", "btnTranslationManual",
     "btnAutoBackupToggle", "btnLogAutoScroll", "btnBackfillToggle",
     "btnScheduledMessageToggle", "btnBilibiliAutoResolveToggle",
-    "translationSourceEnabled", "translationSourceAppendOriginal", "translationSourceShowDatetime",
 ]
 
 failures = []

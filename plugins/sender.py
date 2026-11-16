@@ -720,7 +720,7 @@ async def send_relay_message(
         if is_personal(group):
             automatic = bool(channel_id) and (
                 str(channel_id).isascii() and str(channel_id).isdecimal()
-                or str(channel_id).startswith(("x_rss:", "bilibili:", "youtube:", "qq_manual:", "scheduled:", "personal-link:"))
+                or str(channel_id).startswith(("x_rss:", "bilibili:", "youtube:", "steam:", "qq_manual:", "scheduled:", "personal-link:"))
             )
             if not automatic or not is_personal(bot_id):
                 selected = None

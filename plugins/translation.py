@@ -6,9 +6,15 @@ import time
 
 from nonebot import logger
 
-from plugins.ai_client import AIClientError, generate_text, get_last_used_model
+from plugins.ai_client import (
+    AIClientError,
+    generate_text,
+    get_last_used_model,
+    get_last_used_profile,
+)
 from plugins.config import (
     get_ai_config,
+    get_ai_configs,
     get_tencent_tmt_config,
     get_translation_config,
 )
@@ -52,12 +58,17 @@ def _should_translate(text, config):
 def _provider_cache_identity(provider):
     """Return non-secret settings that change the active translation route."""
     if provider == "ai":
-        config = get_ai_config()
+        configs = get_ai_configs()
         return (
             provider,
-            str(config.get("_profile_id") or ""),
-            str(config.get("base_url") or "").strip().rstrip("/"),
-            str(config.get("model") or "").strip(),
+            tuple(
+                (
+                    str(config.get("_profile_id") or ""),
+                    str(config.get("base_url") or "").strip().rstrip("/"),
+                    str(config.get("model") or "").strip(),
+                )
+                for config in configs
+            ),
         )
     if provider == "tencent_tmt":
         config = get_tencent_tmt_config()
@@ -95,7 +106,7 @@ async def _translate_with_providers(text, cache_key, config, providers):
                 profile = model = None
                 if provider == "ai":
                     ai_config = await asyncio.to_thread(get_ai_config)
-                    profile = ai_config.get("_profile_name") or None
+                    profile = get_last_used_profile() or ai_config.get("_profile_name") or None
                     model = get_last_used_model() or ai_config.get("model") or None
                 _last_successful_provider = provider
                 _last_successful_at = int(time.time())

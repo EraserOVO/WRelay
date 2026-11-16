@@ -30,7 +30,7 @@ SnowLuma 并同时在线；同一 QQ 号只允许一个连接，不自动切换�
 
 ## 范围与身份
 
-- 支持 Discord、X RSS、Bilibili RSS、YouTube RSS 四条自动链路群投递。
+- 支持 Discord、X RSS、Bilibili RSS、YouTube RSS、Steam 五条自动链路群投递。
   各来源筛选、翻译、限速和媒体规则继续生效；YouTube 仍只发送标题、封面和链接。
 - 支持文字、图片、音频、视频；本地媒体转为字节编码发送，不把本地文件路径交给协议端。
   HTTP(S) 媒体由协议端下载，实际媒体能力及大小限制取决于协议端与 QQ。

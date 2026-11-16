@@ -7,7 +7,7 @@ from collections import OrderedDict
 import httpx
 from nonebot import get_driver, logger
 
-from plugins.config import get_ai_config
+from plugins.config import get_ai_configs
 from plugins.ai_protocol import (
     clean_ollama_content,
     ollama_native_chat_endpoint,
@@ -23,17 +23,19 @@ def get_last_used_model():
     return _last_used_model
 
 
+def get_last_used_profile():
+    """返回最近一次成功完成请求的 AI 配置名称。"""
+    return _last_used_profile
+
+
 _ai_client = None
 _ai_request_tasks = set()
 _ai_stopping = False
 _MODEL_CACHE_TTL = 300
-_MODEL_RECHECK_TTL = 300
 _MODEL_CACHE_LIMIT = 128
-_MODEL_STATE_LIMIT = 64
 _model_cache = OrderedDict()
-_model_overrides = OrderedDict()
-_model_recheck_at = OrderedDict()
 _last_used_model = None
+_last_used_profile = None
 _PREFERRED_MODELS = (
     "DeepSeek-V4-Flash",
     "DeepSeek-V4.1-Flash",
@@ -107,24 +109,6 @@ def _remember_model_cache(cache_key, expires_at, models):
     _model_cache[cache_key] = (expires_at, models)
     while len(_model_cache) > _MODEL_CACHE_LIMIT:
         _model_cache.popitem(last=False)
-
-
-def _remember_model_override(override_key, model, recheck_at):
-    _model_overrides.pop(override_key, None)
-    _model_recheck_at.pop(override_key, None)
-    _model_overrides[override_key] = model
-    _model_recheck_at[override_key] = recheck_at
-    while len(_model_overrides) > _MODEL_STATE_LIMIT:
-        oldest_key, _ = _model_overrides.popitem(last=False)
-        _model_recheck_at.pop(oldest_key, None)
-
-
-def _model_override_key(config):
-    return (
-        str(config.get("_profile_id") or ""),
-        str(config.get("base_url") or "").strip().rstrip("/"),
-        str(config.get("model") or "").strip(),
-    )
 
 
 def _should_switch_model(error):
@@ -223,28 +207,6 @@ def _choose_fallback_model(models, failed_model):
     return candidates[0] if candidates else ""
 
 
-async def _model_for_request(config, api_key, timeout, configured_model, override_key):
-    override_model = _model_overrides.get(override_key)
-    if not override_model:
-        return configured_model
-    _model_overrides.move_to_end(override_key)
-    if override_key in _model_recheck_at:
-        _model_recheck_at.move_to_end(override_key)
-    now = time.monotonic()
-    if _model_recheck_at.get(override_key, 0) > now:
-        return override_model
-    _model_recheck_at[override_key] = now + _MODEL_RECHECK_TTL
-    try:
-        models = await _fetch_models(
-            config.get("base_url"), api_key, timeout, force=True
-        )
-    except (httpx.HTTPError, KeyError, TypeError, ValueError):
-        return override_model
-    if configured_model not in models:
-        return override_model
-    return configured_model
-
-
 async def _request_completion(base_url, api_key, model, messages, max_tokens, temperature, timeout):
     ollama_endpoint = ollama_native_chat_endpoint(base_url)
     if ollama_endpoint:
@@ -280,10 +242,11 @@ async def _request_completion(base_url, api_key, model, messages, max_tokens, te
         return clean_ollama_content(data["message"]["content"])
     return data["choices"][0]["message"]["content"]
 
-async def generate_text(messages, max_tokens=None, temperature=0.7):
-    """调用已配置的 AI 接口，返回供翻译路由使用的纯文本。"""
-    global _last_used_model
-    config = await asyncio.to_thread(get_ai_config)
+def _profile_description(config):
+    return str(config.get("_profile_name") or config.get("model") or "AI 配置")
+
+
+async def _generate_with_profile(messages, config, max_tokens, temperature):
     api_key = os.getenv(str(config.get("api_key_env") or "WRELAY_AI_API_KEY"), "").strip()
     if not api_key:
         raise AIClientError("AI API 密钥未配置")
@@ -295,68 +258,13 @@ async def generate_text(messages, max_tokens=None, temperature=0.7):
     if ollama_native_chat_endpoint(config.get("base_url")):
         timeout = max(90, timeout)
     output_limit = int(max_tokens or config.get("max_output_tokens") or 800)
-    override_key = _model_override_key(config)
-    model = await _model_for_request(
-        config, api_key, timeout, configured_model, override_key
-    )
     try:
         content = await _request_completion(
-            config.get("base_url"), api_key, model, messages,
+            config.get("base_url"), api_key, configured_model, messages,
             output_limit, temperature, timeout,
         )
-        if model == configured_model and _model_overrides.pop(override_key, None):
-            _model_recheck_at.pop(override_key, None)
-            logger.info("AI API 原选模型已恢复：{}", configured_model)
     except httpx.HTTPStatusError as exc:
-        if not _should_switch_model(exc):
-            raise AIClientError("AI API 调用失败: %s" % exc) from exc
-        try:
-            models = await _fetch_models(
-                config.get("base_url"), api_key, timeout, force=True
-            )
-        except AIClientError:
-            raise
-        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as models_exc:
-            raise AIClientError("AI API 查询可用模型失败: %s" % models_exc) from models_exc
-        fallback_models = _choose_fallback_models(models, {model})
-        if not fallback_models:
-            raise AIClientError("AI API 当前模型不可用，且没有可切换模型")
-        last_model_error = exc
-        for index, fallback_model in enumerate(fallback_models, start=1):
-            _remember_model_override(
-                override_key,
-                fallback_model,
-                time.monotonic() + _MODEL_RECHECK_TTL,
-            )
-            logger.warning(
-                "AI API 模型不可用或繁忙，已自动切换：{} -> {}（候选 {}/{}）",
-                model,
-                fallback_model,
-                index,
-                len(fallback_models),
-            )
-            try:
-                content = await _request_completion(
-                    config.get("base_url"), api_key, fallback_model, messages,
-                    output_limit, temperature, timeout,
-                )
-            except httpx.HTTPStatusError as fallback_exc:
-                if _should_switch_model(fallback_exc):
-                    last_model_error = fallback_exc
-                    logger.warning(
-                        "AI API 备用模型仍不可用，继续尝试下一个模型：{}",
-                        fallback_model,
-                    )
-                    continue
-                raise AIClientError("AI API 自动切换失败: %s" % fallback_exc) from fallback_exc
-            except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as fallback_exc:
-                raise AIClientError("AI API 自动切换失败: %s" % fallback_exc) from fallback_exc
-            model = fallback_model
-            break
-        else:
-            _model_overrides.pop(override_key, None)
-            _model_recheck_at.pop(override_key, None)
-            raise AIClientError("AI API 当前模型不可用，已尝试所有可用模型") from last_model_error
+        raise AIClientError("AI API 调用失败: %s" % exc) from exc
     except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
         raise AIClientError("AI API 调用失败: %s" % exc) from exc
 
@@ -365,5 +273,114 @@ async def generate_text(messages, max_tokens=None, temperature=0.7):
     text = content.strip()
     if not text:
         raise AIClientError("AI API 未返回文本")
-    _last_used_model = model
-    return text
+    return text, configured_model
+
+
+def _switchable_cause(error):
+    current = error
+    while current is not None:
+        if _should_switch_model(current):
+            return True
+        current = getattr(current, "__cause__", None)
+    return False
+
+
+async def _try_discovered_fallback(messages, config, max_tokens, temperature, excluded_models):
+    api_key = os.getenv(str(config.get("api_key_env") or "WRELAY_AI_API_KEY"), "").strip()
+    if not api_key:
+        return None
+    timeout = int(config.get("timeout_seconds") or 25)
+    if ollama_native_chat_endpoint(config.get("base_url")):
+        timeout = max(90, timeout)
+    output_limit = int(max_tokens or config.get("max_output_tokens") or 800)
+    try:
+        models = await _fetch_models(config.get("base_url"), api_key, timeout, force=True)
+    except (AIClientError, httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+        logger.warning("AI API 查询目录模型失败：{}", exc)
+        return None
+    candidates = _choose_fallback_models(models, excluded_models)
+    for index, model in enumerate(candidates, start=1):
+        logger.warning(
+            "已配置的 AI 模型链均失败，尝试服务目录备用模型：{}（候选 {}/{}）",
+            model,
+            index,
+            len(candidates),
+        )
+        try:
+            content = await _request_completion(
+                config.get("base_url"), api_key, model, messages,
+                output_limit, temperature, timeout,
+            )
+        except httpx.HTTPStatusError as exc:
+            if _should_switch_model(exc):
+                continue
+            logger.warning("AI API 目录备用模型调用失败：{}", exc)
+            return None
+        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
+            logger.warning("AI API 目录备用模型调用失败：{}", exc)
+            return None
+        if isinstance(content, str) and content.strip():
+            return content.strip(), model
+        logger.warning("AI API 目录备用模型返回空内容：{}", model)
+    return None
+
+
+async def generate_text(messages, max_tokens=None, temperature=0.7):
+    """按用户配置的 AI 模型优先级链调用，返回翻译纯文本。"""
+    global _last_used_model, _last_used_profile
+    configs = await asyncio.to_thread(get_ai_configs)
+    errors = []
+    models_by_endpoint = {}
+    fallback_sources = OrderedDict()
+
+    for index, config in enumerate(configs, start=1):
+        model = str(config.get("model") or "").strip()
+        endpoint_key = (
+            str(config.get("base_url") or "").strip().rstrip("/"),
+            str(config.get("api_key_env") or "WRELAY_AI_API_KEY"),
+        )
+        if model:
+            models_by_endpoint.setdefault(endpoint_key, set()).add(model)
+        try:
+            text, used_model = await _generate_with_profile(
+                messages, config, max_tokens, temperature
+            )
+        except AIClientError as exc:
+            errors.append((config, exc))
+            logger.warning(
+                "AI 优先级模型失败，尝试下一项（{}/{}）：{} · {}",
+                index,
+                len(configs),
+                _profile_description(config),
+                exc,
+            )
+            if _switchable_cause(exc) and endpoint_key[0]:
+                fallback_sources.setdefault(endpoint_key, config)
+            continue
+
+        _last_used_model = used_model
+        _last_used_profile = _profile_description(config)
+        return text
+
+    # 用户配置的链路始终优先。仅在全部配置项失败后，才保留原有的服务端模型目录兜底。
+    for endpoint_key, config in fallback_sources.items():
+        fallback = await _try_discovered_fallback(
+            messages,
+            config,
+            max_tokens,
+            temperature,
+            models_by_endpoint.get(endpoint_key, set()),
+        )
+        if fallback:
+            _last_used_model = fallback[1]
+            _last_used_profile = _profile_description(config) + "（服务目录兜底）"
+            return fallback[0]
+
+    if errors:
+        _, last_error = errors[-1]
+        summary = "；".join(
+            "%s：%s" % (_profile_description(config), error)
+            for config, error in errors
+        )
+        raise AIClientError("AI 模型优先级链全部失败：%s" % summary) from last_error
+    raise AIClientError("AI 模型优先级链为空")

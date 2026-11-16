@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Windows desktop entry with in-process management and native tray."""
+"""Windows desktop entry with in-process management and a custom tray popup."""
 
 import ctypes
 import importlib
@@ -21,7 +21,7 @@ if BASE_DIR not in sys.path:
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from desktop_controls import DesktopPreferences, DesktopControls, build_tray_menu
+from desktop_controls import DesktopPreferences, DesktopControls, CustomTrayIcon
 from panel.local_bridge import ManagerPipeServer, dispatch, request_manager
 from plugins.paths import COMPILED, EDITION, PROJECT_ROOT as SHARED_ROOT
 
@@ -363,9 +363,7 @@ def main():
     pipe_server = None
     try:
         try:
-            import pystray
             import webview
-            from PIL import Image
         except ImportError as exc:
             _message("桌面组件未安装：%s\n请重新运行 install.bat 或安装最新版 WRelay。" % exc)
             return
@@ -505,12 +503,26 @@ def main():
         )
         controls.running = bool(panel.bot_status().get("running"))
         controls.tooltip = "WRelay · 机器人运行中" if controls.running else "WRelay · 机器人已停止"
-        icon_image = Image.open(ICON_PATH).convert("RGBA")
-        tray = pystray.Icon("WRelay", icon_image, controls.tooltip, build_tray_menu(pystray, controls))
+        tray = CustomTrayIcon(ICON_PATH, controls, api._preferences.get_window_theme)
         controls.tray = tray
         panel.DESKTOP_RESTART_CALLBACK = restart_desktop
-        tray.run_detached()
         threading.Thread(target=controls.poll, name="wrelay-tray-status", daemon=True).start()
+
+        def initialize_tray():
+            try:
+                native_window = window.native
+                if native_window is None:
+                    return
+                from System import Action
+                native_window.Invoke(Action(lambda: tray.initialize(native_window)))
+            except Exception:
+                _log_error()
+
+        # The start callback runs before pywebview has created its native window.
+        # Initialize when the WebView is loaded, with before_show as a fallback
+        # for backends that defer loading until the first show.
+        window.events.loaded += initialize_tray
+        window.events.before_show += initialize_tray
         os.makedirs(WEBVIEW_STORAGE_PATH, exist_ok=True)
         webview.start(gui="edgechromium", icon=ICON_PATH,
                       private_mode=False, storage_path=WEBVIEW_STORAGE_PATH)

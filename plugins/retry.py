@@ -701,18 +701,48 @@ async def _process_due(channel_id):
         )
 
 
-def get_retry_status():
-    """返回供健康接口/管理面板展示的重试队列摘要，不包含消息正文。"""
-    pending_entries = sum(len(entries) for entries in _pending.values())
-    pending_groups = sum(
-        len(entry.groups)
-        for entries in _pending.values()
-        for entry in entries.values()
-    )
+def get_retry_status(bot_id=None):
+    """返回重试队列摘要；传入 Bot ID 时只统计该账号的目标群。"""
+    owner = str(bot_id or "")
+    groups_for_owner = None
+    if owner:
+        try:
+            from plugins import bot_profiles, config
+            with bot_profiles.scope(owner):
+                settings = config._load_settings()
+            owners = bot_profiles.ids(config.SETTINGS_FILE)
+            groups_for_owner = {
+                str(group.get("openid"))
+                for group in settings.get("qq_group_openids", [])
+                if isinstance(group, dict)
+                and group.get("openid")
+                and (
+                    str(group.get("bot_id") or "") == owner
+                    or (not owners and not group.get("bot_id"))
+                    or (owners and owner == owners[0] and not group.get("bot_id"))
+                )
+            }
+        except Exception:
+            # 配置无法读取时不把其他账号的待重试数泄露到当前工作区。
+            groups_for_owner = set()
+
+    pending_entries = 0
+    pending_groups = 0
+    pending_channels = 0
+    for entries in _pending.values():
+        channel_has_pending = False
+        for entry in entries.values():
+            groups = entry.groups if groups_for_owner is None else entry.groups & groups_for_owner
+            if groups:
+                pending_entries += 1
+                pending_groups += len(groups)
+                channel_has_pending = True
+        if channel_has_pending:
+            pending_channels += 1
     return {
         "pending_entries": pending_entries,
         "pending_groups": pending_groups,
-        "channels": len(_pending),
+        "channels": pending_channels,
         "max_entries": MAX_TOTAL_PENDING,
         "last_error": _last_error,
     }
