@@ -6,6 +6,7 @@ import time
 import unittest
 from pathlib import Path
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest import mock
 
 import nonebot
@@ -228,21 +229,30 @@ class DeliveryJournalTest(unittest.IsolatedAsyncioTestCase):
                 await asyncio.gather(task, return_exceptions=True)
 
     async def test_backfill_sends_are_spaced_and_recheck_route(self):
+        clock = [0.0]
         started = []
+        requested_delays = []
+
+        async def fake_sleep(delay):
+            requested_delays.append(delay)
+            clock[0] += delay
 
         async def fake_send(*args, **kwargs):
-            started.append(time.monotonic())
+            started.append(clock[0])
             return {"g": True}
 
         snapshot = {"enabled": True, "groups_by_channel": {"123": ["g"]}}
         with mock.patch.object(backfill, "BACKFILL_SEND_INTERVAL", 0.03), \
                 mock.patch.object(backfill, "_backfill_last_send", None), \
+                mock.patch.object(backfill, "time", SimpleNamespace(monotonic=lambda: clock[0])), \
+                mock.patch.object(backfill.asyncio, "sleep", new=fake_sleep), \
                 mock.patch.object(backfill, "get_backfill_runtime_snapshot", return_value=snapshot), \
                 mock.patch.object(backfill, "send_and_record", side_effect=fake_send), \
                 mock.patch.object(backfill, "record", new_callable=mock.AsyncMock):
             await backfill._deliver_backfill_message("123", "101", {}, ["g"], (["text"], []))
             await backfill._deliver_backfill_message("123", "102", {}, ["g"], (["text"], []))
-            self.assertGreaterEqual(started[1] - started[0], 0.025)
+            self.assertEqual(requested_delays, [0.03])
+            self.assertAlmostEqual(started[1] - started[0], 0.03)
 
     async def test_recovery_ignores_high_cursor_and_preserves_paused_group(self):
         with tempfile.TemporaryDirectory() as directory, \
