@@ -6,6 +6,9 @@ $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $runtimeParent = Join-Path $projectRoot ".runtime"
 $runtimeRoot = Join-Path $runtimeParent "python"
 $runtimePython = Join-Path $runtimeRoot "python.exe"
+$prerequisitesRoot = Join-Path $runtimeParent "prerequisites"
+$webView2Bootstrapper = Join-Path $prerequisitesRoot "MicrosoftEdgeWebview2Setup.exe"
+$webView2BootstrapperUrl = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
 $requirementsLock = Join-Path $projectRoot "requirements-lock.txt"
 
 $pythonVersion = "3.12.14"
@@ -50,10 +53,42 @@ function Assert-RuntimeReady([string]$pythonPath) {
     }
 }
 
+function Ensure-WebView2Bootstrapper() {
+    New-Item -ItemType Directory -Path $prerequisitesRoot -Force | Out-Null
+
+    if (-not (Test-Path -LiteralPath $webView2Bootstrapper -PathType Leaf)) {
+        $temporaryBootstrapper = Join-Path $prerequisitesRoot (
+            "MicrosoftEdgeWebview2Setup-" + [Guid]::NewGuid().ToString("N") + ".download.exe"
+        )
+        try {
+            Write-Host "Downloading the Microsoft WebView2 Evergreen Bootstrapper ..."
+            Invoke-WebRequest -Uri $webView2BootstrapperUrl -OutFile $temporaryBootstrapper
+
+            $signature = Get-AuthenticodeSignature -LiteralPath $temporaryBootstrapper
+            if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch "Microsoft Corporation") {
+                throw "Downloaded WebView2 bootstrapper does not have a valid Microsoft signature"
+            }
+
+            Move-Item -LiteralPath $temporaryBootstrapper -Destination $webView2Bootstrapper
+        } finally {
+            if (Test-Path -LiteralPath $temporaryBootstrapper -PathType Leaf) {
+                Remove-Item -LiteralPath $temporaryBootstrapper -Force
+            }
+        }
+    }
+
+    $signature = Get-AuthenticodeSignature -LiteralPath $webView2Bootstrapper
+    if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch "Microsoft Corporation") {
+        throw "WebView2 bootstrapper does not have a valid Microsoft signature: $webView2Bootstrapper"
+    }
+    Write-Host "Verified Microsoft WebView2 Evergreen Bootstrapper"
+}
+
 if (-not (Test-Path -LiteralPath $requirementsLock -PathType Leaf)) {
     throw "Missing dependency lock file: $requirementsLock"
 }
 New-Item -ItemType Directory -Path $runtimeParent -Force | Out-Null
+Ensure-WebView2Bootstrapper
 
 if (Test-Path -LiteralPath $runtimeRoot) {
     if (-not (Test-Path -LiteralPath $runtimePython -PathType Leaf)) {

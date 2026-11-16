@@ -92,7 +92,7 @@ multidict 固定为 `6.9.1`，修复 `6.7.0` 至 `6.9.0` 的 items-view 并集�
 powershell -ExecutionPolicy Bypass -File .\scripts\prepare_runtime.ps1
 ```
 
-准备脚本会下载固定版本的 `python-build-standalone` Windows x64 运行时，校验 SHA-256，并准备 WebView2 安装器。然后创建专用编译环境并安装锁定依赖及 Nuitka：
+准备脚本会下载固定版本的 `python-build-standalone` Windows x64 运行时并校验 SHA-256，同时从微软官方 Evergreen 入口下载 WebView2 Bootstrapper 并校验 Microsoft Authenticode 签名。然后创建专用编译环境并安装锁定依赖及 Nuitka：
 
 ```powershell
 .\.runtime\python\python.exe -m venv .runtime\compile-env
