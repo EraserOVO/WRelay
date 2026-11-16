@@ -20,7 +20,7 @@ jobs:
         with:
           ref: ${{ github.ref }}
 
-      - name: Confirm draft release and matching version
+      - name: Prepare draft release and confirm matching version
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -28,11 +28,28 @@ jobs:
           if ($env:GITHUB_REF_TYPE -ne 'tag' -or $env:GITHUB_REF_NAME -notmatch '^v\d+\.\d+\.\d+$') {
             throw "Run this workflow from a version tag such as v0.4.0"
           }
+          $tag = $env:GITHUB_REF_NAME
           $project = Get-Content pyproject.toml -Raw
           if ($project -notmatch '(?m)^version\s*=\s*"([^"]+)"') { throw "Project version not found" }
-          if ($Matches[1] -ne $env:GITHUB_REF_NAME.Substring(1)) { throw "Git tag and project version do not match" }
-          $isDraft = gh release view $env:GITHUB_REF_NAME --json isDraft --jq .isDraft
-          if ($LASTEXITCODE -ne 0 -or $isDraft -ne 'true') { throw "Create a draft GitHub Release for this tag before signing" }
+          $version = $Matches[1]
+          if ($version -ne $tag.Substring(1)) { throw "Git tag and project version do not match" }
+
+          $isDraft = gh release view $tag --json isDraft --jq .isDraft 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            $changelog = Get-Content CHANGELOG.md -Raw
+            $notesPattern = "(?ms)^##\s+$([regex]::Escape($version))\s*\r?\n(.*?)(?=^##\s|\z)"
+            $notesMatch = [regex]::Match($changelog, $notesPattern)
+            if (-not $notesMatch.Success) { throw "Release notes for version $version were not found in CHANGELOG.md" }
+
+            $notesPath = Join-Path $env:RUNNER_TEMP "release-notes-$version.md"
+            [IO.File]::WriteAllText($notesPath, $notesMatch.Groups[1].Value.Trim() + "`n", [Text.UTF8Encoding]::new($false))
+            gh release create $tag --draft --verify-tag --title "WRelay $version" --notes-file $notesPath
+            if ($LASTEXITCODE -ne 0) { throw "Could not create a draft GitHub Release for $tag" }
+
+            $isDraft = gh release view $tag --json isDraft --jq .isDraft
+            if ($LASTEXITCODE -ne 0) { throw "Could not verify the draft GitHub Release for $tag" }
+          }
+          if ($isDraft -ne 'true') { throw "The existing GitHub Release for $tag must be a draft before signing" }
 
       - name: Prepare bundled runtime
         shell: pwsh

@@ -116,7 +116,7 @@ $env:WRELAY_TIMESTAMP_URL = '<证书提供方的 HTTPS RFC 3161 时间戳地址>
 $env:WRELAY_SIGNTOOL = '<Windows SDK 中 signtool.exe 的完整路径>'
 ```
 
-不要提交私钥/PFX 或密码，也不要通过聊天发送。自签名证书不能替代公开发行所需的受信任发布者证书。公开 GitHub 发布的首选签名方式是 SignPath Foundation 工作流，政策见 [Code signing policy](../CODE_SIGNING_POLICY.md)。维护者先为版本标签创建 GitHub 草稿 Release，再从该版本标签手动运行 `Sign and publish Windows release`；工作流在 GitHub 托管的 Windows runner 构建，将安装包送交 SignPath 人工批准签名，验证签名并生成 SHA256 后才上传资产并发布 Release。配置 SignPath 项目后，在 GitHub Actions variables 中设置 `SIGNPATH_ORGANIZATION_ID`、`SIGNPATH_PROJECT_SLUG`、`SIGNPATH_SIGNING_POLICY_SLUG`、`SIGNPATH_ARTIFACT_CONFIGURATION_SLUG`，并在 Actions secrets 中设置 `SIGNPATH_API_TOKEN`。
+不要提交私钥/PFX 或密码，也不要通过聊天发送。自签名证书不能替代公开发行所需的受信任发布者证书。公开 GitHub 发布的首选签名方式是 SignPath Foundation 工作流，政策见 [Code signing policy](../CODE_SIGNING_POLICY.md)。维护者从版本标签手动运行 `Sign and publish Windows release`；若该标签尚无 Release，工作流会从标签中的 `CHANGELOG.md` 创建草稿，若已有 Release 则要求它仍为草稿。工作流在 GitHub 托管的 Windows runner 构建，将安装包送交 SignPath 人工批准签名，验证签名并生成 SHA256 后才上传资产并发布 Release。配置 SignPath 项目后，在 GitHub Actions variables 中设置 `SIGNPATH_ORGANIZATION_ID`、`SIGNPATH_PROJECT_SLUG`、`SIGNPATH_SIGNING_POLICY_SLUG`、`SIGNPATH_ARTIFACT_CONFIGURATION_SLUG`，并在 Actions secrets 中设置 `SIGNPATH_API_TOKEN`。
 
 `pyproject.toml` 也提供标准 Python 构建元数据，可用于构建插件依赖包；它不是完整的桌面应用安装方式。
 完整的 Bot、桌面窗口及 Windows 快捷方式请使用上面的 Inno Setup 安装包。
