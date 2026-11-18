@@ -18,6 +18,7 @@ from plugins.json_io import atomic_write_json
 from plugins.media import make_text
 from plugins.paths import data_path
 from plugins.retry import send_and_record
+from plugins.network_proxy import get_proxy as get_network_proxy
 from plugins.sender import get_qq_bots
 from plugins.stats import record
 from plugins.steam_data import (app_id, bundle_details, bundle_ids, creator_app_ids, creator_clan_id,
@@ -39,7 +40,6 @@ _proxy_address = None
 _tasks = []
 _poll_jobs = {}
 _previous_connected = set()
-_poll_suspended = set()
 _stopping = False
 _LEGACY_QUEUE_HEADERS = frozenset({
     "Steam 游戏公告", "Steam 游戏新闻", "Steam 游戏折扣", "Steam DLC折扣",
@@ -129,7 +129,9 @@ async def _client_instance(use_proxy=False):
             _client = httpx.AsyncClient(follow_redirects=True, timeout=30, trust_env=False,
                                         headers={"User-Agent": "WRelay Steam monitor"})
         return _client
-    proxy = str(getattr(get_driver().config, "discord_proxy", "") or "").strip()
+    proxy = get_network_proxy("steam") or str(
+        getattr(get_driver().config, "discord_proxy", "") or ""
+    ).strip()
     if not proxy:
         return await _client_instance(False)
     if _proxy_client is None or _proxy_address != proxy:
@@ -431,7 +433,13 @@ async def _dispatch_owner(owner, settings=None):
 
 
 async def _dispatch_locked(owner, settings):
+    sources = {source["id"]: source for source in settings.get("sources", [])}
     state = await _snapshot(owner)
+    if any(not _routable(item, settings, sources) for item in state["queue"]):
+        def discard_unroutable(current):
+            current["queue"] = [item for item in current["queue"] if _routable(item, settings, sources)]
+        await _change(owner, discard_unroutable)
+        state = await _snapshot(owner)
     now = time.time()
     protection = settings["protection"]
     sent = [value for value in state["sent_at"] if now - value < 3600]
@@ -523,8 +531,6 @@ async def _poll_loop():
                 _next_poll.pop(owner, None)
             _previous_connected = current
             for owner in owners:
-                if owner in _poll_suspended:
-                    continue
                 now = time.monotonic()
                 job = _poll_jobs.get(owner)
                 if (job is not None and not job.done()) or now < _next_poll.get(owner, 0):
@@ -604,37 +610,6 @@ async def api_steam_status(bot_id: str = ""):
         result.setdefault("last_sent_count", 0)
         connected = set(get_qq_bots()) | set(personal_qq.connected_bots())
         result["qq_connected"] = bot_id in connected if bot_id else bool(connected)
-        sources = {source["id"]: source for source in settings["sources"]}
-        result["queue_paused"] = sum(not _routable(item, settings, sources) for item in state["queue"])
         return result
     except (OSError, ValueError, RuntimeError) as exc:
         return {"ok": False, "running": bool(_tasks), "last_error": str(exc)[:240]}
-
-
-@get_app().post("/api/steam/clear-paused")
-async def api_steam_clear_paused(bot_id: str = ""):
-    try:
-        owners = await asyncio.to_thread(bot_profiles.ids, config.SETTINGS_FILE)
-        if (owners and (not bot_id or bot_id not in owners or bot_id == "unassigned")) or (not owners and bot_id):
-            raise ValueError("请选择有效的 QQ 账号")
-        async with _delivery_locks.setdefault(bot_id, asyncio.Lock()):
-            _poll_suspended.add(bot_id)
-            _next_poll[bot_id] = time.monotonic() + 60
-            try:
-                job = _poll_jobs.get(bot_id)
-                if job is not None and not job.done():
-                    job.cancel()
-                    await asyncio.gather(job, return_exceptions=True)
-                settings = await _config(bot_id)
-                sources = {source["id"]: source for source in settings["sources"]}
-                def discard(state):
-                    before = len(state["queue"])
-                    state["queue"] = [item for item in state["queue"] if _routable(item, settings, sources)]
-                    return before - len(state["queue"])
-                removed = await _change(bot_id, discard)
-            finally:
-                _next_poll[bot_id] = 0
-                _poll_suspended.discard(bot_id)
-        return {"ok": True, "removed": removed}
-    except (OSError, ValueError, RuntimeError) as exc:
-        return {"ok": False, "msg": str(exc)[:240]}

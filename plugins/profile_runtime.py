@@ -52,7 +52,7 @@ class RSSProfiles:
                 self.ns.update(old)
                 self.ns.update(self.paths)
 
-    async def poll(self, operation):
+    async def poll(self, operation, *, retry_interval=None):
         owners = await asyncio.to_thread(self.owners)
         if not owners:
             return await operation()
@@ -63,17 +63,22 @@ class RSSProfiles:
             self.next.pop(owner, None)
         self.connected = connected
         loop = asyncio.get_running_loop()
+        retry_requested = False
         for owner in owners:
             if owner not in connected or loop.time() < self.next.get(owner, 0):
                 continue
             try:
-                await self.call(owner, operation)
+                owner_retry_requested = bool(await self.call(owner, operation))
                 with profiles.scope(owner):
                     interval = await self.ns["_read_poll_interval"]()
+                if owner_retry_requested and retry_interval is not None:
+                    interval = min(interval, retry_interval)
+                    retry_requested = True
                 self.next[owner] = loop.time() + interval
             except Exception:
                 self.next[owner] = loop.time() + 30
                 self.ns["logger"].exception("Bot {} 来源配置异常，暂停本轮", owner)
+        return retry_requested
 
     async def interval(self, reader):
         return 5 if await asyncio.to_thread(self.owners) else await reader()

@@ -53,6 +53,7 @@ from plugins.json_io import atomic_write_json, run_in_thread_to_completion
 from plugins.media import fetch_bytes_many, make_media_link, make_text
 from plugins.paths import data_path
 from plugins.proxy_guard import loopback_http_proxy, system_loopback_http_proxy
+from plugins.network_proxy import get_proxy as get_network_proxy
 from plugins.retry import send_and_record
 from plugins.rss_polling import read_rss_poll_interval, run_rss_poll_loop
 from plugins.stats import record
@@ -211,6 +212,9 @@ def _read_discord_proxy():
 
 
 def _read_youtube_proxy():
+    configured = get_network_proxy("youtube")
+    if configured:
+        return configured
     proxy = str(os.environ.get("YOUTUBE_PROXY") or "").strip()
     return proxy or _read_discord_proxy()
 

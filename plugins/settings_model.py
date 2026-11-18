@@ -254,7 +254,6 @@ class SettingsModel(dict):
             "steam_region": "CN",
             "steam_protection": {"min_send_interval": 60, "hourly_limit": 30, "backlog_limit": 500},
             "scheduled_message": {
-                "enabled": False,
                 "content": "",
                 "interval": 3600,
                 "target_groups": [],
@@ -266,6 +265,7 @@ class SettingsModel(dict):
                 "send_time": "09:00",
                 "anchor_date": "",
                 "messages": [],
+                "message_groups": [],
             },
             # 翻译服务路由：是否翻译及是否保留原文由每个来源条目决定。
             "translation": {
@@ -801,8 +801,6 @@ def _validate_scheduled_messages(data):
     scheduled = data.get("scheduled_message")
     if not isinstance(scheduled, dict):
         return "scheduled_message 必须是对象"
-    if not isinstance(scheduled.get("enabled"), bool):
-        return "scheduled_message.enabled 必须是布尔值"
     if not isinstance(scheduled.get("content"), str):
         return "scheduled_message.content 必须是字符串"
     if len(scheduled["content"]) > 20000:
@@ -816,6 +814,42 @@ def _validate_scheduled_messages(data):
     messages = scheduled.get("messages")
     if not isinstance(messages, list):
         return "scheduled_message.messages 必须是列表"
+    message_groups = scheduled.get("message_groups")
+    if message_groups is not None:
+        if not isinstance(message_groups, list):
+            return "scheduled_message.message_groups 必须是列表"
+        grouped_messages = []
+        for group_index, group in enumerate(message_groups, start=1):
+            prefix = "scheduled_message.message_groups[%d]" % group_index
+            if not isinstance(group, dict):
+                return prefix + " 必须是对象"
+            for key in ("id", "name"):
+                if key in group and (not isinstance(group[key], str) or not group[key].strip()):
+                    return prefix + ".%s 必须是非空字符串" % key
+            if "enabled" in group and not isinstance(group["enabled"], bool):
+                return prefix + ".enabled 必须是布尔值"
+            target_mode = group.get("target_mode", "groups")
+            if target_mode not in SCHEDULED_TARGET_MODES:
+                return prefix + ".target_mode 必须是 groups、forward_group 或 all"
+            for key in ("target_groups", "forward_groups"):
+                values = group.get(key, [])
+                if not isinstance(values, list):
+                    return prefix + ".%s 必须是列表" % key
+                if any(not isinstance(item, str) or not item.strip() for item in values):
+                    return prefix + ".%s 的每一项必须是非空字符串" % key
+            if target_mode == SCHEDULED_TARGET_FORWARD_GROUP and not group.get("forward_groups"):
+                return prefix + ".forward_groups 在转发组模式下不能为空"
+            children = group.get("messages", [])
+            if not isinstance(children, list):
+                return prefix + ".messages 必须是列表"
+            for child in children:
+                if not isinstance(child, dict):
+                    return prefix + ".messages 的每一项必须是对象"
+                grouped_messages.append(dict(child, target_mode=target_mode,
+                    target_groups=group.get("target_groups", []),
+                    forward_groups=group.get("forward_groups", [])))
+        if message_groups:
+            messages = grouped_messages
     total_image_bytes = 0
     for index, message in enumerate(messages, start=1):
         prefix = "scheduled_message.messages[%d]" % index
@@ -825,6 +859,8 @@ def _validate_scheduled_messages(data):
             not isinstance(message["id"], str) or not message["id"].strip()
         ):
             return prefix + ".id 必须是非空字符串"
+        if "enabled" in message and not isinstance(message["enabled"], bool):
+            return prefix + ".enabled 必须是布尔值"
         content = message.get("content")
         if not isinstance(content, str):
             return prefix + ".content 必须是字符串"
@@ -863,12 +899,28 @@ def _validate_scheduled_messages(data):
         # 指定群模式允许空列表：表示沿用顶层 scheduled_message.target_groups 默认目标，
         # 是「未单独设置目标」的合法状态，不能在保存时判为配置损坏。
         schedule_type = message.get("schedule_type")
-        if schedule_type not in ("interval", "calendar"):
-            return prefix + ".schedule_type 必须是 interval 或 calendar"
+        if schedule_type not in ("interval", "calendar", "once"):
+            return prefix + ".schedule_type 必须是 interval、calendar 或 once"
         if schedule_type == "interval":
             error = _validate_interval_schedule(message, prefix)
-        else:
+        elif schedule_type == "calendar":
             error = _validate_calendar_schedule(message, prefix)
+        else:
+            once_at = message.get("once_at")
+            if not isinstance(once_at, str):
+                return prefix + ".once_at 必须是日期时间字符串"
+            try:
+                datetime.strptime(once_at, "%Y-%m-%dT%H:%M")
+            except ValueError:
+                return prefix + ".once_at 必须是 YYYY-MM-DDTHH:MM 格式"
+            completed_at = message.get("completed_at", "")
+            if not isinstance(completed_at, str):
+                return prefix + ".completed_at 必须是字符串"
+            execution_status = message.get("execution_status", "")
+            if execution_status not in ("", "sent", "missed"):
+                return prefix + ".execution_status 必须是 sent 或 missed"
+            if completed_at and message.get("execution_status") not in ("sent", "missed"):
+                return prefix + ".execution_status 必须是 sent 或 missed"
         if error:
             return error
 

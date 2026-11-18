@@ -2,6 +2,8 @@
 
 import asyncio
 
+RSS_CONNECTION_RETRY_INTERVAL = 60
+
 
 async def read_rss_poll_interval(read_value, default_interval, *, source_name, logger):
     """Read a source's polling interval off-loop and fall back on read errors."""
@@ -26,8 +28,14 @@ async def run_rss_poll_loop(
     read_interval,
     logger,
     connection_check_interval=5,
+    retry_interval=None,
 ):
-    """Poll while connected and monitor connection changes between poll intervals."""
+    """Poll while connected and monitor connection changes between poll intervals.
+
+    ``poll_all`` may return true to request a short retry after an upstream
+    connection failure. Callers that omit ``retry_interval`` keep the
+    configured polling cadence unchanged.
+    """
     loop = asyncio.get_running_loop()
     next_poll_at = loop.time()
     previous_connected = None
@@ -38,14 +46,17 @@ async def run_rss_poll_loop(
             now = loop.time()
 
             if connected and (not previous_connected or now >= next_poll_at):
+                retry_requested = False
                 try:
-                    await poll_all()
+                    retry_requested = bool(await poll_all())
                 except asyncio.CancelledError:
                     raise
                 except Exception:
                     logger.exception("{} 轮询异常", source_name)
 
                 interval = await read_interval()
+                if retry_requested and retry_interval is not None:
+                    interval = min(interval, retry_interval)
                 next_poll_at = loop.time() + interval
             elif not connected and previous_connected is not False:
                 logger.debug(

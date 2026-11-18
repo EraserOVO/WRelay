@@ -6,6 +6,7 @@ from collections import OrderedDict
 
 import httpx
 from nonebot import get_driver, logger
+from plugins.network_proxy import proxy_for_url
 
 from plugins.config import get_ai_configs
 from plugins.ai_protocol import (
@@ -29,6 +30,7 @@ def get_last_used_profile():
 
 
 _ai_client = None
+_ai_proxy_clients = {}
 _ai_request_tasks = set()
 _ai_stopping = False
 _MODEL_CACHE_TTL = 300
@@ -57,6 +59,17 @@ def _get_ai_client():
     return _ai_client
 
 
+def _get_ai_client_for_url(url):
+    proxy = proxy_for_url("translation", url)
+    if not proxy:
+        return _get_ai_client()
+    client = _ai_proxy_clients.get(proxy)
+    if client is None or client.is_closed:
+        client = httpx.AsyncClient(proxy=proxy, trust_env=False)
+        _ai_proxy_clients[proxy] = client
+    return client
+
+
 @get_driver().on_shutdown
 async def _close_ai_client():
     global _ai_client, _ai_stopping
@@ -71,6 +84,10 @@ async def _close_ai_client():
     if _ai_client is not None:
         await _ai_client.aclose()
         _ai_client = None
+    clients = list(_ai_proxy_clients.values())
+    _ai_proxy_clients.clear()
+    if clients:
+        await asyncio.gather(*(client.aclose() for client in clients if not client.is_closed))
 
 
 async def _request_ai(method, *args, **kwargs):
@@ -81,7 +98,8 @@ async def _request_ai(method, *args, **kwargs):
     if task is not None:
         _ai_request_tasks.add(task)
     try:
-        return await getattr(_get_ai_client(), method)(*args, **kwargs)
+        url = args[0] if args else kwargs.get("url")
+        return await getattr(_get_ai_client_for_url(url), method)(*args, **kwargs)
     finally:
         if task is not None:
             _ai_request_tasks.discard(task)

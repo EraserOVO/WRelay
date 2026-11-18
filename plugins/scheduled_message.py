@@ -1,6 +1,6 @@
 """QQ 定时消息投递。
 
-配置保存于 settings.json 的 scheduled_message：启用后按每条消息自己的
+    配置保存于 settings.json 的 scheduled_message：按每条消息自己的
 间隔或日历计划，把消息发送到显式选中的 QQ 接收群。配置实时读取，面板
 或白名单私聊修改后无需重启机器人。
 """
@@ -18,6 +18,7 @@ from plugins.config import (
     get_qq_group_entries,
     get_qq_forwarding_groups,
     get_scheduled_message_config,
+    set_scheduled_message_execution,
     resolve_scheduled_targets,
 )
 from plugins.media import make_text
@@ -113,6 +114,8 @@ def _next_calendar_at(now, message):
 
 def next_scheduled_at(now, message):
     """计算单条消息下一次发送时间。"""
+    if message.get("schedule_type") == "once":
+        return _parse_datetime(message.get("once_at"))
     if message.get("schedule_type") == "calendar":
         return _next_calendar_at(now, message)
     return _next_interval_at(now, message)
@@ -168,7 +171,6 @@ async def _scheduled_owner_loop():
     while True:
         try:
             config = await asyncio.to_thread(get_scheduled_message_config)
-            enabled = config["enabled"]
             target_groups = set(config["target_groups"])
             messages = config.get("messages") or []
             message_signature = tuple(
@@ -180,7 +182,6 @@ async def _scheduled_owner_loop():
                 for message in messages
             )
             signature = (
-                enabled,
                 tuple(sorted(target_groups)),
                 message_signature,
             )
@@ -194,14 +195,15 @@ async def _scheduled_owner_loop():
             has_targets = any(
                 _message_has_targets(message) for message in messages
             )
-            if enabled and has_targets:
+            if has_targets:
                 for index, message in enumerate(messages):
                     key = str(message.get("id") or "message-" + str(index + 1)) + ":" + str(index)
                     active_keys.add(key)
                     if key not in next_send_at:
-                        next_send_at[key], calculation_failed = _try_next_scheduled_at(
-                            now, message, key
-                        )
+                        if message.get("schedule_type") == "once" and message.get("completed_at"):
+                            next_send_at[key] = None
+                            continue
+                        next_send_at[key], calculation_failed = _try_next_scheduled_at(now, message, key)
                         if calculation_failed:
                             continue
                         if next_send_at[key] is None:
@@ -213,6 +215,20 @@ async def _scheduled_owner_loop():
                         continue
                     if now < next_send_at[key]:
                         continue
+                    if message.get("schedule_type") == "once":
+                        target_at = next_send_at[key]
+                        status = "missed" if now - target_at > timedelta(minutes=1) else "sent"
+                        completed_at = datetime.now().isoformat(timespec="seconds")
+                        persisted = await asyncio.to_thread(
+                            set_scheduled_message_execution, message.get("id"), status, completed_at
+                        )
+                        if not persisted:
+                            next_send_at.pop(key, None)
+                            continue
+                        next_send_at[key] = None
+                        if status == "missed":
+                            logger.info("按时点发送的定时消息已错过，不补发：{}", message.get("id") or key)
+                            continue
                     try:
                         groups = await asyncio.to_thread(
                             _message_target_groups, message
@@ -262,9 +278,8 @@ async def _scheduled_owner_loop():
                     except Exception as exc:
                         logger.exception("定时消息处理异常，跳过本次计划 {}：{}", key, exc)
                     finally:
-                        next_send_at[key], _ = _try_next_scheduled_at(
-                            datetime.now(), message, key
-                        )
+                        if message.get("schedule_type") != "once":
+                            next_send_at[key], _ = _try_next_scheduled_at(datetime.now(), message, key)
             next_send_at = {
                 key: value for key, value in next_send_at.items()
                 if key in active_keys

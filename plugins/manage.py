@@ -201,7 +201,7 @@ def _help_text():
         "WRelay菜单\n"
         "/运行状态 运行总览\n"
         "/转发 列表 手动转发目标与方法\n"
-        "/定时消息 查询或开关定时消息\n"
+        "/定时消息 查询或清空定时消息\n"
         "/QQ账号与群 用户/群注册申请\n"
         "/重启 重启机器人"
     )
@@ -435,10 +435,8 @@ async def _cmd_registration_requests(kind, page=1):
 def _timer_rows():
     """定时消息查询后的操作按钮。"""
     return command_rows([
-        command_button("timer-on", "开启", "/定时消息 开启"),
-        command_button("timer-off", "关闭", "/定时消息 关闭"),
         command_button("timer-clear", "清空", "/定时消息 清空"),
-    ], per_row=3)
+    ], per_row=1)
 
 
 def _backfill_rows():
@@ -844,19 +842,22 @@ def _scheduled_has_any_target(messages, default_targets):
 
 
 async def _cmd_timer(args):
-    """查询或开关定时消息。具体内容和计划由管理面板维护。"""
+    """查询或清空定时消息。启停状态由各条消息的启用勾选管理。"""
     if not args:
         settings = await _panel_get("/api/settings")
         error = _management_api_error(settings, "读取定时消息设置失败")
         if error:
             return error
         config = settings.get("scheduled_message") or {}
-        messages = [
-            item for item in config.get("messages") or []
-            if isinstance(item, dict) and str(item.get("content") or "").strip()
-        ]
+        messages = []
+        for group in config.get("message_groups") or []:
+            if isinstance(group, dict):
+                messages.extend(item for item in group.get("messages") or [] if isinstance(item, dict))
+        if not messages:
+            messages = [item for item in config.get("messages") or [] if isinstance(item, dict)]
+        messages = [item for item in messages if str(item.get("content") or "").strip() or item.get("image_data")]
         content = str(messages[0].get("content") or "").strip() if messages else str(config.get("content") or "").strip()
-        enabled = config.get("enabled") is True
+        enabled_count = sum(item.get("enabled") is not False for item in messages)
         if messages:
             schedule = str(len(messages)) + " 条消息"
             send_time = messages[0].get("send_time") or messages[0].get("anchor_at") or "未设置"
@@ -866,7 +867,7 @@ async def _cmd_timer(args):
         targets = _scheduled_target_summary(messages, config.get("target_groups") or [])
         return (
             "定时消息\n"
-            "状态：" + ("开启" if enabled else "关闭") + "\n"
+            "启用：" + str(enabled_count) + "/" + str(len(messages)) + " 条消息\n"
             "计划：" + schedule + "\n"
             "时间：" + str(send_time) + "\n"
             "目标：" + targets + "\n"
@@ -874,47 +875,18 @@ async def _cmd_timer(args):
         )
 
     action = args[0]
-    if action in ("开启", "关闭"):
-        if len(args) != 1:
-            return "用法：/定时消息 开启 或 /定时消息 关闭"
-        if action == "开启":
-            settings = await _panel_get("/api/settings")
-            error = _management_api_error(settings, "读取定时消息设置失败")
-            if error:
-                return error
-            config = settings.get("scheduled_message") or {}
-            messages = config.get("messages") or []
-            has_content = any(
-                isinstance(item, dict) and str(item.get("content") or "").strip()
-                for item in messages
-            )
-            if not has_content and not str(config.get("content") or "").strip():
-                return "请先在管理面板设置定时消息内容"
-            if not _scheduled_has_any_target(
-                [item for item in messages if isinstance(item, dict)],
-                config.get("target_groups") or [],
-            ):
-                return "请先在管理面板为定时消息设置目标群或转发组"
-        data = await _panel_post(
-            "/api/settings/scheduled-message",
-            {"enabled": action == "开启"},
-        )
-        if data.get("ok"):
-            return "已" + ("开启" if action == "开启" else "关闭") + "定时消息"
-        return data.get("msg") or "设置失败"
-
     if action == "清空":
         if len(args) != 1:
             return "用法：/定时消息 清空"
         data = await _panel_post(
             "/api/settings/scheduled-message",
-            {"content": "", "enabled": False},
+            {"content": "", "messages": [], "message_groups": []},
         )
         if data.get("ok"):
-            return "定时消息已关闭并清空内容"
+            return "定时消息已清空"
         return data.get("msg") or "设置失败"
 
-    return "仅支持：/定时消息（查询）或 /定时消息 <开启/关闭/清空>"
+    return "仅支持：/定时消息（查询）或 /定时消息 清空；单条启停请在桌面面板勾选"
 
 
 PRIVATE_UNKNOWN_COMMAND_REPLY = "该命令未知，点击下方按钮展开菜单："

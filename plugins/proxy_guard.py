@@ -1,7 +1,7 @@
 """Discord 专用代理端口自检。
 
-Clash Verge 重启后混合端口可能变化，而 .env.prod 的 DISCORD_PROXY 不会自动
-跟随；端口失效时 Discord 适配器连网关都拿不到，且只尝试一次。这里只在
+Clash Verge 重启后混合端口可能变化，而设置页或 .env.prod 保存的 DISCORD_PROXY
+不会自动跟随；端口失效时 Discord 适配器可能无法连接网关。这里只在
 DISCORD_PROXY 指向本机且端口不可用时，改用 Windows 系统代理的当前端口。
 """
 

@@ -166,7 +166,7 @@ async def _backfill_missed_profile():
     _backfill_running = True
     _backfill_rerun_requested = False
     state = _backfill_states.setdefault(discord_gaps.current_owner(), {})
-    state.update(running=True, error="")
+    state.update(running=True, error="", scan_error="")
 
     try:
         snapshot = await asyncio.to_thread(get_backfill_runtime_snapshot)
@@ -193,6 +193,7 @@ async def _backfill_missed_profile():
                         await _scan_gaps_channel(channel_id, active_groups)
                     except Exception:
                         state["error"] = "部分频道检查失败，请查看运行日志"
+                        state["scan_error"] = "Discord 历史消息扫描失败，断点已保留并等待重试"
                         logger.exception("补发历史扫描失败: {}", channel_id)
                     try:
                         await _replay_gaps_channel(channel_id, channel_name, active_groups, limit)

@@ -9,6 +9,7 @@ import httpx
 
 from nonebot import get_driver, logger
 from nonebot.adapters.qq import MessageSegment as QQMessageSegment
+from plugins.network_proxy import get_proxy as get_network_proxy
 
 
 # =====================================================
@@ -225,27 +226,34 @@ def make_media_link(kind, url):
 
 
 def _get_proxy(url):
-    """Use platform proxies for hosted media; domestic media stays on system routing."""
+    """Use per-service proxies for hosted media; other media stays direct."""
     try:
         host = (urlsplit(str(url)).hostname or "").lower()
     except (TypeError, ValueError):
         return None
-    if not (
+    is_discord_host = (
         host == "discord.com"
         or host.endswith((".discord.com", ".discordapp.com", ".discordapp.net"))
+    )
+    is_x_host = (
+        host == "twitter.com"
+        or host.endswith((".twitter.com", ".x.com", ".twimg.com"))
+        or host == "x.com"
         or host == "twimg.com"
-        or host.endswith(".twimg.com")
-        or host == "youtube.com"
-        or host.endswith(".youtube.com")
-        or host == "youtu.be"
-        or host == "ytimg.com"
-        or host.endswith(".ytimg.com")
-        or host == "ggpht.com"
-        or host.endswith(".ggpht.com")
-        or host == "googleusercontent.com"
-        or host.endswith(".googleusercontent.com")
-    ):
-        return None
+    )
+    is_bilibili_host = any(
+        host == domain or host.endswith("." + domain)
+        for domain in (
+            "bilibili.com",
+            "bilibili.tv",
+            "bilivideo.com",
+            "hdslb.com",
+            "biliapi.net",
+            "biliapi.com",
+            "b23.tv",
+            "bili2233.cn",
+        )
+    )
     is_youtube_host = (
         host == "youtube.com"
         or host.endswith(".youtube.com")
@@ -257,16 +265,32 @@ def _get_proxy(url):
         or host == "googleusercontent.com"
         or host.endswith(".googleusercontent.com")
     )
-    proxy = str(os.environ.get("YOUTUBE_PROXY") or "").strip() if is_youtube_host else ""
-    if not proxy:
-        try:
-            proxy = getattr(get_driver().config, "discord_proxy", None)
-        except Exception:
-            return None
-    if isinstance(proxy, str):
-        proxy = proxy.strip()
-        return proxy or None
-    return None
+    if not (is_discord_host or is_x_host or is_bilibili_host or is_youtube_host):
+        return None
+    try:
+        legacy_discord_proxy = getattr(get_driver().config, "discord_proxy", None)
+    except Exception:
+        legacy_discord_proxy = None
+    legacy_discord_proxy = (
+        legacy_discord_proxy.strip()
+        if isinstance(legacy_discord_proxy, str)
+        else ""
+    )
+    if is_x_host:
+        return get_network_proxy("x") or legacy_discord_proxy or None
+    if is_bilibili_host:
+        return get_network_proxy("bilibili")
+    if is_youtube_host:
+        youtube_env_proxy = str(os.environ.get("YOUTUBE_PROXY") or "").strip()
+        return (
+            get_network_proxy("youtube")
+            or youtube_env_proxy
+            or legacy_discord_proxy
+            or None
+        )
+    # Use the live adapter config here: discord_reconnect may have switched a
+    # stale loopback proxy to the current Windows proxy after startup.
+    return legacy_discord_proxy or None
 
 
 # =====================================================
@@ -284,30 +308,24 @@ DEFAULT_MEDIA_TIMEOUT = 120
 DEFAULT_MEDIA_CONCURRENCY = 4
 DEFAULT_MAX_DOWNLOAD_BYTES = 30 * 1024 * 1024
 _media_client = None
-_discord_media_client = None
-_discord_media_proxy = None
+_media_proxy_clients = {}
 _media_download_tasks = set()
 _media_stopping = False
 
 
 def _get_media_client(proxy=None):
-    global _media_client, _discord_media_client, _discord_media_proxy
     if proxy:
-        if _discord_media_client is None or proxy != _discord_media_proxy:
-            stale = _discord_media_client
-            _discord_media_client = httpx.AsyncClient(
+        client = _media_proxy_clients.get(proxy)
+        if client is None:
+            client = httpx.AsyncClient(
                 proxy=proxy,
                 timeout=_get_timeout(),
                 follow_redirects=True,
                 headers={"User-Agent": "Mozilla/5.0"},
+                trust_env=False,
             )
-            _discord_media_proxy = proxy
-            if stale is not None:
-                try:
-                    asyncio.get_running_loop().create_task(stale.aclose())
-                except RuntimeError:
-                    pass
-        return _discord_media_client
+            _media_proxy_clients[proxy] = client
+        return client
     if _media_client is None:
         # 非代理媒体走系统路由，不读取环境/系统代理。
         # 若保留 trust_env，Windows 代理绕过列表中的裸 IPv6 条目（如 ::1）会
@@ -324,7 +342,7 @@ def _get_media_client(proxy=None):
 
 @get_driver().on_shutdown
 async def _close_media_client():
-    global _media_client, _discord_media_client, _discord_media_proxy, _media_stopping
+    global _media_client, _media_stopping
     _media_stopping = True
     current_task = asyncio.current_task()
     download_tasks = [
@@ -339,10 +357,13 @@ async def _close_media_client():
     if _media_client is not None:
         await _media_client.aclose()
         _media_client = None
-    if _discord_media_client is not None:
-        await _discord_media_client.aclose()
-        _discord_media_client = None
-    _discord_media_proxy = None
+    proxy_clients = list(_media_proxy_clients.values())
+    _media_proxy_clients.clear()
+    if proxy_clients:
+        await asyncio.gather(
+            *(client.aclose() for client in proxy_clients),
+            return_exceptions=True,
+        )
 
 _semaphore = None
 _semaphore_lock = threading.Lock()

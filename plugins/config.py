@@ -1265,14 +1265,33 @@ def get_scheduled_message_config():
     value = data.get("scheduled_message")
     if not isinstance(value, dict):
         return {
-            "enabled": False,
             "target_groups": [],
             "messages": [],
         }
     default_targets = _scheduled_group_list(value.get("target_groups"))
+    raw_messages = []
+    message_groups = value.get("message_groups")
+    if isinstance(message_groups, list) and message_groups:
+        for group_index, group in enumerate(message_groups, start=1):
+            if not isinstance(group, dict):
+                continue
+            mode = str(group.get("target_mode") or SCHEDULED_TARGET_GROUP)
+            for child_index, child in enumerate(group.get("messages") or [], start=1):
+                if not isinstance(child, dict):
+                    continue
+                raw_child = dict(child)
+                raw_child["id"] = str(group.get("id") or "scheduled-group-" + str(group_index)) + ":" + str(child.get("id") or "message-" + str(child_index))
+                raw_child["target_mode"] = mode
+                raw_child["target_groups"] = group.get("target_groups") or []
+                raw_child["forward_groups"] = group.get("forward_groups") or []
+                raw_messages.append(raw_child)
+    else:
+        raw_messages = list(value.get("messages") or [])
     messages = []
-    for index, raw in enumerate(value.get("messages") or []):
+    for index, raw in enumerate(raw_messages):
         if not isinstance(raw, dict):
+            continue
+        if raw.get("enabled") is False:
             continue
         content = str(raw.get("content") or "").strip()
         image_data = raw.get("image_data")
@@ -1285,6 +1304,12 @@ def get_scheduled_message_config():
             "content": content,
             "schedule_type": raw.get("schedule_type"),
         }
+        if item["schedule_type"] == "once":
+            item.update({
+                "once_at": str(raw.get("once_at") or ""),
+                "completed_at": str(raw.get("completed_at") or ""),
+                "execution_status": str(raw.get("execution_status") or ""),
+            })
         item.update(_scheduled_message_targets(raw, default_targets))
         if isinstance(image_data, str) and image_data:
             item["image_data"] = image_data
@@ -1334,10 +1359,51 @@ def get_scheduled_message_config():
             continue
         messages.append(item)
     return {
-        "enabled": value.get("enabled") is True,
         "target_groups": default_targets,
         "messages": messages,
     }
+
+
+def set_scheduled_message_execution(message_id, status, completed_at):
+    """Persist the consumed/missed state of one one-time plan without replacing concurrent edits."""
+    from plugins import bot_profiles
+
+    for _attempt in range(3):
+        revision = bot_profiles.revision(SETTINGS_FILE)
+        data = bot_profiles.read(SETTINGS_FILE)
+        scheduled = data.get("scheduled_message")
+        if not isinstance(scheduled, dict):
+            return False
+        found = None
+        groups = scheduled.get("message_groups")
+        if isinstance(groups, list):
+            for group_index, group in enumerate(groups, start=1):
+                if not isinstance(group, dict):
+                    continue
+                group_id = str(group.get("id") or "scheduled-group-" + str(group_index))
+                for child_index, child in enumerate(group.get("messages") or [], start=1):
+                    if isinstance(child, dict):
+                        child_id = str(child.get("id") or "message-" + str(child_index))
+                        if group_id + ":" + child_id == str(message_id):
+                            found = child
+                            break
+                if found:
+                    break
+        if found is None:
+            found = next((item for item in scheduled.get("messages", [])
+                          if isinstance(item, dict) and str(item.get("id") or "") == str(message_id)), None)
+        if found is None or found.get("schedule_type") != "once":
+            return False
+        if found.get("completed_at"):
+            return True
+        found["completed_at"] = str(completed_at)
+        found["execution_status"] = status
+        try:
+            bot_profiles.save(SETTINGS_FILE, data, expected_revision=revision)
+            return True
+        except ConcurrentWriteError:
+            continue
+    return False
 
 
 SCHEDULED_TARGET_GROUP = "groups"

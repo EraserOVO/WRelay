@@ -3,10 +3,6 @@
    handlers and state; restore their exact slots when leaving this page. */
 (function () {
   const byId = id => document.getElementById(id);
-  byId("btnBackfillRefresh").title = "刷新待补发数量";
-  byId("btnBackfillRefresh").setAttribute("aria-label", "刷新待补发数量");
-  byId("btnBackfillClear").title = "清空待补发";
-  byId("btnBackfillClear").setAttribute("aria-label", "清空待补发");
   const pages = {
     discord: {workspace: "fgBody"},
     x: {workspace: "xFgBody"},
@@ -33,7 +29,7 @@
     moves.push({node, slot});
     parent.append(node);
   }
-  const toggles = ["btnBackfillToggle", "btnScheduledMessageToggle"].map(byId);
+  const toggles = [];
   function decorateToggle(button) {
     if (!enabled || !pages[active]) return;
     button.setAttribute("role", "switch");
@@ -55,12 +51,11 @@
   };
   function scheduledPresentation() {
     if (active !== "qq") return;
-    const empty = byId("scheduledMessageSummary").classList.contains("is-empty");
-    const label = empty ? "+ 新增" : "编辑定时消息";
+    const label = "＋ 新增";
     scheduledEdit.textContent = label;
     scheduledEdit.title = label;
     scheduledEdit.setAttribute("aria-label", label);
-    scheduledEdit.className = empty ? "" : "sec";
+    scheduledEdit.className = "";
   }
   new MutationObserver(scheduledPresentation).observe(byId("scheduledMessageSummary"),
     {attributes:true, attributeFilter:["class"], childList:true});
@@ -96,9 +91,10 @@
       group(status, "desktop-statistics-group", [...status.querySelectorAll(".robot-stat")]);
       const config = pages[active];
       if (config && active === "qq") {
-        // 转发组下方的所有小卡片共用同一个两列网格：同宽同高，从左至右、从上至下排列。
+        // 定时消息作为独立大卡片横跨转发组下方；其余工具卡继续共用两列网格。
+        const scheduledWorkspace = group(byId("pageQQ"), "scheduled-message-full-width", []);
+        move(byId("scheduledMessageCard"), scheduledWorkspace);
         const lowerCards = group(byId("pageQQ"), "relay-translation-row func-cards", []);
-        move(byId("scheduledMessageCard"), lowerCards);
         move(byId("unifiedRelayCard"), lowerCards);
         move(byId("autoTranslationCard"), lowerCards);
       }

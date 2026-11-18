@@ -80,7 +80,9 @@ async def api_backfill_pending():
     groups_by_channel = snapshot["groups_by_channel"]
 
     if not channels:
-        return {"ok": True, "total": 0, "channels": {}, "unknown": False, "scanning": False, "capped": False, "status": get_backfill_status()}
+        return {"ok": True, "total": 0, "channels": {}, "unknown": False,
+                "scanning": False, "scan_pending": False, "scan_failed": False,
+                "capped": False, "status": get_backfill_status()}
 
     last_messages = await load_last_messages_async(load_last_messages)
 
@@ -88,7 +90,10 @@ async def api_backfill_pending():
     total = 0
     unknown = False
     scanning = False
+    scan_pending = False
+    scan_failed = False
     capped = False
+    status = get_backfill_status()
 
     for channel_id, channel_name in channels.items():
 
@@ -106,19 +111,25 @@ async def api_backfill_pending():
             )
             latest = await fetch_channel_latest(channel_id)
             is_unknown = not latest
-            in_progress = state["scanning"]
+            unfinished = state["scanning"]
             if latest:
                 channel_map = normalize_channel_map(last_messages, channel_id)
                 for group, cursor in state["cursors"].items():
                     cursor = cursor or channel_map.get(group) or channel_map.get("*")
                     if cursor is None or int(latest) > int(cursor):
-                        in_progress = True
+                        unfinished = True
+            in_progress = unfinished and bool(status.get("running"))
+            waiting_retry = unfinished and not bool(status.get("running"))
+            failed = waiting_retry and bool(status.get("scan_error"))
             count = state["count"]
             unknown = unknown or is_unknown
             scanning = scanning or in_progress
+            scan_pending = scan_pending or waiting_retry
+            scan_failed = scan_failed or failed
             capped = capped or state["capped"]
             result[channel_id] = {"name": channel_name, "count": count,
                                   "unknown": is_unknown, "scanning": in_progress,
+                                  "scan_pending": waiting_retry, "scan_failed": failed,
                                   "capped": state["capped"]}
             total += count
         except Exception:
@@ -135,8 +146,10 @@ async def api_backfill_pending():
         "channels": result,
         "unknown": unknown,
         "scanning": scanning,
+        "scan_pending": scan_pending,
+        "scan_failed": scan_failed,
         "capped": capped,
-        "status": get_backfill_status(),
+        "status": status,
     }
 
 

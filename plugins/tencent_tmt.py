@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 import httpx
 from nonebot import get_driver
+from plugins.network_proxy import proxy_for_url
 
 from plugins.config import get_tencent_tmt_config
 
@@ -25,6 +26,7 @@ _SERVICE = "tmt"
 _VERSION = "2018-03-21"
 _ALGORITHM = "TC3-HMAC-SHA256"
 _tmt_client = None
+_tmt_proxy_clients = {}
 _tmt_request_tasks = set()
 _tmt_stopping = False
 
@@ -37,6 +39,17 @@ def _get_tmt_client():
         # InvalidURL，使腾讯 TMT 回退翻译整体不可用。
         _tmt_client = httpx.AsyncClient(trust_env=False)
     return _tmt_client
+
+
+def _get_tmt_client_for_url(url):
+    proxy = proxy_for_url("translation", url)
+    if not proxy:
+        return _get_tmt_client()
+    client = _tmt_proxy_clients.get(proxy)
+    if client is None or client.is_closed:
+        client = httpx.AsyncClient(proxy=proxy, trust_env=False)
+        _tmt_proxy_clients[proxy] = client
+    return client
 
 
 @get_driver().on_shutdown
@@ -53,6 +66,10 @@ async def _close_tmt_client():
     if _tmt_client is not None:
         await _tmt_client.aclose()
         _tmt_client = None
+    clients = list(_tmt_proxy_clients.values())
+    _tmt_proxy_clients.clear()
+    if clients:
+        await asyncio.gather(*(client.aclose() for client in clients if not client.is_closed))
 
 
 async def _request_tmt(method, *args, **kwargs):
@@ -63,7 +80,8 @@ async def _request_tmt(method, *args, **kwargs):
     if task is not None:
         _tmt_request_tasks.add(task)
     try:
-        return await getattr(_get_tmt_client(), method)(*args, **kwargs)
+        url = args[0] if args else kwargs.get("url")
+        return await getattr(_get_tmt_client_for_url(url), method)(*args, **kwargs)
     finally:
         if task is not None:
             _tmt_request_tasks.discard(task)

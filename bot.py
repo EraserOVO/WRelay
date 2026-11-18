@@ -13,6 +13,7 @@ from plugins.paths import PROJECT_ROOT, data_path
 from plugins.startup_config import needs_discord
 from plugins.json_io import load_json
 from plugins.proxy_guard import align_discord_proxy
+from plugins.network_proxy import get_proxy as get_network_proxy
 
 from nonebot.adapters.qq import Adapter as QQAdapter
 from plugins.personal_qq import PersonalQQAdapter
@@ -168,8 +169,8 @@ def _first_run_config_check():
         lines.append("    - 在 .env.prod 的 DISCORD_BOTS 中：token 填你的 Bot Token")
         lines.append("    - 记得在 Bot 设置里开启 Message Content Intent（特权网关意图）")
     lines.append("")
-    lines.append("  Discord 可通过 Clash 虚拟网卡（TUN）路由，或在 .env.prod 设置适配器专用 DISCORD_PROXY。")
-    lines.append("  通用 HTTP_PROXY 不会被使用；DISCORD_PROXY 代理 Discord API、Gateway、Discord 托管媒体和 X 媒体 CDN。")
+    lines.append("  Discord 可通过 Clash 虚拟网卡（TUN）路由，也可在桌面端「设置 → 网络代理」配置 Discord 代理；仍可用 .env.prod 中的 DISCORD_PROXY 作为旧式回退。")
+    lines.append("  通用 HTTP_PROXY 不会被使用；网络代理设置按链路生效，旧式 DISCORD_PROXY 还可回退代理 Discord 媒体和 X 媒体 CDN。")
     lines.append("  详细说明见 docs/SETUP.md。")
     lines.append("")
     lines.append("  请打开桌面端「设置 → 配置向导」完成所需账号配置，再启动机器人。")
@@ -241,6 +242,9 @@ _use_tun_network_routing()
 
 # 代理软件重启后混合端口可能变化，DISCORD_PROXY 不会自动跟随；在 NoneBot
 # 读取配置前对齐到系统代理当前端口，避免 Discord 启动即离线且不再重试。
+_configured_discord_proxy = get_network_proxy("discord")
+if _configured_discord_proxy:
+    os.environ["DISCORD_PROXY"] = _configured_discord_proxy
 _PROXY_SWITCH = align_discord_proxy()
 
 # 机器人 HTTP API 仅供本机管理面板调用。Windows 当前保留 8082 所在范围，

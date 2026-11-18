@@ -347,6 +347,8 @@ def restore_backup_archive(
 
 def _sync_legacy_scheduled_message(scheduled, body):
     """把旧版 timer 字段同步到新版 messages 的第一条消息。"""
+    if "message_groups" in body:
+        return
     legacy_keys = {
         "content", "schedule_mode", "every_days", "every_weeks",
         "every_months", "weekdays", "send_time", "anchor_date",
@@ -1652,6 +1654,16 @@ def api_status(bot_id: str = ""):
             for message in messages
             if isinstance(message, dict)
         ]
+        groups = scheduled_message.get("message_groups")
+        if isinstance(groups, list):
+            scheduled_message["message_groups"] = [
+                dict(group, messages=[
+                    {key: value for key, value in message.items() if key != "image_data"}
+                    for message in (group.get("messages") or [])
+                    if isinstance(message, dict)
+                ])
+                for group in groups if isinstance(group, dict)
+            ]
     else:
         scheduled_message = {}
     return {
@@ -1915,9 +1927,9 @@ def _update_scheduled_message(body):
         return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
 
     allowed = {
-        "enabled", "content", "interval", "target_groups",
+        "content", "interval", "target_groups",
         "schedule_mode", "every_days", "every_weeks", "every_months",
-        "weekdays", "send_time", "anchor_date", "messages",
+        "weekdays", "send_time", "anchor_date", "messages", "message_groups",
     }
     if not any(key in body for key in allowed):
         return JSONResponse(
@@ -3267,6 +3279,8 @@ from panel.personal_qq_api import register_routes as register_personal_qq_routes
 register_personal_qq_routes(app, globals())
 from panel.profile_api import register_routes as register_profile_routes
 register_profile_routes(app, globals())
+from panel.network_proxy_api import register_routes as register_network_proxy_routes
+register_network_proxy_routes(app, globals())
 
 
 @app.get("/api/bot/qq-config")

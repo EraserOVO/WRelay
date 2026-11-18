@@ -78,7 +78,12 @@ from plugins.json_io import (
     update_json,
 )
 from plugins.paths import data_path
-from plugins.rss_polling import read_rss_poll_interval, run_rss_poll_loop
+from plugins.network_proxy import proxy_for_url
+from plugins.rss_polling import (
+    RSS_CONNECTION_RETRY_INTERVAL,
+    read_rss_poll_interval,
+    run_rss_poll_loop,
+)
 from plugins.x_rss_parser import parse_feed, QUOTE_TEXT_LIMIT, delivery_identity
 from plugins.x_rate_limit import (
     choose_overflow,
@@ -103,7 +108,7 @@ FEED_RETRY_DELAYS = (1, 3)
 SYNDICATION_BASE = "https://syndication.twitter.com/srv/timeline-profile/screen-name"
 # RSSHub 常与本程序同时开机启动（Docker Desktop 登录自启），容器需要
 # 1~2 分钟才监听端口。启动初期连接被拒属于"服务尚未就绪"，不是真的
-# 请求失败：记为 pending 并照常重试，避免开机即刷失败与三轮告警。
+# 请求失败：记为 pending 并在 60 秒后重试，避免开机即刷失败与三轮告警。
 RSSHUB_COLD_START_GRACE = 240
 # 进程启动时刻（用于判断是否仍处于冷启动宽限期）
 _PROCESS_STARTED_AT = time.time()
@@ -141,6 +146,7 @@ _dispatch_sent_since_poll = 0
 _dispatch_failed_since_poll = 0
 _PROTECTION_STATE_MISSING = object()
 _feed_client = None
+_proxy_feed_clients = {}
 _x_request_tasks = set()
 _dispatch_task = None
 _feed_stopping = False
@@ -156,6 +162,30 @@ def _get_feed_client():
     return _feed_client
 
 
+def _get_feed_client_for_url(url):
+    from urllib.parse import urlsplit
+
+    host = (urlsplit(str(url or "")).hostname or "").lower()
+    service = "x" if (
+        host == "twitter.com"
+        or host.endswith(".twitter.com")
+        or host == "x.com"
+        or host.endswith(".x.com")
+    ) else "rsshub"
+    proxy = proxy_for_url(service, url)
+    if not proxy:
+        return _get_feed_client()
+    client = _proxy_feed_clients.get(proxy)
+    if client is None or client.is_closed:
+        client = httpx.AsyncClient(
+            proxy=proxy,
+            follow_redirects=True,
+            trust_env=False,
+        )
+        _proxy_feed_clients[proxy] = client
+    return client
+
+
 async def _x_get(*args, **kwargs):
     """Track X RSS GET requests so shutdown can reap one-shot and poll calls."""
     if _feed_stopping:
@@ -164,7 +194,8 @@ async def _x_get(*args, **kwargs):
     if task is not None:
         _x_request_tasks.add(task)
     try:
-        return await _get_feed_client().get(*args, **kwargs)
+        url = args[0] if args else kwargs.get("url")
+        return await _get_feed_client_for_url(url).get(*args, **kwargs)
     finally:
         if task is not None:
             _x_request_tasks.discard(task)
@@ -202,6 +233,10 @@ async def _close_feed_client():
     if _feed_client is not None:
         await _feed_client.aclose()
         _feed_client = None
+    proxy_clients = list(_proxy_feed_clients.values())
+    _proxy_feed_clients.clear()
+    if proxy_clients:
+        await asyncio.gather(*(client.aclose() for client in proxy_clients if not client.is_closed))
 
 
 # =====================================================
@@ -1322,7 +1357,7 @@ async def _poll_all_profile():
         sources.append(source)
     if not sources:
         _runtime_status["source_health"] = []
-        return
+        return False
 
     sem = asyncio.Semaphore(X_POLL_CONCURRENCY)
 
@@ -1395,6 +1430,15 @@ async def _poll_all_profile():
         st["last_result"] = "ok"
         st["last_error"] = ""
 
+    return any(
+        result.get("result") == "pending"
+        or (
+            result.get("result") == "fetch_failed"
+            and "请求异常" in str(result.get("error") or "")
+        )
+        for result in results
+    )
+
 
 async def _poll_loop():
     await run_rss_poll_loop(
@@ -1405,6 +1449,7 @@ async def _poll_loop():
         poll_all=_poll_all,
         read_interval=lambda: _profile_runtime.interval(_read_poll_interval),
         logger=logger,
+        retry_interval=RSS_CONNECTION_RETRY_INTERVAL,
     )
 
 
@@ -1423,7 +1468,10 @@ _profile_runtime = RSSProfiles(globals(), 'x')
 
 
 async def _poll_all():
-    return await _profile_runtime.poll(_poll_all_profile)
+    return await _profile_runtime.poll(
+        _poll_all_profile,
+        retry_interval=RSS_CONNECTION_RETRY_INTERVAL,
+    )
 
 
 _loop_started = False

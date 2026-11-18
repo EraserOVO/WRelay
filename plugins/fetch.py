@@ -507,13 +507,38 @@ async def _fetch_discord_message_page(api, headers, channel_id):
                 headers=headers,
             )
         except Exception as exc:
+            if attempt < RATE_LIMIT_ATTEMPTS:
+                delay = REST_RETRY_DELAY * attempt
+                logger.warning(
+                    "Discord 历史分页请求断开，{} 秒后重试（{}/{}，频道 {}）：{}",
+                    delay,
+                    attempt,
+                    RATE_LIMIT_ATTEMPTS,
+                    channel_id,
+                    exc,
+                )
+                await asyncio.sleep(delay)
+                continue
             logger.warning(
-                "Discord API请求异常，本轮补发放弃: {}",
+                "Discord 历史分页请求重试耗尽，本轮保留断点（频道 {}）：{}",
+                channel_id,
                 exc,
             )
             return None, False
 
         if response.status_code != 429:
+            if response.status_code >= 500 and attempt < RATE_LIMIT_ATTEMPTS:
+                delay = REST_RETRY_DELAY * attempt
+                logger.warning(
+                    "Discord 历史分页返回 HTTP {}，{} 秒后重试（{}/{}，频道 {}）",
+                    response.status_code,
+                    delay,
+                    attempt,
+                    RATE_LIMIT_ATTEMPTS,
+                    channel_id,
+                )
+                await asyncio.sleep(delay)
+                continue
             break
         rate_limited = True
         if attempt == RATE_LIMIT_ATTEMPTS:

@@ -4,6 +4,8 @@ const SVG_ORIGINAL_ON = mcIcon("check", 13);
 const SVG_ORIGINAL_OFF = mcIcon("close", 13);
 const SVG_TRASH = mcIcon("delete-2", 14);
 const SVG_GRIP = mcIcon("menu", 14);
+const SVG_SCHEDULE_CALENDAR = '<svg class="scheduled-date-picker-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5.5" width="16" height="15" rx="2"/><path d="M8 3.5v4M16 3.5v4M4 9.5h16M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01M16 17h.01"/></svg>';
+const SVG_SCHEDULE_CLOCK = '<svg class="scheduled-date-picker-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/></svg>';
 // 统一笔图标：空心笔、笔尖朝左下角（转发组重命名 / 频道名称编辑共用）
 const SVG_PEN = mcIcon("edit-2", 12);
 const SVG_PAUSE = mcIcon("pause", 13);
@@ -270,10 +272,8 @@ function setActivePage(page) {
   if (runtimeCards) runtimeCards.style.display = activePage === "settings" ? "none" : "";
   document.getElementById("recentMessageCard").style.display = activePage === "overview" ? "" : "none";
   if (latestMessageTraceData) renderRecentMessage(latestMessageTraceData);
-  // 桌面版将补发与 RSS 详情卡收在状态栏入口内；普通网页仍在对应链路页显示。
+  // 桌面版将 RSS 与 Steam 详情卡收在状态栏入口内；普通网页仍在对应链路页显示。
   const showInlineChainDetails = !IS_DESKTOP_HOST;
-  const backfillCard = document.getElementById("backfillCard");
-  if (backfillCard) backfillCard.style.display = showInlineChainDetails && activePage === "discord" ? "" : "none";
   const xrssCard = document.getElementById("xrssCard");
   if (xrssCard) xrssCard.style.display = showInlineChainDetails && activePage === "x" ? "" : "none";
   const bilibiliCard = document.getElementById("bilibiliCard");
@@ -301,10 +301,9 @@ function renderPageCredentialShortcut() {
   const discord = document.getElementById("discordConfigShortcut");
   const youtube = document.getElementById("youtubeApiKeyShortcut");
   if (!discord || !youtube) return;
-  const showDiscord = activePage === "discord";
-  const showYoutube = activePage === "youtube";
-  discord.hidden = !showDiscord;
-  youtube.hidden = !showYoutube;
+  const detailOpen = document.getElementById("chainDetailModal")?.style.display === "flex";
+  discord.hidden = activePage !== "discord" || !detailOpen;
+  youtube.hidden = activePage !== "youtube" || !detailOpen;
   const discordHealthy = !!(latestStatus && latestStatus.running === true
     && latestStatus.health && latestStatus.health.discord === true);
   discord.dataset.state = discordHealthy ? "on" : "neutral";
@@ -321,7 +320,7 @@ function renderChainStatusShortcut() {
   if (!button) return;
 
   const pages = {
-    discord: {kind: "backfill", target: "backfillCard"},
+    discord: {kind: "discord", name: "Discord", target: "discordUpstreamCard"},
     x: {kind: "rss", name: "X", badge: "xrssBadge", summary: "xrssSummary", target: "xrssCard"},
     bilibili: {kind: "rss", name: "Bilibili", badge: "bilibiliBadge", summary: "bilibiliSummary", target: "bilibiliCard"},
     youtube: {kind: "rss", name: "YouTube", badge: "youtubeBadge", summary: "youtubeSummary", target: "youtubeCard"},
@@ -336,11 +335,20 @@ function renderChainStatusShortcut() {
   button.hidden = false;
   button.dataset.target = page.target;
   button.setAttribute("aria-controls", page.target);
-  if (page.kind === "backfill") {
-    button.dataset.state = backfillUnknown ? "warn" : (backfillTotal > 0 || backfillScanning ? "pending" : "neutral");
-    button.innerHTML = mcIcon("history-anticlockwise", 18);
-    button.title = "Discord 离线补发 · 当前账号 " + backfillStatusText + " · 点击查看设置";
-    button.setAttribute("aria-label", "打开 Discord 离线补发详情");
+  if (page.kind === "discord") {
+    const badge = document.getElementById("discordUpstreamBadge");
+    const health = latestStatus?.health;
+    const state = !latestStatus || !latestStatus.running ? "neutral" : !health ? "warn" : health.discord ? "on" : "warn";
+    const label = !latestStatus ? "状态未知" : !latestStatus.running ? "机器人未运行" : !health ? "等待连接状态" : health.discord ? "Gateway 已连接" : health.discord_connecting ? "Gateway 连接中" : "Gateway 未连接";
+    badge.className = "badge " + state;
+    badge.textContent = label;
+    const summary = document.getElementById("discordUpstreamSummary");
+    if (summary) {
+      const channels = settings && Array.isArray(settings.discord_channels) ? enabledTotal("discord_channels") : null;
+      summary.textContent = channels ? "启用频道 " + channels.enabled + " / 配置 " + channels.total + " · 未逐频道检测" : "频道配置尚未读取";
+    }
+    button.dataset.state = state;
+    button.title = "Discord 上游 · " + label;
   } else if (page.kind === "steam") {
     const status = document.getElementById(page.status);
     const badge = document.getElementById("steamBadge");
@@ -348,7 +356,7 @@ function renderChainStatusShortcut() {
     button.dataset.state = ["on", "off", "warn", "pending", "neutral"].find(function (state) {
       return badge && badge.classList.contains(state);
     }) || status?.dataset.state || "neutral";
-    button.innerHTML = mcIcon(page.icon, 18);
+    button.innerHTML = mcIcon("cloud-download", 18);
     button.title = page.name + "：" + statusText + " · 点击查看状态和设置";
     button.setAttribute("aria-label", "打开 Steam 运行状态详情");
   } else {
@@ -364,12 +372,21 @@ function renderChainStatusShortcut() {
       state = "warn";
     }
     button.dataset.state = state;
-    button.innerHTML = mcIcon("rss", 18);
-    const detail = [page.name + " RSS：" + badgeText, badge && (badge.title || badge.dataset.wrelayTitle), summary && summary.textContent.trim()]
+    button.innerHTML = mcIcon("cloud-download", 18);
+    const detail = [page.name + " 上游：" + badgeText, badge && (badge.title || badge.dataset.wrelayTitle), summary && summary.textContent.trim()]
       .filter(Boolean).join("；");
     button.title = detail + " · 点击查看状态和设置";
-    button.setAttribute("aria-label", "打开" + page.name + " RSS 状态详情");
+    button.setAttribute("aria-label", "打开" + page.name + " 上游状态详情");
   }
+  if (page.kind !== "discord" && button.dataset.state === "on") {
+    const summary = document.getElementById(page.summary || page.status);
+    if (!summary || !summary.textContent.includes("上次轮询") || summary.textContent.includes("上次轮询 —")) {
+      button.dataset.state = "pending";
+      button.title = page.name + " 上游 · 等待首次轮询";
+    }
+  }
+  button.innerHTML = mcIcon("cloud-download", 18);
+  button.setAttribute("aria-label", page.name + " 上游状态：" + (button.title || "状态未知"));
 }
 
 let chainDetailPlaceholder = null;
@@ -383,6 +400,7 @@ function openChainDetailModal(cardId) {
   const title = document.getElementById("chainDetailTitle");
   if (!card || !overlay || !body || !title) return;
 
+  renderChainStatusShortcut();
   const heading = card.querySelector(":scope > h2");
   title.textContent = heading ? heading.textContent.trim() : "链路详情";
   chainDetailPlaceholder = document.createComment("Chain detail card position");
@@ -392,6 +410,7 @@ function openChainDetailModal(cardId) {
   card.style.display = "";
   body.replaceChildren(card);
   overlay.style.display = "flex";
+  renderPageCredentialShortcut();
   overlay.querySelector(".modal-x")?.focus();
 }
 
@@ -412,6 +431,7 @@ function closeChainDetailModal() {
   }
   chainDetailCard = null;
   chainDetailPlaceholder = null;
+  renderPageCredentialShortcut();
 }
 
 const chainStatusShortcut = document.getElementById("chainStatusShortcut");
@@ -1240,6 +1260,7 @@ function renderStatus(st) {
     setOverviewRouteStatus(overviewQQ, "未连接", selectedBot ? "当前 QQ Bot" : "QQ Bot", "warn");
   }
   renderPageCredentialShortcut();
+  renderChainStatusShortcut();
 }
 
 function setOverviewRouteStatus(target, label, detail, state) {
@@ -1282,15 +1303,6 @@ function renderAutostart(btn, on) {
   btn.setAttribute("aria-label", btn.dataset.tooltip);
   btn.setAttribute("aria-pressed", on ? "true" : "false");
   btn.disabled = false;
-}
-
-// 离线补发开关按钮：胶囊式（文字在左、轨道在右），data-on 记录状态供点击切换
-function renderBackfillToggle(on) {
-  const btn = document.getElementById("btnBackfillToggle");
-  if (!btn) return;
-  btn.dataset.on = on ? "1" : "0";
-  btn.setAttribute("aria-checked", on ? "true" : "false");
-  btn.innerHTML = pillSwitchMarkup("启用补发", on);
 }
 
 function renderFailureNotificationToggle(on) {
@@ -1336,21 +1348,161 @@ const SCHEDULED_TARGET_MODES = ["groups", "forward_group", "all"];
 const SCHEDULED_TARGET_LABELS = { groups: "指定群", forward_group: "转发组", all: "全部群" };
 
 let scheduledMessageDraft = null;
+let scheduledMessageEditorMode = "edit";
 let scheduledMessageId = 0;
-// 折叠状态只影响当前编辑会话（按消息 id 记录），不写入 settings。
-const scheduledCollapsed = new Set();
+let scheduledMessageGroupsDraft = [];
+let activeScheduledMessageGroupId = null;
+let scheduledMessageTargetPickerOpen = false;
+
+function activeScheduledMessageGroup() {
+  return scheduledMessageGroupsDraft.find(function (group) {
+    return String(group.id) === String(activeScheduledMessageGroupId);
+  }) || scheduledMessageGroupsDraft[0] || null;
+}
+
+function scheduledMessageGroupTargetSelection(group, qqGroups) {
+  if (!group) return {ids: [], dynamicLabel: ""};
+  if (group.target_mode === "all") {
+    return {
+      ids: qqGroups.map(function (item) { return String(item.openid); }),
+      dynamicLabel: "全部已启用群（动态）",
+    };
+  }
+  if (group.target_mode === "forward_group") {
+    const wanted = new Set((group.forward_groups || []).map(String));
+    const ids = [];
+    (settings.qq_forwarding_groups || []).filter(function (forwardGroup) {
+      return wanted.has(String(forwardGroup.id)) && forwardGroup.enabled !== false;
+    }).forEach(function (forwardGroup) {
+      ids.push.apply(ids, forwardGroup.groups || []);
+    });
+    return {ids: Array.from(new Set(ids.map(String))), dynamicLabel: "跟随 QQ 转发组（动态）"};
+  }
+  return {ids: (group.target_groups || []).map(String), dynamicLabel: ""};
+}
+
+function normalizeScheduledMessageGroups(config) {
+  const value = config || {};
+  if (Array.isArray(value.message_groups) && value.message_groups.length) {
+    return value.message_groups.map(function (raw, index) {
+      const group = Object.assign({id: "scheduled-group-" + (index + 1), name: "消息组" + (index + 1), enabled: true, target_groups: [], messages: []}, raw || {});
+      group.id = String(group.id || "scheduled-group-" + (index + 1));
+      group.name = String(group.name || ("消息组" + (index + 1)));
+      group.target_mode = SCHEDULED_TARGET_MODES.includes(group.target_mode) ? group.target_mode : "groups";
+      group.target_groups = Array.isArray(group.target_groups) ? group.target_groups.map(String).filter(Boolean) : [];
+      group.forward_groups = Array.isArray(group.forward_groups) ? group.forward_groups.map(String).filter(Boolean) : [];
+      group.messages = normalizeScheduledMessages({messages: Array.isArray(group.messages) ? group.messages : []}).map(function (message) {
+        delete message.target_mode; delete message.target_groups; delete message.forward_groups;
+        return message;
+      });
+      return group;
+    });
+  }
+  const legacyMessages = normalizeScheduledMessages(value);
+  const buckets = new Map();
+  legacyMessages.forEach(function (message) {
+    // 保留旧消息引用 QQ→QQ 转发组或“全部群”的动态路由语义。
+    const mode = message.target_mode || "groups";
+    const key = JSON.stringify([mode, message.target_groups || [], message.forward_groups || []]);
+    if (!buckets.has(key)) buckets.set(key, {id: "legacy-group-" + (buckets.size + 1), name: "消息组" + (buckets.size + 1), enabled: true, target_mode: mode, target_groups: (message.target_groups || []).slice(), forward_groups: (message.forward_groups || []).slice(), messages: []});
+    const clean = Object.assign({}, message);
+    delete clean.target_mode; delete clean.target_groups; delete clean.forward_groups;
+    buckets.get(key).messages.push(clean);
+  });
+  return Array.from(buckets.values());
+}
 
 function pillSwitchMarkup(label, on) {
   // 胶囊开关统一外观：文字在左、轨道在右，与「启用补发」一致（✓/× 图标不再出现在按钮里）。
   return '<span class="pill-switch-label">' + label + '</span><span class="settings-switch-track" aria-hidden="true"></span>';
 }
 
-function renderScheduledMessageToggle(on) {
-  const btn = document.getElementById("btnScheduledMessageToggle");
-  if (!btn) return;
-  btn.dataset.on = on ? "1" : "0";
-  btn.setAttribute("aria-checked", on ? "true" : "false");
-  btn.innerHTML = pillSwitchMarkup("启用定时发送", on);
+function renderScheduledMessageWorkspace() {
+  const group = activeScheduledMessageGroup();
+  const tabs = document.getElementById("scheduledMessageGroupTabs");
+  const list = document.getElementById("scheduledGroupMessageList");
+  const targets = document.getElementById("scheduledGroupTargetList");
+  if (!tabs || !list || !targets) return;
+  const groupTabs = scheduledMessageGroupsDraft.map(function (item) {
+    return '<button type="button" class="fgtab' + (group && String(item.id) === String(group.id) ? ' active' : '') + '" data-scheduled-group="' + escapeHtml(item.id) + '"><span class="fgtab-name">' + escapeHtml(item.name) + '</span></button>';
+  }).join("");
+  const addGroupTab = '<button type="button" class="fgtab-add" id="btnAddScheduledGroupTab" title="添加消息组" aria-label="添加消息组">' + mcIcon("add", 16) + '</button>';
+  const deleteGroupAction = group && scheduledMessageGroupsDraft.length > 1
+    ? '<div class="fgtab-actions"><button type="button" class="fgctrl rowicon fg-delete scheduled-message-group-delete" data-delete-scheduled-group="' + escapeHtml(group.id) + '" title="删除当前消息组" aria-label="删除当前消息组">' + SVG_TRASH + '</button></div>'
+    : '';
+  tabs.innerHTML = '<div class="fgtab-list">' + groupTabs + addGroupTab + deleteGroupAction + '</div>';
+  const messageCount = scheduledMessageGroupsDraft.reduce(function (sum, item) { return sum + (item.messages || []).length; }, 0);
+  const summary = document.getElementById("scheduledMessageSummary");
+  if (summary) summary.textContent = "共 " + scheduledMessageGroupsDraft.length + " 个消息组，" + messageCount + " 条消息";
+  const allEnabled = document.getElementById("scheduledMessageAllEnabled");
+  const currentMessages = group ? (group.messages || []) : [];
+  if (allEnabled) {
+    const count = currentMessages.filter(function (message) { return message.enabled !== false; }).length;
+    allEnabled.disabled = !currentMessages.length;
+    allEnabled.checked = !!currentMessages.length && count === currentMessages.length;
+    allEnabled.indeterminate = count > 0 && count < currentMessages.length;
+  }
+  if (!group) {
+    list.innerHTML = '<tr class="fgempty-row"><td colspan="5" class="fgempty-msg">暂无消息组，点击上方“＋”创建。</td></tr>';
+    targets.innerHTML = '<tr class="fgempty-row"><td colspan="6" class="fgempty-msg">选择一个消息组管理接收群。</td></tr>';
+    return;
+  }
+  const messages = group.messages || [];
+  list.innerHTML = messages.length ? messages.map(function (message, index) {
+    const schedule = message.schedule_type === "once"
+      ? formatScheduledDateTime(message.once_at) + (message.execution_status === "sent" ? " · 已执行" : message.execution_status === "missed" ? " · 已错过" : " · 待发送")
+      : message.schedule_type === "calendar"
+      ? ({weekly:"每周", monthly:"每月", yearly:"每年"}[message.calendar_type] || "日历计划") + " " + (message.send_time || "09:00")
+      : "每隔 " + ([message.interval_days ? message.interval_days + "日" : "", message.interval_hours ? message.interval_hours + "时" : "", message.interval_minutes ? message.interval_minutes + "分" : ""].filter(Boolean).join(" ") || "1分");
+    const summaryText = (message.content || "（纯图片消息）").replace(/\s+/g, " ").trim();
+    return '<tr data-id="' + escapeHtml(String(message.id || ("message-" + index))) + '"><td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td><td style="text-align:center"><input type="checkbox" class="scheduled-message-enabled" data-message-index="' + index + '" aria-label="启用消息 ' + (index + 1) + '"' + (message.enabled !== false ? ' checked' : '') + '></td><td><div class="scheduled-group-message-copy"><strong>' + escapeHtml(summaryText.slice(0, 100)) + '</strong><small>' + (message.image_data ? '附图' : '') + '</small></div></td><td>' + escapeHtml(schedule) + '</td><td><div class="table-actions"><button type="button" class="sec rowicon scheduled-group-message-edit" data-message-index="' + index + '" title="编辑消息" aria-label="编辑消息">' + SVG_PEN + '</button><button type="button" class="danger rowicon scheduled-group-message-remove" data-message-index="' + index + '" title="删除消息" aria-label="删除消息">' + SVG_TRASH + '</button></div></td></tr>';
+  }).join("") : '<tr class="fgempty-row"><td colspan="5" class="fgempty-msg">这个消息组还没有定时消息。</td></tr>';
+
+  const allQQGroups = settings && Array.isArray(settings.qq_group_openids) ? settings.qq_group_openids : [];
+  const qqGroups = allQQGroups.filter(groupInActiveQQBotWorkspace);
+  const targetSelection = scheduledMessageGroupTargetSelection(group, qqGroups);
+  const selected = targetSelection.ids;
+  const dynamicLabel = targetSelection.dynamicLabel;
+  const byId = new Map(qqGroups.map(function (item) { return [String(item.openid), item]; }));
+  const names = selected.map(function (id) {
+    const item = byId.get(String(id));
+    const name = item ? (item.name || item.remark || id) : id;
+    const targetIndex = item ? allQQGroups.indexOf(item) : -1;
+    const removeAction = group.target_mode === "groups"
+      ? '<button type="button" class="danger rowicon scheduled-group-target-remove" data-target-openid="' + escapeHtml(String(id)) + '" title="移出当前消息组" aria-label="移出当前消息组">' + SVG_TRASH + '</button>' : '';
+    const dragHandle = group.target_mode === "groups" ? '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' : '<td></td>';
+    const editAction = item ? '<button type="button" class="sec rowicon" data-kind="groupEdit" data-id="' + escapeHtml(String(id)) + '" title="编辑群资料" aria-label="编辑群资料">' + SVG_PEN + '</button>' : '';
+    const enableCheckbox = '<input type="checkbox" data-kind="group" data-i="' + targetIndex + '" aria-label="启用群 ' + escapeHtml(name) + '"' + (targetIndex < 0 ? ' disabled' : '') + (item && item.enabled === true ? ' checked' : '') + '>';
+    return '<tr data-id="' + escapeHtml(String(id)) + '">' + dragHandle + '<td style="text-align:center">' + enableCheckbox + '</td><td>' + escapeHtml(name) + '</td><td>' + escapeHtml(item && item.qq_id || '—') + '</td><td>' + renderIdCell(String(id)) + '</td><td><div class="table-actions">' + editAction + removeAction + '</div></td></tr>';
+  }).join("");
+  targets.innerHTML = (dynamicLabel ? '<tr class="scheduled-group-target-mode"><td colspan="6">' + escapeHtml(dynamicLabel) + '</td></tr>' : '') + (names || '<tr class="fgempty-row"><td colspan="6" class="fgempty-msg">尚未选择 QQ 群。</td></tr>');
+  syncHeaderAll("scheduledGroupTargetsAllEnabled", selected.map(function (id) { return byId.get(String(id)); }).filter(Boolean), "enabled");
+}
+
+async function saveScheduledMessageGroups() {
+  const selectedGroupId = activeScheduledMessageGroupId;
+  const current = settings.scheduled_message || {};
+  const groups = scheduledMessageGroupsDraft.map(function (group) {
+    return Object.assign({}, group, {messages: (group.messages || []).map(function (message) {
+      return Object.assign({}, message, {
+        image_name: typeof message.image_data === "string" && message.image_data && typeof message.image_name === "string" ? message.image_name : "",
+      });
+    })});
+  });
+  settings.scheduled_message = Object.assign({}, current, {
+    content: "",
+    messages: [],
+    message_groups: groups,
+  });
+  delete settings.scheduled_message.enabled;
+  const saved = await saveAndReload();
+  if (saved) {
+    scheduledMessageGroupsDraft = normalizeScheduledMessageGroups(settings.scheduled_message);
+    activeScheduledMessageGroupId = scheduledMessageGroupsDraft.some(function (group) { return String(group.id) === String(selectedGroupId); })
+      ? selectedGroupId : (scheduledMessageGroupsDraft[0] ? scheduledMessageGroupsDraft[0].id : null);
+    renderScheduledMessageWorkspace();
+  }
+  return saved;
 }
 
 function scheduledLocalDateTimeValue() {
@@ -1359,10 +1511,400 @@ function scheduledLocalDateTimeValue() {
   return new Date(now.getTime() - offset * 60000).toISOString().slice(0, 16);
 }
 
+function scheduledPickerPad(value) { return String(value).padStart(2, "0"); }
+
+function scheduledPickerDateKey(date) {
+  return date.getFullYear() + "-" + scheduledPickerPad(date.getMonth() + 1) + "-" + scheduledPickerPad(date.getDate());
+}
+
+function scheduledPickerParts(kind, value) {
+  const now = new Date();
+  const parts = {year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate(), hour: 9, minute: 0};
+  const match = kind === "time"
+    ? /^(\d{2}):(\d{2})$/.exec(value || "")
+    : /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value || "");
+  if (!match) return parts;
+  if (kind === "time") {
+    parts.hour = Number(match[1]);
+    parts.minute = Number(match[2]);
+  } else {
+    parts.year = Number(match[1]);
+    parts.month = Number(match[2]);
+    parts.day = Number(match[3]);
+    parts.hour = Number(match[4]);
+    parts.minute = Number(match[5]);
+  }
+  return parts;
+}
+
+function formatScheduledDateTime(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value || "");
+  if (match) return match[1] + "/" + match[2] + "/" + match[3] + " " + match[4] + ":" + match[5];
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");
+  return dateOnly ? dateOnly[1] + "/" + dateOnly[2] + "/" + dateOnly[3] : "未设置时间";
+}
+
+function scheduledDatePickerMarkup(fieldName, kind, accessibleName) {
+  const icon = kind === "time" ? SVG_SCHEDULE_CLOCK : SVG_SCHEDULE_CALENDAR;
+  return '<div class="scheduled-date-picker" data-picker-kind="' + kind + '">' +
+    '<input type="hidden" data-field="' + fieldName + '">' +
+    '<button type="button" class="sec scheduled-date-picker-trigger" aria-label="' + accessibleName + '" aria-haspopup="dialog" aria-expanded="false"><span class="scheduled-date-picker-value"></span>' + icon + '</button>' +
+    '<div class="scheduled-date-picker-popover" data-picker-kind="' + kind + '" role="dialog" aria-label="' + accessibleName + '" hidden></div>' +
+    '</div>';
+}
+
+function updateScheduledDatePickerDisplay(picker) {
+  const field = picker.querySelector('input[data-field]');
+  const value = picker.querySelector(".scheduled-date-picker-value");
+  if (!field || !value) return;
+  value.textContent = picker.dataset.pickerKind === "time"
+    ? (field.value || "选择时间")
+    : formatScheduledDateTime(field.value).replace("未设置时间", "选择日期和时间");
+}
+
+function renderScheduledDatePicker(picker, focusSelector) {
+  const popover = picker._scheduledDatePickerPopover || picker.querySelector(".scheduled-date-picker-popover");
+  const field = picker.querySelector('input[data-field]');
+  if (!popover || !field) return;
+  const kind = picker.dataset.pickerKind;
+  const value = field.value || "";
+  const parts = scheduledPickerParts(kind, value);
+  const year = picker.dataset.viewYear !== undefined ? Number(picker.dataset.viewYear) : parts.year;
+  const month = picker.dataset.viewMonth !== undefined ? Number(picker.dataset.viewMonth) : parts.month - 1;
+  picker.dataset.viewYear = String(year);
+  picker.dataset.viewMonth = String(month);
+  const selectedDateKey = kind === "datetime" && value ? value.slice(0, 10) : "";
+  const todayKey = scheduledPickerDateKey(new Date());
+  const monthStart = new Date(year, month, 1);
+  const firstCell = new Date(year, month, 1 - ((monthStart.getDay() + 6) % 7));
+  const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
+  const calendar = kind === "datetime"
+    ? '<div class="scheduled-date-picker-calendar">' +
+      '<div class="scheduled-date-picker-month"><button type="button" class="sec" data-picker-action="previous-month" aria-label="上个月">' + mcIcon("right", 14) + '</button>' +
+      '<strong>' + year + "年" + (month + 1) + '月</strong>' +
+      '<button type="button" class="sec" data-picker-action="next-month" aria-label="下个月">' + mcIcon("right", 14) + '</button></div>' +
+      '<div class="scheduled-date-picker-weekdays">' + weekdays.map(function (day) { return "<span>" + day + "</span>"; }).join("") + '</div>' +
+      '<div class="scheduled-date-picker-days">' + Array.from({length: 42}, function (_, index) {
+        const date = new Date(firstCell.getFullYear(), firstCell.getMonth(), firstCell.getDate() + index);
+        const dateKey = scheduledPickerDateKey(date);
+        const classes = ["scheduled-date-picker-day"];
+        if (date.getMonth() !== month) classes.push("outside-month");
+        if (dateKey === todayKey) classes.push("is-today");
+        if (dateKey === selectedDateKey) classes.push("is-selected");
+        return '<button type="button" class="' + classes.join(" ") + '" data-picker-date="' + dateKey + '" aria-label="' + date.getFullYear() + "年" + (date.getMonth() + 1) + "月" + date.getDate() + '日" aria-pressed="' + String(dateKey === selectedDateKey) + '">' + date.getDate() + '</button>';
+      }).join("") + '</div><div class="scheduled-date-picker-calendar-actions"><button type="button" class="sec" data-picker-action="clear-date">清除</button><button type="button" class="sec" data-picker-action="today">今天</button></div></div>'
+    : '';
+  const renderTimeColumn = function (part, count, selected) {
+    return '<div class="scheduled-date-picker-time-column"><span>' + (part === "hour" ? "时" : "分") + '</span><div class="scheduled-date-picker-time-list" data-time-list="' + part + '">' +
+      Array.from({length: count}, function (_, index) {
+        const valueText = scheduledPickerPad(index);
+        const active = index === selected;
+        return '<button type="button" data-picker-part="' + part + '" data-picker-value="' + valueText + '" aria-pressed="' + String(active) + '"' + (active ? ' class="is-selected"' : '') + '>' + valueText + '</button>';
+      }).join("") + '</div></div>';
+  };
+  popover.innerHTML = (kind === "time" ? '<div class="scheduled-date-picker-time-title">选择发送时间</div>' : '') +
+    '<div class="scheduled-date-picker-popover-content">' + calendar +
+    '<div class="scheduled-date-picker-time">' + renderTimeColumn("hour", 24, parts.hour) + renderTimeColumn("minute", 60, parts.minute) + '</div></div>';
+  popover.querySelectorAll(".scheduled-date-picker-time-list").forEach(function (list) {
+    const selected = list.querySelector(".is-selected");
+    if (selected) list.scrollTop = Math.max(0, selected.offsetTop - (list.clientHeight - selected.offsetHeight) / 2);
+  });
+  if (focusSelector) {
+    const target = popover.querySelector(focusSelector);
+    if (target) target.focus({preventScroll: true});
+  }
+}
+
+function placeScheduledDatePicker(picker) {
+  const popover = picker && picker._scheduledDatePickerPopover;
+  const trigger = picker && picker.querySelector(".scheduled-date-picker-trigger");
+  if (!popover || !trigger) return;
+  const rect = trigger.getBoundingClientRect();
+  const gap = 6;
+  const edge = 12;
+  const width = popover.offsetWidth;
+  const height = popover.offsetHeight;
+  const left = Math.max(edge, Math.min(rect.left, window.innerWidth - width - edge));
+  let top = rect.bottom + gap;
+  if (top + height > window.innerHeight - edge) top = Math.max(edge, rect.top - height - gap);
+  popover.style.left = left + "px";
+  popover.style.top = top + "px";
+}
+
+function closeScheduledDatePicker(picker) {
+  if (!picker) return;
+  const popover = picker._scheduledDatePickerPopover;
+  const marker = picker._scheduledDatePickerMarker;
+  picker.classList.remove("is-open");
+  const trigger = picker.querySelector(".scheduled-date-picker-trigger");
+  if (trigger) trigger.setAttribute("aria-expanded", "false");
+  if (popover) {
+    popover.hidden = true;
+    popover.style.left = "";
+    popover.style.top = "";
+    if (marker && marker.parentNode) {
+      marker.parentNode.insertBefore(popover, marker);
+      marker.remove();
+    } else {
+      popover.remove();
+    }
+  }
+  picker._scheduledDatePickerPopover = null;
+  picker._scheduledDatePickerMarker = null;
+}
+
+function closeAllScheduledDatePickers() {
+  document.querySelectorAll(".scheduled-date-picker.is-open").forEach(closeScheduledDatePicker);
+  closeAllScheduledWeekdayPickers();
+}
+
+function openScheduledDatePicker(picker) {
+  if (picker.classList.contains("is-open")) {
+    closeScheduledDatePicker(picker);
+    return;
+  }
+  closeAllScheduledDatePickers();
+  const popover = picker.querySelector(".scheduled-date-picker-popover");
+  const trigger = picker.querySelector(".scheduled-date-picker-trigger");
+  const modal = picker.closest("#scheduledMessageContentModal");
+  if (!popover || !trigger || !modal) return;
+  const marker = document.createComment("scheduled-date-picker");
+  popover.parentNode.insertBefore(marker, popover);
+  picker._scheduledDatePickerPopover = popover;
+  picker._scheduledDatePickerMarker = marker;
+  modal.appendChild(popover);
+  picker.classList.add("is-open");
+  trigger.setAttribute("aria-expanded", "true");
+  const field = picker.querySelector('input[data-field]');
+  const parts = scheduledPickerParts(picker.dataset.pickerKind, field && field.value);
+  picker.dataset.viewYear = String(parts.year);
+  picker.dataset.viewMonth = String(parts.month - 1);
+  popover.hidden = false;
+  if (!popover.dataset.bound) {
+    popover.dataset.bound = "1";
+    popover.addEventListener("click", function (event) {
+      const button = event.target.closest("button[data-picker-action], button[data-picker-date], button[data-picker-part]");
+      if (!button || !picker.classList.contains("is-open")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const currentField = picker.querySelector('input[data-field]');
+      const currentKind = picker.dataset.pickerKind;
+      const currentValue = currentField.value || "";
+      const current = scheduledPickerParts(currentKind, currentValue);
+      const action = button.dataset.pickerAction;
+      let focusSelector = "";
+      if (action === "previous-month" || action === "next-month") {
+        const shift = action === "previous-month" ? -1 : 1;
+        const next = new Date(Number(picker.dataset.viewYear), Number(picker.dataset.viewMonth) + shift, 1);
+        picker.dataset.viewYear = String(next.getFullYear());
+        picker.dataset.viewMonth = String(next.getMonth());
+        focusSelector = '[data-picker-action="' + action + '"]';
+      } else if (action === "clear-date") {
+        currentField.value = "";
+        focusSelector = '[data-picker-action="clear-date"]';
+      } else if (action === "today") {
+        const today = new Date();
+        const dateKey = scheduledPickerDateKey(today);
+        currentField.value = dateKey + "T" + scheduledPickerPad(current.hour) + ":" + scheduledPickerPad(current.minute);
+        picker.dataset.viewYear = String(today.getFullYear());
+        picker.dataset.viewMonth = String(today.getMonth());
+        focusSelector = '[data-picker-action="today"]';
+      } else if (button.dataset.pickerDate) {
+        const dateKey = button.dataset.pickerDate;
+        currentField.value = dateKey + "T" + scheduledPickerPad(current.hour) + ":" + scheduledPickerPad(current.minute);
+        picker.dataset.viewYear = dateKey.slice(0, 4);
+        picker.dataset.viewMonth = String(Number(dateKey.slice(5, 7)) - 1);
+        focusSelector = '[data-picker-date="' + dateKey + '"]';
+      } else if (button.dataset.pickerPart) {
+        const part = button.dataset.pickerPart;
+        const chosen = Number(button.dataset.pickerValue);
+        if (part === "hour") current.hour = chosen;
+        if (part === "minute") current.minute = chosen;
+        if (currentKind === "time") {
+          currentField.value = scheduledPickerPad(current.hour) + ":" + scheduledPickerPad(current.minute);
+        } else if (currentValue) {
+          currentField.value = currentValue.slice(0, 10) + "T" + scheduledPickerPad(current.hour) + ":" + scheduledPickerPad(current.minute);
+        } else {
+          currentField.value = scheduledPickerDateKey(new Date()) + "T" + scheduledPickerPad(current.hour) + ":" + scheduledPickerPad(current.minute);
+        }
+        focusSelector = '[data-picker-part="' + part + '"][data-picker-value="' + scheduledPickerPad(chosen) + '"]';
+      }
+      updateScheduledDatePickerDisplay(picker);
+      currentField.dispatchEvent(new Event("change", {bubbles: true}));
+      renderScheduledDatePicker(picker, focusSelector);
+      placeScheduledDatePicker(picker);
+    });
+  }
+  renderScheduledDatePicker(picker);
+  placeScheduledDatePicker(picker);
+}
+
+function refreshScheduledDatePickerDisplays(root) {
+  (root || document).querySelectorAll(".scheduled-date-picker").forEach(updateScheduledDatePickerDisplay);
+}
+
+function scheduledWeekdayPickerMarkup() {
+  const weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  return '<div class="scheduled-message-weekday-picker">' +
+    '<button type="button" class="scheduled-message-entry-select scheduled-message-weekday-trigger" aria-haspopup="dialog" aria-expanded="false"><span class="scheduled-message-weekday-value">选择星期</span>' + mcIcon("right", 14) + '</button>' +
+    '<div class="scheduled-message-weekday-popover" role="dialog" aria-label="选择发送星期" hidden>' +
+    '<strong>选择星期</strong><div class="scheduled-message-weekday-options">' + weekdays.map(function (label, day) {
+      return '<label><input type="checkbox" data-field="weekday" value="' + day + '"><span>' + label + '</span></label>';
+    }).join("") + '</div></div></div>';
+}
+
+function updateScheduledWeekdayPickerDisplay(picker) {
+  const value = picker && picker.querySelector(".scheduled-message-weekday-value");
+  const popover = picker && (picker._scheduledWeekdayPopover || picker.querySelector(".scheduled-message-weekday-popover"));
+  if (!value || !popover) return;
+  const names = Array.from(popover.querySelectorAll('[data-field="weekday"]:checked')).map(function (field) {
+    return field.nextElementSibling ? field.nextElementSibling.textContent : "";
+  }).filter(Boolean);
+  value.textContent = names.length === 7 ? "每天" : names.length > 2 ? names.length + " 天已选" : names.join("、") || "选择星期";
+  const trigger = picker.querySelector(".scheduled-message-weekday-trigger");
+  if (trigger) trigger.setAttribute("aria-label", names.length ? "发送星期：" + names.join("、") : "选择发送星期");
+}
+
+function placeScheduledWeekdayPicker(picker) {
+  const popover = picker && picker._scheduledWeekdayPopover;
+  const trigger = picker && picker.querySelector(".scheduled-message-weekday-trigger");
+  if (!popover || !trigger) return;
+  const rect = trigger.getBoundingClientRect();
+  const edge = 12;
+  const gap = 6;
+  const width = popover.offsetWidth;
+  const height = popover.offsetHeight;
+  const left = Math.max(edge, Math.min(rect.left, window.innerWidth - width - edge));
+  let top = rect.bottom + gap;
+  if (top + height > window.innerHeight - edge) top = Math.max(edge, rect.top - height - gap);
+  popover.style.left = left + "px";
+  popover.style.top = top + "px";
+}
+
+function closeScheduledWeekdayPicker(picker) {
+  if (!picker) return;
+  const popover = picker._scheduledWeekdayPopover;
+  const marker = picker._scheduledWeekdayMarker;
+  picker.classList.remove("is-open");
+  picker.querySelector(".scheduled-message-weekday-trigger")?.setAttribute("aria-expanded", "false");
+  if (popover) {
+    popover.hidden = true;
+    popover.style.left = "";
+    popover.style.top = "";
+    if (marker && marker.parentNode) {
+      marker.parentNode.insertBefore(popover, marker);
+      marker.remove();
+    } else {
+      popover.remove();
+    }
+  }
+  picker._scheduledWeekdayPopover = null;
+  picker._scheduledWeekdayMarker = null;
+}
+
+function closeAllScheduledWeekdayPickers() {
+  document.querySelectorAll(".scheduled-message-weekday-picker.is-open").forEach(closeScheduledWeekdayPicker);
+}
+
+function openScheduledWeekdayPicker(picker) {
+  if (!picker) return;
+  if (picker.classList.contains("is-open")) {
+    closeScheduledWeekdayPicker(picker);
+    return;
+  }
+  closeAllScheduledDatePickers();
+  const popover = picker.querySelector(".scheduled-message-weekday-popover");
+  const trigger = picker.querySelector(".scheduled-message-weekday-trigger");
+  const modal = picker.closest("#scheduledMessageContentModal");
+  if (!popover || !trigger || !modal) return;
+  const marker = document.createComment("scheduled-weekday-picker");
+  popover.parentNode.insertBefore(marker, popover);
+  picker._scheduledWeekdayPopover = popover;
+  picker._scheduledWeekdayMarker = marker;
+  modal.appendChild(popover);
+  picker.classList.add("is-open");
+  trigger.setAttribute("aria-expanded", "true");
+  popover.hidden = false;
+  updateScheduledWeekdayPickerDisplay(picker);
+  if (!popover.dataset.bound) {
+    popover.dataset.bound = "1";
+    popover.addEventListener("change", function (event) {
+      if (event.target.dataset.field !== "weekday") return;
+      updateScheduledWeekdayPickerDisplay(picker);
+      scheduledMessageDraft = readScheduledMessageEditor();
+    });
+  }
+  placeScheduledWeekdayPicker(picker);
+}
+
+function ensureScheduledImagePreview() {
+  const modal = document.getElementById("scheduledMessageContentModal");
+  if (!modal) return null;
+  let preview = modal.querySelector(".scheduled-message-image-preview");
+  if (!preview) {
+    preview = document.createElement("div");
+    preview.className = "scheduled-message-image-preview";
+    preview.setAttribute("role", "tooltip");
+    preview.hidden = true;
+    preview.innerHTML = '<img alt="">';
+    preview.addEventListener("pointerout", function (event) {
+      if (preview.contains(event.relatedTarget) || (preview._anchor && preview._anchor.contains(event.relatedTarget))) return;
+      closeScheduledImagePreview();
+    });
+    modal.appendChild(preview);
+  }
+  return preview;
+}
+
+function placeScheduledImagePreview(anchor, preview) {
+  if (!anchor || !preview) return;
+  const rect = anchor.getBoundingClientRect();
+  const edge = 12;
+  const gap = 8;
+  const width = preview.offsetWidth;
+  const height = preview.offsetHeight;
+  const left = Math.max(edge, Math.min(rect.left, window.innerWidth - width - edge));
+  let top = rect.bottom + gap;
+  if (top + height > window.innerHeight - edge) top = Math.max(edge, rect.top - height - gap);
+  preview.style.left = left + "px";
+  preview.style.top = top + "px";
+}
+
+function openScheduledImagePreview(anchor) {
+  const index = Number(anchor && anchor.dataset.messageIndex);
+  const message = scheduledMessageDraft && scheduledMessageDraft[index];
+  if (!message || !message.image_data) return;
+  const preview = ensureScheduledImagePreview();
+  const image = preview && preview.querySelector("img");
+  if (!preview || !image) return;
+  image.onload = function () { placeScheduledImagePreview(anchor, preview); };
+  image.src = message.image_data;
+  image.alt = message.image_name || "定时消息图片预览";
+  preview.hidden = false;
+  preview._anchor = anchor;
+  placeScheduledImagePreview(anchor, preview);
+}
+
+function closeScheduledImagePreview() {
+  const preview = document.querySelector(".scheduled-message-image-preview");
+  if (!preview) return;
+  const image = preview.querySelector("img");
+  if (image) {
+    image.onload = null;
+    image.removeAttribute("src");
+    image.alt = "";
+  }
+  preview.hidden = true;
+  preview.style.left = "";
+  preview.style.top = "";
+  preview._anchor = null;
+}
+
 function newScheduledMessage() {
   scheduledMessageId += 1;
   return {
     id: "message-" + Date.now() + "-" + scheduledMessageId,
+    enabled: true,
     content: "",
     image_data: "",
     image_name: "",
@@ -1371,6 +1913,9 @@ function newScheduledMessage() {
     target_groups: [],
     forward_groups: [],
     schedule_type: "interval",
+    once_at: scheduledLocalDateTimeValue(),
+    completed_at: "",
+    execution_status: "",
     interval_days: 1,
     interval_hours: 0,
     interval_minutes: 0,
@@ -1391,17 +1936,21 @@ function normalizeScheduledMessages(config) {
       const message = Object.assign(newScheduledMessage(), raw || {});
       message.id = String(message.id || "message-" + (index + 1));
       message.content = String(message.content || "");
+      message.image_name = typeof message.image_data === "string" && message.image_data && typeof message.image_name === "string" ? message.image_name : "";
       message.target_mode = SCHEDULED_TARGET_MODES.includes(message.target_mode)
         ? message.target_mode : "groups";
       message.target_groups = Array.isArray(message.target_groups)
         ? message.target_groups.map(String).filter(Boolean) : [];
       message.forward_groups = Array.isArray(message.forward_groups)
         ? message.forward_groups.map(String).filter(Boolean) : [];
-      message.schedule_type = message.schedule_type === "calendar" ? "calendar" : "interval";
+      message.schedule_type = ["interval", "calendar", "once"].includes(message.schedule_type) ? message.schedule_type : "interval";
       message.interval_days = Math.max(0, Math.min(3650, Number(message.interval_days) || 0));
       message.interval_hours = Math.max(0, Math.min(23, Number(message.interval_hours) || 0));
       message.interval_minutes = Math.max(0, Math.min(59, Number(message.interval_minutes) || 0));
       message.anchor_at = typeof message.anchor_at === "string" ? message.anchor_at : scheduledLocalDateTimeValue();
+      message.once_at = typeof message.once_at === "string" ? message.once_at : scheduledLocalDateTimeValue();
+      message.completed_at = typeof message.completed_at === "string" ? message.completed_at : "";
+      message.execution_status = ["sent", "missed"].includes(message.execution_status) ? message.execution_status : "";
       message.calendar_type = ["weekly", "monthly", "yearly"].includes(message.calendar_type)
         ? message.calendar_type : "weekly";
       message.weekdays = Array.isArray(message.weekdays)
@@ -1439,62 +1988,43 @@ function normalizeScheduledMessages(config) {
 }
 
 function scheduledOptionMarkup(message, index) {
-  const weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
-  const collapsed = scheduledCollapsed.has(String((message && message.id) || "")) || scheduledCollapsed.has("index:" + index);
-  return '<div class="scheduled-message-entry' + (collapsed ? ' is-collapsed' : '') + '" data-index="' + index + '">' +
-    // 卡片头：序号在左，折叠按钮复用转发组的 .foldbtn，固定在右上角。
-    '<div class="scheduled-message-entry-header">' +
-    '<strong>消息 ' + (index + 1) + '</strong>' +
-    '<button type="button" class="foldbtn scheduled-message-fold' + (collapsed ? ' folded' : '') + '" title="折叠/展开" aria-label="折叠/展开" aria-expanded="' + (collapsed ? "false" : "true") + '">' +
-    mcIcon("down", 10) + '</button></div>' +
+  const dayOptions = Array.from({length: 31}, function (_, index) { return index + 1; });
+  return '<div class="scheduled-message-entry" data-index="' + index + '">' +
     '<div class="scheduled-message-entry-body">' +
     '<label class="scheduled-message-entry-label">消息正文' +
     '<textarea class="scheduled-message-entry-content" data-field="content" maxlength="20000" placeholder="输入消息正文"></textarea></label>' +
     '<div class="scheduled-message-image-row">' +
     '<input type="file" data-field="image_file_input" accept="image/png,image/jpeg,image/gif,image/webp" hidden>' +
-    '<button type="button" class="sec scheduled-message-image-pick">选择图片</button>' +
-    '<button type="button" class="sec scheduled-message-image-remove">移除图片</button>' +
-    '<span class="scheduled-message-image-name"></span>' +
-    '</div>' +
-    '<div class="scheduled-message-entry-row scheduled-message-target-row">' +
-    '<label>发送目标<select class="scheduled-message-entry-select" data-field="target_mode">' +
-    '<option value="groups">指定群</option><option value="forward_group">转发组</option><option value="all">全部群</option></select></label>' +
-    '<span class="scheduled-message-target-summary"></span>' +
-    '<button type="button" class="sec scheduled-message-target-manage">管理</button>' +
+    '<button type="button" class="sec rowicon scheduled-message-image-pick" title="上传图片" aria-label="上传图片">' + mcIcon("upload", 16) + '</button>' +
+    '<button type="button" class="sec rowicon scheduled-message-image-remove" title="移除图片" aria-label="移除图片" hidden>' + SVG_TRASH + '</button>' +
+    '<span class="scheduled-message-image-name" data-message-index="' + index + '" tabindex="0"></span>' +
     '</div>' +
     '<div class="scheduled-message-timing-row">' +
     '<div class="scheduled-message-timing-mode">' +
     '<label>发送方式<select class="scheduled-message-entry-select" data-field="schedule_type">' +
-    '<option value="interval">按间隔发送</option><option value="calendar">按日历发送</option></select></label>' +
+    '<option value="interval">按间隔发送</option><option value="calendar">按日历发送</option><option value="once">按时点发送</option></select></label>' +
     '</div>' +
     '<div class="scheduled-message-interval-fields">' +
-    '<label>基准日期时间<input type="datetime-local" lang="zh-CN" data-field="anchor_at"></label>' +
+    '<label>基准日期时间' + scheduledDatePickerMarkup("anchor_at", "datetime", "选择基准日期和时间") + '</label>' +
     '<div class="scheduled-message-interval-row"><span>每隔</span>' +
     '<label><input type="number" data-field="interval_days" min="0" max="3650" step="1"> 日</label>' +
     '<label><input type="number" data-field="interval_hours" min="0" max="23" step="1"> 时</label>' +
     '<label><input type="number" data-field="interval_minutes" min="0" max="59" step="1"> 分</label></div>' +
     '</div>' +
     '<div class="scheduled-message-calendar-fields">' +
-    '<div class="scheduled-message-entry-row"><label>日历周期<select class="scheduled-message-entry-select" data-field="calendar_type">' +
+    '<label>日历周期<select class="scheduled-message-entry-select" data-field="calendar_type">' +
     '<option value="weekly">每周</option><option value="monthly">每月</option><option value="yearly">每年</option></select></label>' +
-    '<label>发送时间<input type="time" data-field="send_time"></label></div>' +
-    '<div class="scheduled-message-calendar-panel" data-calendar-type="weekly"><span>星期</span><div class="scheduled-message-weekdays">' +
-    weekdays.map(function (label, day) {
-      return '<label><input type="checkbox" data-field="weekday" value="' + day + '">' + label + '</label>';
-    }).join("") + '</div></div>' +
+    '<div class="scheduled-message-calendar-panel scheduled-message-weekday-panel" data-calendar-type="weekly"><label>星期</label>' + scheduledWeekdayPickerMarkup() + '</div>' +
     '<div class="scheduled-message-calendar-panel" data-calendar-type="monthly">' +
-    '<label>每月 <input type="number" data-field="day_of_month" min="1" max="31" step="1"> 号</label></div>' +
+    '<label>每月日期<select data-field="day_of_month">' + dayOptions.map(function (day) { return '<option value="' + day + '">' + day + ' 号</option>'; }).join("") + '</select></label></div>' +
     '<div class="scheduled-message-calendar-panel" data-calendar-type="yearly">' +
-    '<label>每年 <select data-field="month">' + Array.from({length: 12}, function (_, month) {
+    '<label>月份<select data-field="month">' + Array.from({length: 12}, function (_, month) {
       return '<option value="' + (month + 1) + '">' + (month + 1) + ' 月</option>';
     }).join("") + '</select></label>' +
-    '<label><input type="number" data-field="day" min="1" max="31" step="1"> 号</label></div>' +
+    '<label>日期<select data-field="day">' + dayOptions.map(function (day) { return '<option value="' + day + '">' + day + ' 日</option>'; }).join("") + '</select></label></div>' +
+    '<label>发送时间' + scheduledDatePickerMarkup("send_time", "time", "选择发送时间") + '</label>' +
     '</div>' +
-    '</div>' +
-    '<div class="scheduled-message-image-hint">可附加一张 PNG、JPEG、GIF 或 WebP 图片；单张不超过 2 MiB，所有定时消息图片合计不超过 3 MiB。正文可留空以仅发送图片。</div>' +
-    // 卡片动作栏：删除按钮在右下角，复用转发组表格的 .danger.rowicon 样式。
-    '<div class="scheduled-message-entry-actions">' +
-    '<button type="button" class="danger rowicon scheduled-message-remove" title="删除消息" aria-label="删除消息">' + SVG_TRASH + '</button>' +
+    '<div class="scheduled-message-once-fields"><label>发送日期时间' + scheduledDatePickerMarkup("once_at", "datetime", "选择发送日期和时间") + '</label></div>' +
     '</div>' +
     '</div></div>';
 }
@@ -1504,12 +2034,17 @@ function updateScheduledMessageEntryVisibility(entry) {
   const interval = entry.querySelector(".scheduled-message-interval-fields");
   const calendar = entry.querySelector(".scheduled-message-calendar-fields");
   const isCalendar = type && type.value === "calendar";
-  if (interval) interval.style.display = isCalendar ? "none" : "flex";
-  if (calendar) calendar.style.display = isCalendar ? "flex" : "none";
+  const isOnce = type && type.value === "once";
+  if (interval) interval.style.display = !isCalendar && !isOnce ? "grid" : "none";
+  if (calendar) calendar.style.display = isCalendar ? "grid" : "none";
+  const once = entry.querySelector(".scheduled-message-once-fields");
+  if (once) once.style.display = isOnce ? "flex" : "none";
   const calendarType = entry.querySelector('[data-field="calendar_type"]');
   entry.querySelectorAll(".scheduled-message-calendar-panel").forEach(function (panel) {
     panel.style.display = isCalendar && calendarType && panel.dataset.calendarType === calendarType.value ? "flex" : "none";
   });
+  const weekdayPicker = entry.querySelector(".scheduled-message-weekday-picker");
+  if (weekdayPicker && (!isCalendar || !calendarType || calendarType.value !== "weekly")) closeScheduledWeekdayPicker(weekdayPicker);
 }
 
 function scheduledTargetSummary(message) {
@@ -1558,30 +2093,41 @@ function updateScheduledMessageTargetVisibility(entry, message) {
 function renderScheduledMessageEditor() {
   const container = document.getElementById("scheduledMessageEntries");
   if (!container) return;
+  closeAllScheduledDatePickers();
+  closeScheduledImagePreview();
   const messages = scheduledMessageDraft || [];
   container.innerHTML = messages.length ? messages.map(scheduledOptionMarkup).join("")
-    : '<p class="compact-empty-state">暂无定时消息，点击「＋ 添加消息」创建发送计划。</p>';
+    : '<p class="compact-empty-state">暂无定时消息；请返回主面板点「＋ 新增」添加。</p>';
   container.querySelectorAll(".scheduled-message-entry").forEach(function (entry, index) {
     const message = messages[index];
     entry.querySelector('[data-field="content"]').value = message.content || "";
     const imageName = entry.querySelector(".scheduled-message-image-name");
-    if (imageName) imageName.textContent = message.image_data ? (message.image_name || "已附加图片") : "未附加图片";
+    if (imageName) {
+      imageName.textContent = message.image_data ? (message.image_name || "已附加图片") : "未附加图片";
+      imageName.classList.toggle("has-image", !!message.image_data);
+      imageName.removeAttribute("title");
+      imageName.tabIndex = message.image_data ? 0 : -1;
+      imageName.setAttribute("aria-label", message.image_data ? "悬停或聚焦预览图片：" + (message.image_name || "已附加图片") : "未附加图片");
+    }
     const imageRemove = entry.querySelector(".scheduled-message-image-remove");
-    if (imageRemove) imageRemove.disabled = !message.image_data;
+    if (imageRemove) imageRemove.hidden = !message.image_data;
     const imagePick = entry.querySelector(".scheduled-message-image-pick");
-    if (imagePick) imagePick.textContent = message.image_data ? "更换图片" : "选择图片";
+    if (imagePick) {
+      const label = message.image_data ? "更换图片" : "上传图片";
+      imagePick.title = label;
+      imagePick.setAttribute("aria-label", label);
+    }
     entry.querySelector('[data-field="schedule_type"]').value = message.schedule_type;
-    const targetMode = entry.querySelector('[data-field="target_mode"]');
-    if (targetMode) targetMode.value = message.target_mode || "groups";
-    ["anchor_at", "interval_days", "interval_hours", "interval_minutes", "day_of_month", "month", "day", "send_time", "calendar_type"].forEach(function (key) {
+    ["anchor_at", "once_at", "interval_days", "interval_hours", "interval_minutes", "day_of_month", "month", "day", "send_time", "calendar_type"].forEach(function (key) {
       const field = entry.querySelector('[data-field="' + key + '"]');
       if (field && message[key] !== undefined && message[key] !== null) field.value = message[key];
     });
+    refreshScheduledDatePickerDisplays(entry);
     entry.querySelectorAll('[data-field="weekday"]').forEach(function (field) {
       field.checked = message.weekdays.includes(Number(field.value));
     });
+    updateScheduledWeekdayPickerDisplay(entry.querySelector(".scheduled-message-weekday-picker"));
     updateScheduledMessageEntryVisibility(entry);
-    updateScheduledMessageTargetVisibility(entry, message);
   });
 }
 
@@ -1590,28 +2136,36 @@ function readScheduledMessageEditor() {
   if (!container) return [];
   return Array.from(container.querySelectorAll(".scheduled-message-entry")).map(function (entry, index) {
     const get = function (key) { return entry.querySelector('[data-field="' + key + '"]'); };
+    const weekdayPicker = entry.querySelector(".scheduled-message-weekday-picker");
+    const weekdayPopover = weekdayPicker && (weekdayPicker._scheduledWeekdayPopover || weekdayPicker.querySelector(".scheduled-message-weekday-popover"));
     const type = get("schedule_type").value;
     const message = {
       id: (scheduledMessageDraft[index] && scheduledMessageDraft[index].id) || ("message-" + (index + 1)),
+      enabled: !(scheduledMessageDraft[index] && scheduledMessageDraft[index].enabled === false),
       content: get("content").value,
       image_data: (scheduledMessageDraft[index] && scheduledMessageDraft[index].image_data) || "",
       image_name: (scheduledMessageDraft[index] && scheduledMessageDraft[index].image_name) || "",
-      // 目标来自草稿（由「管理」弹窗写入），不是 DOM 输入。
-      target_mode: (scheduledMessageDraft[index] && scheduledMessageDraft[index].target_mode) || (get("target_mode") ? get("target_mode").value : "groups"),
-      target_groups: ((scheduledMessageDraft[index] && scheduledMessageDraft[index].target_groups) || []).slice(),
-      forward_groups: ((scheduledMessageDraft[index] && scheduledMessageDraft[index].forward_groups) || []).slice(),
       schedule_type: type,
+      once_at: get("once_at").value,
+      completed_at: "",
+      execution_status: "",
       interval_days: Number(get("interval_days").value) || 0,
       interval_hours: Number(get("interval_hours").value) || 0,
       interval_minutes: Number(get("interval_minutes").value) || 0,
       anchor_at: get("anchor_at").value,
       calendar_type: get("calendar_type").value,
-      weekdays: Array.from(entry.querySelectorAll('[data-field="weekday"]:checked')).map(function (field) { return Number(field.value); }),
+      weekdays: Array.from(weekdayPopover ? weekdayPopover.querySelectorAll('[data-field="weekday"]:checked') : []).map(function (field) { return Number(field.value); }),
       day_of_month: Number(get("day_of_month").value) || 1,
       month: Number(get("month").value) || 1,
       day: Number(get("day").value) || 1,
       send_time: get("send_time").value || "09:00",
     };
+    const previous = scheduledMessageDraft[index] || {};
+    if (!message.image_data) message.image_name = "";
+    if (type === "once" && previous.schedule_type === "once" && message.once_at === previous.once_at) {
+      message.completed_at = previous.completed_at || "";
+      message.execution_status = previous.execution_status || "";
+    }
     return message;
   });
 }
@@ -1683,21 +2237,14 @@ function openScheduledTargetPicker(index) {
   );
 }
 
-function setScheduledMessagesCollapsed(collapsed) {
-  scheduledMessageDraft = readScheduledMessageEditor();
-  scheduledCollapsed.clear();
-  if (collapsed) {
-    (scheduledMessageDraft || []).forEach(function (message, index) {
-      scheduledCollapsed.add(String(message.id || "index:" + index));
-    });
-  }
-  renderScheduledMessageEditor();
-}
-
-function openScheduledMessageEditor() {
+function openScheduledMessageEditor(addNew) {
   const modal = document.getElementById("scheduledMessageContentModal");
   if (!modal) return;
-  scheduledMessageDraft = normalizeScheduledMessages(settings && settings.scheduled_message);
+  const group = activeScheduledMessageGroup();
+  scheduledMessageEditorMode = addNew ? "add" : "edit";
+  scheduledMessageDraft = addNew
+    ? [newScheduledMessage()]
+    : (group && group.messages ? group.messages : []).map(function (message) { return Object.assign({}, message); });
   renderScheduledMessageEditor();
   modal.style.display = "flex";
   const first = document.querySelector(".scheduled-message-entry-content");
@@ -1710,26 +2257,24 @@ async function confirmScheduledMessageEditor() {
     return;
   }
   const messages = readScheduledMessageEditor();
-  const defaultTargets = ((settings.scheduled_message && settings.scheduled_message.target_groups) || []).length;
-  let totalImageBytes = 0;
+  const group = activeScheduledMessageGroup();
+  if (!group) return;
+  let totalImageBytes = scheduledMessageGroupsDraft.reduce(function (sum, item) {
+    if (String(item.id) === String(group.id)) {
+      return scheduledMessageEditorMode === "add"
+        ? sum + (item.messages || []).reduce(function (groupBytes, message) {
+          return groupBytes + scheduledImageDataSize(message.image_data);
+        }, 0)
+        : sum;
+    }
+    return sum + (item.messages || []).reduce(function (groupBytes, message) {
+      return groupBytes + scheduledImageDataSize(message.image_data);
+    }, 0);
+  }, 0);
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
     if (!message.content.trim() && !message.image_data) {
       showAlert("定时消息", "消息 " + (index + 1) + " 需要填写正文或附加图片");
-      return;
-    }
-    const missingTarget = message.target_mode === "forward_group"
-      ? !message.forward_groups.length
-      : message.target_mode === "groups"
-        ? (!message.target_groups.length && !defaultTargets)
-        : false;
-    if (missingTarget) {
-      showAlert(
-        "定时消息",
-        "消息 " + (index + 1) + " 还没有目标：请点「管理」选择"
-          + (message.target_mode === "forward_group" ? "转发组" : "目标群")
-          + "，或改用「全部群」"
-      );
       return;
     }
     totalImageBytes += scheduledImageDataSize(message.image_data);
@@ -1740,6 +2285,17 @@ async function confirmScheduledMessageEditor() {
     if (message.schedule_type === "interval" && !message.interval_days && !message.interval_hours && !message.interval_minutes) {
       showAlert("定时消息", "消息 " + (index + 1) + " 的间隔至少需要 1 分钟");
       return;
+    }
+    if (message.schedule_type === "once") {
+      const selectedAt = new Date(message.once_at);
+      if (!message.once_at || Number.isNaN(selectedAt.getTime())) {
+        showAlert("定时消息", "消息 " + (index + 1) + " 请选择有效的发送时间");
+        return;
+      }
+      if (!message.completed_at && selectedAt <= new Date()) {
+        showAlert("定时消息", "消息 " + (index + 1) + " 的发送时间必须晚于当前时间");
+        return;
+      }
     }
     if (message.schedule_type === "calendar" && message.calendar_type === "weekly" && !message.weekdays.length) {
       showAlert("定时消息", "消息 " + (index + 1) + " 至少选择一个星期");
@@ -1753,15 +2309,13 @@ async function confirmScheduledMessageEditor() {
       }
     }
   }
-  settings.scheduled_message = Object.assign({}, settings.scheduled_message || {}, {
-    enabled: messages.length ? (settings.scheduled_message || {}).enabled === true : false,
-    content: messages.length ? messages[0].content : "",
-    messages: messages,
-  });
-  const saved = await saveAndReload();
+  group.messages = scheduledMessageEditorMode === "add"
+    ? (group.messages || []).concat(messages)
+    : messages;
+  const saved = await saveScheduledMessageGroups();
   if (saved) {
     scheduledMessageDraft = null;
-    scheduledCollapsed.clear();
+    scheduledMessageEditorMode = "edit";
     document.getElementById("scheduledMessageContentModal").style.display = "none";
   }
 }
@@ -1789,40 +2343,128 @@ function readScheduledImageFile(file) {
 function initScheduledPickers() {
   const editButton = document.getElementById("btnScheduledMessageEdit");
   if (editButton) {
-    editButton.innerHTML = SVG_PEN;
-    editButton.addEventListener("click", openScheduledMessageEditor);
+    editButton.addEventListener("click", function () { openScheduledMessageEditor(true); });
   }
-  document.getElementById("btnAddScheduledMessage").addEventListener("click", function () {
-    if (scheduledImageReadPending) return;
-    scheduledMessageDraft = readScheduledMessageEditor();
-    const message = newScheduledMessage();
-    scheduledCollapsed.delete(String(message.id));
-    scheduledMessageDraft.push(message);
-    renderScheduledMessageEditor();
+  const addGroup = async function () {
+    const suffix = scheduledMessageGroupsDraft.length + 1;
+    const group = {id: "scheduled-group-" + Date.now() + "-" + suffix, name: "消息组" + suffix, enabled: true, target_mode: "groups", target_groups: [], forward_groups: [], messages: []};
+    scheduledMessageGroupsDraft.push(group);
+    activeScheduledMessageGroupId = group.id;
+    renderScheduledMessageWorkspace();
+    await saveScheduledMessageGroups();
+  };
+  const groupTabs = document.getElementById("scheduledMessageGroupTabs");
+  if (groupTabs) groupTabs.addEventListener("click", async function (event) {
+    const add = event.target.closest("#btnAddScheduledGroupTab");
+    if (add) { await addGroup(); return; }
+    const remove = event.target.closest("[data-delete-scheduled-group]");
+    if (remove) {
+      const id = String(remove.dataset.deleteScheduledGroup || "");
+      showConfirmDlg("删除消息组", "删除该消息组及其中的定时消息？保存后生效。", function () {
+        scheduledMessageGroupsDraft = scheduledMessageGroupsDraft.filter(function (group) { return String(group.id) !== id; });
+        activeScheduledMessageGroupId = scheduledMessageGroupsDraft[0] ? scheduledMessageGroupsDraft[0].id : null;
+        renderScheduledMessageWorkspace();
+        saveScheduledMessageGroups();
+      }, "删除");
+      return;
+    }
+    const tab = event.target.closest("[data-scheduled-group]");
+    if (!tab) return;
+    activeScheduledMessageGroupId = String(tab.dataset.scheduledGroup);
+    renderScheduledMessageWorkspace();
   });
-  const foldAll = document.getElementById("btnScheduledFoldAll");
-  if (foldAll) foldAll.addEventListener("click", function () { setScheduledMessagesCollapsed(true); });
-  const unfoldAll = document.getElementById("btnScheduledUnfoldAll");
-  if (unfoldAll) unfoldAll.addEventListener("click", function () { setScheduledMessagesCollapsed(false); });
+  const manageTargets = document.getElementById("btnScheduledGroupTargets");
+  if (manageTargets) manageTargets.addEventListener("click", function () {
+    const group = activeScheduledMessageGroup();
+    if (!group) return;
+    const groupId = String(group.id);
+    const groups = (settings && Array.isArray(settings.qq_group_openids) ? settings.qq_group_openids : []).filter(groupInActiveQQBotWorkspace);
+    if (!groups.length) { showAlert("QQ 接收群", "当前没有已审核的 QQ 群"); return; }
+    const selected = new Set((group.target_groups || []).map(String));
+    showConfirmSelect("选择消息组接收群", groups, function (item) {
+      const name = item.name || item.remark || item.openid;
+      return name + (item.enabled === true ? "（已启用）" : "（未启用）");
+    }, async function (picked) {
+      const currentGroup = scheduledMessageGroupsDraft.find(function (item) {
+        return String(item.id) === groupId;
+      });
+      if (!currentGroup) {
+        showAlert("保存失败", "当前消息组已发生变化，请重新选择接收群。");
+        return;
+      }
+      currentGroup.target_mode = "groups";
+      currentGroup.target_groups = picked.map(function (item) { return String(item.openid); });
+      currentGroup.forward_groups = [];
+      renderScheduledMessageWorkspace();
+      await saveScheduledMessageGroups();
+    }, {
+      defaultChecked: function (item) {
+        if (group.target_mode === "all") return item.enabled === true;
+        if (group.target_mode === "forward_group") {
+          const wanted = new Set((group.forward_groups || []).map(String));
+          return (settings.qq_forwarding_groups || []).some(function (fg) { return wanted.has(String(fg.id)) && fg.enabled !== false && (fg.groups || []).map(String).includes(String(item.openid)); });
+        }
+        return selected.has(String(item.openid));
+      },
+      okText: "保存选择",
+    });
+    scheduledMessageTargetPickerOpen = true;
+  });
+  const messageList = document.getElementById("scheduledGroupMessageList");
+  const allEnabled = document.getElementById("scheduledMessageAllEnabled");
+  if (allEnabled) allEnabled.addEventListener("change", async function () {
+    const group = activeScheduledMessageGroup();
+    if (!group) return;
+    (group.messages || []).forEach(function (message) { message.enabled = allEnabled.checked; });
+    renderScheduledMessageWorkspace();
+    await saveScheduledMessageGroups();
+  });
+  if (messageList) messageList.addEventListener("change", async function (event) {
+    const checkbox = event.target.closest(".scheduled-message-enabled");
+    const group = activeScheduledMessageGroup();
+    const message = group && group.messages[Number(checkbox && checkbox.dataset.messageIndex)];
+    if (!checkbox || !message) return;
+    message.enabled = checkbox.checked;
+    renderScheduledMessageWorkspace();
+    await saveScheduledMessageGroups();
+  });
+  if (messageList) messageList.addEventListener("click", function (event) {
+    const edit = event.target.closest(".scheduled-group-message-edit");
+    if (edit) { openScheduledMessageEditor(); return; }
+    const remove = event.target.closest(".scheduled-group-message-remove");
+    if (!remove) return;
+    const group = activeScheduledMessageGroup();
+    const index = Number(remove.dataset.messageIndex);
+    showConfirmDlg("删除定时消息", "删除这条消息？保存后生效。", function () {
+      group.messages.splice(index, 1);
+      renderScheduledMessageWorkspace();
+      saveScheduledMessageGroups();
+    }, "删除");
+  });
+  const targetList = document.getElementById("scheduledGroupTargetList");
+  if (targetList) targetList.addEventListener("click", function (event) {
+    const remove = event.target.closest(".scheduled-group-target-remove");
+    if (!remove) return;
+    const group = activeScheduledMessageGroup();
+    if (!group || group.target_mode !== "groups") return;
+    group.target_groups = (group.target_groups || []).filter(function (id) { return String(id) !== String(remove.dataset.targetOpenid); });
+    renderScheduledMessageWorkspace();
+    saveScheduledMessageGroups();
+  });
   document.getElementById("scheduledMessageEntries").addEventListener("click", function (event) {
     if (scheduledImageReadPending) return;
-    const fold = event.target.closest(".scheduled-message-fold");
-    if (fold) {
-      const entry = fold.closest(".scheduled-message-entry");
-      const index = entry ? Number(entry.dataset.index) : -1;
-      const message = scheduledMessageDraft && scheduledMessageDraft[index];
-      // 折叠前先落盘当前编辑，避免重绘丢内容。
-      scheduledMessageDraft = readScheduledMessageEditor();
-      const collapsed = entry.classList.toggle("is-collapsed");
-      // 与转发组折叠按钮一致：折叠态使用 .folded 旋转 chevron。
-      fold.classList.toggle("folded", collapsed);
-      fold.setAttribute("aria-expanded", String(!collapsed));
-      if (collapsed) {
-        scheduledCollapsed.add(message && message.id ? String(message.id) : "index:" + index);
-      } else {
-        if (message && message.id) scheduledCollapsed.delete(String(message.id));
-        scheduledCollapsed.delete("index:" + index);
-      }
+    const weekdayTrigger = event.target.closest(".scheduled-message-weekday-trigger");
+    if (weekdayTrigger) {
+      event.preventDefault();
+      event.stopPropagation();
+      openScheduledWeekdayPicker(weekdayTrigger.closest(".scheduled-message-weekday-picker"));
+      return;
+    }
+    const pickerTrigger = event.target.closest(".scheduled-date-picker-trigger");
+    if (pickerTrigger) {
+      event.preventDefault();
+      event.stopPropagation();
+      openScheduledDatePicker(pickerTrigger.closest(".scheduled-date-picker"));
       return;
     }
     const manage = event.target.closest(".scheduled-message-target-manage");
@@ -1854,16 +2496,52 @@ function initScheduledPickers() {
       }
       return;
     }
-    const remove = event.target.closest(".scheduled-message-remove");
-    if (!remove) return;
-    const entry = remove.closest(".scheduled-message-entry");
-    if (!entry) return;
-    scheduledMessageDraft = readScheduledMessageEditor();
-    const index = Number(entry.dataset.index);
-    showConfirmDlg("删除定时消息", "从当前编辑列表删除这条消息？保存后生效。", function () {
-      scheduledMessageDraft.splice(index, 1);
-      renderScheduledMessageEditor();
-    }, "删除");
+  });
+  const scheduledEntries = document.getElementById("scheduledMessageEntries");
+  scheduledEntries.addEventListener("pointerover", function (event) {
+    const name = event.target.closest(".scheduled-message-image-name.has-image");
+    if (!name || name.contains(event.relatedTarget)) return;
+    openScheduledImagePreview(name);
+  });
+  scheduledEntries.addEventListener("pointerout", function (event) {
+    const name = event.target.closest(".scheduled-message-image-name.has-image");
+    if (!name || name.contains(event.relatedTarget)) return;
+    const preview = document.querySelector(".scheduled-message-image-preview");
+    if (!preview || !preview.contains(event.relatedTarget)) closeScheduledImagePreview();
+  });
+  scheduledEntries.addEventListener("focusin", function (event) {
+    const name = event.target.closest(".scheduled-message-image-name.has-image");
+    if (name) openScheduledImagePreview(name);
+  });
+  scheduledEntries.addEventListener("focusout", function (event) {
+    const name = event.target.closest(".scheduled-message-image-name.has-image");
+    if (name && !name.contains(event.relatedTarget)) closeScheduledImagePreview();
+  });
+  document.addEventListener("pointerdown", function (event) {
+    if (event.target.closest(".scheduled-date-picker-trigger, .scheduled-date-picker-popover, .scheduled-message-weekday-trigger, .scheduled-message-weekday-popover")) return;
+    closeAllScheduledDatePickers();
+    closeScheduledImagePreview();
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape") return;
+    const picker = document.querySelector(".scheduled-date-picker.is-open, .scheduled-message-weekday-picker.is-open");
+    if (!picker) {
+      closeScheduledImagePreview();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (picker.matches(".scheduled-date-picker")) {
+      closeScheduledDatePicker(picker);
+      picker.querySelector(".scheduled-date-picker-trigger")?.focus();
+    } else {
+      closeScheduledWeekdayPicker(picker);
+      picker.querySelector(".scheduled-message-weekday-trigger")?.focus();
+    }
+  });
+  window.addEventListener("resize", function () {
+    closeAllScheduledDatePickers();
+    closeScheduledImagePreview();
   });
   document.getElementById("scheduledMessageEntries").addEventListener("change", function (event) {
     if (event.target.dataset.field !== "target_mode") return;
@@ -1930,6 +2608,9 @@ function initScheduledPickers() {
       event.target.value = "";
       return;
     }
+    if (entry && event.target.dataset.field === "weekday") {
+      updateScheduledWeekdayPickerDisplay(entry.querySelector(".scheduled-message-weekday-picker"));
+    }
     if (entry && (event.target.dataset.field === "schedule_type" || event.target.dataset.field === "calendar_type")) {
       updateScheduledMessageEntryVisibility(entry);
     }
@@ -1946,18 +2627,31 @@ function scheduledMessageEditorFocused() {
 
 function renderScheduledMessage(config) {
   const value = config || {};
-  const messages = normalizeScheduledMessages(value);
-  const summary = document.getElementById("scheduledMessageSummary");
-  if (summary) {
-    summary.classList.toggle("is-empty", messages.length === 0);
-    summary.innerHTML = messages.length
-      ? "已配置 " + messages.length + " 条消息"
-      : "<strong>暂无定时消息</strong><small>点击添加创建定时任务</small>";
+  scheduledMessageGroupsDraft = normalizeScheduledMessageGroups(value);
+  if (!activeScheduledMessageGroupId || !scheduledMessageGroupsDraft.some(function (group) { return String(group.id) === String(activeScheduledMessageGroupId); })) {
+    activeScheduledMessageGroupId = scheduledMessageGroupsDraft[0] ? scheduledMessageGroupsDraft[0].id : null;
   }
-  renderScheduledMessageToggle(value.enabled === true);
+  renderScheduledMessageWorkspace();
 }
 
 function preserveScheduledMessageAttachments(statusConfig, currentConfig) {
+  if (statusConfig && Array.isArray(statusConfig.message_groups)) {
+    const currentGroups = Array.isArray(currentConfig && currentConfig.message_groups) ? currentConfig.message_groups : [];
+    const oldGroups = new Map(currentGroups.map(function (group) { return [String(group.id), group]; }));
+    const next = Object.assign({}, statusConfig);
+    next.message_groups = statusConfig.message_groups.map(function (group) {
+      const oldGroup = oldGroups.get(String(group.id));
+      const oldMessages = new Map(((oldGroup && oldGroup.messages) || []).map(function (message) { return [String(message.id), message]; }));
+      return Object.assign({}, group, {messages: (group.messages || []).map(function (message, index) {
+        const previous = oldMessages.get(String(message.id)) || ((oldGroup && oldGroup.messages) || [])[index];
+        if (!message.image_data && previous && previous.image_data) {
+          message = Object.assign({}, message, {image_data: previous.image_data, image_name: previous.image_name || ""});
+        }
+        return message;
+      })});
+    });
+    return next;
+  }
   const currentMessages = normalizeScheduledMessages(currentConfig);
   const currentById = new Map(currentMessages.map(function (message) {
     return [message.id, message];
@@ -1972,23 +2666,6 @@ function preserveScheduledMessageAttachments(statusConfig, currentConfig) {
     return message;
   });
   return next;
-}
-
-async function saveScheduledMessageSettings(enabled) {
-  const current = settings.scheduled_message || {};
-  const messages = normalizeScheduledMessages(current);
-  const config = Object.assign({}, current, {messages: messages});
-  if (enabled !== undefined) config.enabled = enabled;
-  if (config.enabled && !messages.length) {
-    showAlert("定时消息", "请先添加至少一条消息");
-    return false;
-  }
-  if (config.enabled && !(config.target_groups || []).length) {
-    showAlert("定时消息", "请至少选择一个已审核群");
-    return false;
-  }
-  settings.scheduled_message = config;
-  return await saveAndReload();
 }
 
 // ---------- 转发组（Discord / X / QQ→QQ 共用机制，按 ctx 区分） ----------
@@ -2523,11 +3200,11 @@ if (qqBotWorkspace) {
       }
       renderSettings();
       renderOverviewCounts();
-      await Promise.all([refreshStatus(), refreshXStatus(), refreshBilibiliStatus(), refreshYoutubeStatus(), refreshSteamStatus(), refreshBackfill(), refreshMessageTrace()]);
+      await Promise.all([refreshStatus(), refreshXStatus(), refreshBilibiliStatus(), refreshYoutubeStatus(), refreshSteamStatus(), refreshMessageTrace()]);
     } catch (error) {
       activeQQBotId = previous;
       workspaceEpoch += 1;
-      await Promise.all([refreshStatus(), refreshXStatus(), refreshBilibiliStatus(), refreshYoutubeStatus(), refreshSteamStatus(), refreshBackfill(), refreshMessageTrace()]);
+      await Promise.all([refreshStatus(), refreshXStatus(), refreshBilibiliStatus(), refreshYoutubeStatus(), refreshSteamStatus(), refreshMessageTrace()]);
       showAlert("切换失败", error.message);
     } finally {
       endPanelLoading();
@@ -2638,12 +3315,8 @@ function renderSettings() {
       ub.appendChild(tr);
     });
   }
-  // 离线补发设置
-  renderBackfillToggle(settings.backfill_enabled !== false);
   renderFailureNotificationToggle(!!(settings.failure_notification && settings.failure_notification.enabled));
   renderStatusSheenToggle(isStatusSheenEnabled());
-  const bfLimit = document.getElementById("backfillLimit");
-  if (bfLimit) bfLimit.value = Number(settings.backfill_limit) > 0 ? settings.backfill_limit : 10;
   renderScheduledMessage(settings.scheduled_message);
   renderUnifiedRelayFilter();
   // 表头全选框状态仅反映「当前转发组」实际显示的成员（而非全部全局实体），
@@ -2913,7 +3586,7 @@ function renderXPage() {
   }
 
   // X RSS 状态卡片的「运行中徽章 + 运行行」由 refreshXStatus 轻量轮询独立刷新；
-  // 这里只同步两个配置输入框（正在编辑的输入框不覆盖，与 backfillLimit 同策略）
+  // 这里只同步两个配置输入框（正在编辑的输入框不覆盖）
   const baseInput = document.getElementById("xRsshubBase");
   if (baseInput && document.activeElement !== baseInput) {
     baseInput.value = settings.x_rsshub_base || "";
@@ -4062,6 +4735,22 @@ function applyDndOrder(bodyId, newIds) {
   const pos = {};
   newIds.forEach(function (id, i) { pos[String(id)] = i; });
   let arr = null, memberSet = null;
+  if (bodyId === "scheduledGroupMessageList" || bodyId === "scheduledGroupTargetList") {
+    const group = activeScheduledMessageGroup();
+    if (!group) return false;
+    if (bodyId === "scheduledGroupMessageList") {
+      const messages = group.messages || [];
+      if (messages.length !== newIds.length || !newIds.every(function (id) { return messages.some(function (item) { return String(item.id) === String(id); }); })) return false;
+      group.messages = newIds.map(function (id) { return messages.find(function (item) { return String(item.id) === String(id); }); });
+    } else {
+      if (group.target_mode !== "groups") return false;
+      const targets = group.target_groups || [];
+      if (targets.length !== newIds.length || !newIds.every(function (id) { return targets.map(String).includes(String(id)); })) return false;
+      group.target_groups = newIds.map(String);
+    }
+    settings.scheduled_message = Object.assign({}, settings.scheduled_message || {}, {messages: [], message_groups: scheduledMessageGroupsDraft});
+    return true;
+  }
   if (bodyId === "xSourceBody" || bodyId === "xXGroupBody") {
     // X 转发组成员排序：直接重排当前 X 组的 sources/groups
     // （只影响本组内的显示顺序，不重排全局注册实体）
@@ -4302,55 +4991,6 @@ async function refreshIdentities() {
   } catch (err) { /* 身份库暂不可用时忽略，仅不显示名称 */ }
 }
 
-let backfillTotal = 0;  // 当前待补发总数，供「立即补发/清空」按钮可用状态判断
-let backfillUnknown = true;
-let backfillScanning = false;
-let backfillStatusText = "状态未知";
-
-function updateBackfillButtons() {
-  const disable = !backfillUnknown && !backfillScanning && backfillTotal <= 0;
-  ["btnBackfillRun", "btnBackfillClear"].forEach(function (id) {
-    const b = document.getElementById(id);
-    if (b) b.disabled = disable;
-  });
-}
-
-function renderBackfill(data) {
-  const el = document.getElementById("backfillPending");
-  if (!el) return;
-  backfillUnknown = !(data && data.ok) || data.unknown === true;
-  backfillScanning = !!(data && data.ok && data.scanning);
-  backfillTotal = (data && data.ok) ? (Number(data.total) || 0) : 0;
-  const partial = backfillUnknown || backfillScanning || !!(data && data.capped);
-  const numberText = backfillTotal > 99 ? "99+" : String(backfillTotal);
-  el.textContent = backfillTotal > 0 ? (partial && backfillTotal <= 99 ? "≥" : "") + numberText
-    : (backfillUnknown ? "未知" : (backfillScanning ? "扫描中" : "0"));
-  backfillStatusText = backfillUnknown ? "状态未知" : (backfillScanning ? "扫描中" : "待补发 " + numberText + " 条");
-  el.title = backfillUnknown ? "部分状态无法查询，显示已确认的待处理数量" : (backfillScanning ? "正在检查历史消息，数量可能增加" : "已登记的待处理消息数");
-  const stateEl = document.getElementById("backfillState");
-  if (stateEl) {
-    const st = (data && data.ok && data.status) || {};
-    const stateText = backfillUnknown ? "状态未知" : (st.enabled === false ? "已关闭" : (st.running ? "检查中" : "等待下次检查"));
-    const checked = st.last_check ? " · 最近检查 " + new Date(st.last_check * 1000).toLocaleString() : "";
-    stateEl.textContent = stateText + checked + (st.error ? " · " + st.error : "");
-  }
-  el.style.color = backfillTotal > 0 ? "var(--pending)" : "";
-  // 无待补发时禁用「立即补发」与「清空待补发」（disabled 自带半透明）
-  updateBackfillButtons();
-  renderChainStatusShortcut();
-}
-
-async function refreshBackfill() {
-  const owner = activeQQBotId;
-  const epoch = workspaceEpoch;
-  try {
-    const r = await jget("/api/backfill/pending");
-    if (owner === activeQQBotId && epoch === workspaceEpoch) renderBackfill(r);
-  } catch (err) {
-    if (owner === activeQQBotId && epoch === workspaceEpoch) renderBackfill(null);
-  }
-}
-
 async function refreshChannelNames() {
   try {
     const r = await jget("/api/channel-names");
@@ -4375,6 +5015,7 @@ function setConfirmButtons(okText, showCancel, cancelText, showOk) {
 }
 
 function showAlert(title, message) {
+  scheduledMessageTargetPickerOpen = false;
   document.getElementById("confirmTitle").textContent = title;
   const body = document.getElementById("confirmBody");
   body.innerHTML = "";
@@ -4388,6 +5029,7 @@ function showAlert(title, message) {
 }
 
 function showConfirmDlg(title, message, onOk, okText) {
+  scheduledMessageTargetPickerOpen = false;
   const alreadyOpen = getComputedStyle(document.getElementById("confirmModal")).display !== "none";
   document.getElementById("confirmTitle").textContent = title;
   const body = document.getElementById("confirmBody");
@@ -4447,6 +5089,7 @@ function editQQDetails(user, isGroup) {
 }
 
 function showConfirmSelect(title, items, labelFn, onOkSelected, opts) {
+  scheduledMessageTargetPickerOpen = false;
   opts = opts || {};
   const defaultChecked = opts.defaultChecked;
   const groupBy = opts.groupBy || null;
@@ -4490,7 +5133,7 @@ function showConfirmSelect(title, items, labelFn, onOkSelected, opts) {
       const edit = document.createElement("button");
       edit.type = "button";
       edit.innerHTML = SVG_PEN;
-      edit.className = "sec rowicon";
+       edit.className = "sec rowicon registry-edit-icon";
       edit.title = "编辑群资料";
       edit.setAttribute("aria-label", "编辑群资料");
       edit.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); opts.onRowEdit(it); });
@@ -4835,6 +5478,7 @@ function openXProtectionModal() {
 
 function hideConfirm() {
   document.getElementById("confirmModal").style.display = "none";
+  scheduledMessageTargetPickerOpen = false;
   confirmAction = null;
   setConfirmButtons("确定", true);
 }
@@ -5394,6 +6038,7 @@ const FORWARDING_PANE_PAIRS = [
   ["youtubeSourceContent", "youtubeGroupContent"],
   ["steamSourceContent", "steamGroupContent"],
   ["qqFgGroupContent", "userContent"],
+  ["scheduledGroupMessageContent", "scheduledGroupTargetContent"],
 ];
 
 function setForwardingPaneFold(id, collapsed) {
@@ -6521,6 +7166,137 @@ async function saveDiscordConfig() {
   await refreshStatus();
 }
 
+const NETWORK_PROXY_FIELDS = {
+  discord: "networkProxyDiscord",
+  x: "networkProxyX",
+  rsshub: "networkProxyRsshub",
+  bilibili: "networkProxyBilibili",
+  youtube: "networkProxyYoutube",
+  steam: "networkProxySteam",
+  translation: "networkProxyTranslation",
+};
+function closeNetworkProxyModal() {
+  document.getElementById("networkProxyModal").style.display = "none";
+}
+function setNetworkProxyTestStatus(service, message, state) {
+  const suffix = service === "discord" ? "Discord" : "X";
+  const status = document.getElementById("networkProxy" + suffix + "Status");
+  if (!status) return;
+  status.textContent = message || "";
+  status.classList.toggle("success", state === "success");
+  status.classList.toggle("failure", state === "failure");
+}
+async function openNetworkProxyModal() {
+  const modal = document.getElementById("networkProxyModal");
+  const saveButton = document.getElementById("networkProxySave");
+  const detectStatus = document.getElementById("networkProxySystemStatus");
+  modal.style.display = "flex";
+  saveButton.disabled = true;
+  if (detectStatus) {
+    detectStatus.textContent = "";
+    detectStatus.classList.remove("success", "failure");
+  }
+  for (const service of ["discord", "x"]) setNetworkProxyTestStatus(service, "", "");
+  let result;
+  try { result = await jget("/api/network-proxy"); } catch (_error) { result = null; }
+  if (!result || !result.ok || !result.proxies) {
+    showAlert("读取代理设置失败", (result && result.msg) || "无法读取当前代理设置");
+    return;
+  }
+  for (const [service, id] of Object.entries(NETWORK_PROXY_FIELDS)) {
+    const input = document.getElementById(id);
+    if (input) input.value = result.proxies[service] || "";
+  }
+  saveButton.disabled = false;
+}
+async function testNetworkProxy(service, button) {
+  const input = document.getElementById(NETWORK_PROXY_FIELDS[service]);
+  const proxy = input ? input.value.trim() : "";
+  if (!proxy) {
+    setNetworkProxyTestStatus(service, "请先填写代理地址", "failure");
+    input?.focus();
+    return false;
+  }
+  button.disabled = true;
+  setNetworkProxyTestStatus(service, "正在检测…", "");
+  let result;
+  try {
+    result = await jpost("/api/network-proxy/test", {service: service, proxy: proxy});
+  } catch (_error) { result = null; }
+  button.disabled = false;
+  const success = !!(result && result.ok);
+  setNetworkProxyTestStatus(
+    service,
+    (result && result.msg) || "连接检测失败，请检查代理地址和网络",
+    success ? "success" : "failure"
+  );
+  return success;
+}
+async function detectSystemNetworkProxy(button) {
+  const status = document.getElementById("networkProxySystemStatus");
+  button.disabled = true;
+  status.textContent = "正在读取 Windows 系统代理…";
+  status.classList.remove("success", "failure");
+  let result;
+  try { result = await jget("/api/network-proxy/detect-system"); }
+  catch (_error) { result = null; }
+  if (!result || !result.ok || !result.proxy) {
+    status.textContent = (result && result.msg) || "读取系统代理失败，请检查 Clash Verge 状态。";
+    status.classList.add("failure");
+    button.disabled = false;
+    return;
+  }
+  document.getElementById(NETWORK_PROXY_FIELDS.discord).value = result.proxy;
+  document.getElementById(NETWORK_PROXY_FIELDS.x).value = result.proxy;
+  status.textContent = "已填入当前系统代理，正在检测 Discord 和 X…";
+  const checks = await Promise.all(["discord", "x"].map(function (service) {
+    const testButton = document.querySelector('[data-proxy-test="' + service + '"]');
+    return testButton ? testNetworkProxy(service, testButton) : Promise.resolve(false);
+  }));
+  if (checks.every(Boolean)) {
+    status.textContent = "两项连接检测都已通过；点「保存并重启机器人」应用设置。";
+    status.classList.add("success");
+  } else {
+    status.textContent = "代理地址已填入，但至少一项检测失败；请查看对应结果后再决定是否保存。";
+    status.classList.add("failure");
+  }
+  button.disabled = false;
+}
+async function saveNetworkProxy() {
+  const modal = document.getElementById("networkProxyModal");
+  const saveButton = document.getElementById("networkProxySave");
+  const proxies = {};
+  for (const [service, id] of Object.entries(NETWORK_PROXY_FIELDS)) {
+    const input = document.getElementById(id);
+    proxies[service] = input ? input.value.trim() : "";
+  }
+  saveButton.disabled = true;
+  let result;
+  try { result = await jpost("/api/network-proxy/save", {proxies: proxies}); }
+  catch (_error) { result = null; }
+  if (!result || !result.ok) {
+    saveButton.disabled = false;
+    showAlert("保存代理设置失败", (result && result.msg) || "保存失败，请稍后重试");
+    return;
+  }
+  if (!result.changed && modal.dataset.restartPending !== "1") {
+    saveButton.disabled = false;
+    closeNetworkProxyModal();
+    return;
+  }
+  let restarted;
+  try { restarted = await jpost("/api/bot/restart"); } catch (_error) { restarted = {ok: false}; }
+  saveButton.disabled = false;
+  if (!restarted || !restarted.ok) {
+    modal.dataset.restartPending = "1";
+    showAlert("代理设置已保存", "机器人重启失败；代理设置将在机器人下次启动时生效，请稍后手动重启。");
+    return;
+  }
+  delete modal.dataset.restartPending;
+  closeNetworkProxyModal();
+  await refreshStatus();
+}
+
 document.addEventListener("contextmenu", async function (e) {
   const value = e.target.closest(".fgsection :is(.middle-value, .id-value)[data-copy-value]");
   if (!value) return;
@@ -6532,6 +7308,22 @@ document.addEventListener("contextmenu", async function (e) {
 document.addEventListener("click", async function (e) {
   const btn = e.target.closest("button");
   if (!btn) return;
+  if (btn.id === "btnNetworkProxy") {
+    await openNetworkProxyModal();
+    return;
+  }
+  if (btn.id === "networkProxyDetectSystem") {
+    await detectSystemNetworkProxy(btn);
+    return;
+  }
+  if (btn.id === "networkProxySave") {
+    await saveNetworkProxy();
+    return;
+  }
+  if (btn.dataset.proxyTest) {
+    await testNetworkProxy(btn.dataset.proxyTest, btn);
+    return;
+  }
   if (btn.id === "btnStatusSheenToggle") {
     const enabled = btn.dataset.on !== "1";
     try { localStorage.setItem(STATUS_SHEEN_KEY, enabled ? "1" : "0"); } catch (err) {}
@@ -6572,12 +7364,12 @@ document.addEventListener("click", async function (e) {
       youtubeApiKeyModal: closeYoutubeApiKeyModal,
       scheduledMessageContentModal: function () {
         scheduledMessageDraft = null;
-        scheduledCollapsed.clear();
         document.getElementById("scheduledMessageContentModal").style.display = "none";
       },
       messageTraceModal: closeMessageTraceModal,
       diagnosticModal: closeDiagnosticModal,
       backupRestoreModal: closeBackupRestore,
+      networkProxyModal: closeNetworkProxyModal,
       chainDetailModal: closeChainDetailModal,
     };
     const closer = closeMap[btn.dataset.close];
@@ -7055,41 +7847,6 @@ document.addEventListener("click", async function (e) {
       if (!r.ok) showAlert("清空失败", r.msg || "清空失败");
       await refreshStatus();
     }, "清空");
-  } else if (btn.id === "btnBackfillRun") {
-    // 与 QQ 私聊 backfill run 一致：先查待补发缺口，无消息时直接告知，避免空触发
-    btn.disabled = true;
-    try {
-      const p = await jget("/api/backfill/pending");
-      if (p.ok && !p.total && !p.unknown && !p.scanning) {
-        showAlert("补发", "当前无可补发的消息");
-        await refreshBackfill();
-      } else {
-        const r = await jpost("/api/backfill/run");
-        showAlert("补发", r.ok ? (r.msg || "补发已触发") : (r.msg || "补发失败"));
-        await refreshBackfill();
-      }
-    } finally {
-      updateBackfillButtons();
-    }
-  } else if (btn.id === "btnBackfillRefresh") {
-    btn.disabled = true;
-    try {
-      await refreshBackfill();
-      showAlert("刷新状态", "已读取 Discord 实时状态");
-    } finally {
-      btn.disabled = false;
-    }
-  } else if (btn.id === "btnBackfillClear") {
-    showConfirmDlg("清空待补发", "清空待补发？未转发的旧消息将不再补发，此操作不可撤销。", async function () {
-      btn.disabled = true;
-      try {
-        const r = await jpost("/api/backfill/clear");
-        showAlert("清空结果", r.ok ? (r.cleared ? ("已清空 " + r.cleared + " 个频道的待补发") : "当前无可清空的待补发") : (r.msg || "清空失败"));
-        await refreshBackfill();
-      } finally {
-        updateBackfillButtons();
-      }
-    });
   } else if (btn.id === "btnStart") {
     await runBotAction("/api/bot/start", "启动失败", "启动机器人失败");
     await sleep(800); await refreshStatus();
@@ -7111,15 +7868,10 @@ document.addEventListener("click", async function (e) {
     renderAutostart(stateButton, r && r.ok ? !!r.enabled : stateButton.dataset.on === "1");
     stateButton.disabled = false;
     btn.disabled = false;
-  } else if (btn.id === "btnBackfillToggle") {
-    settings.backfill_enabled = btn.dataset.on !== "1";
-    await saveAndReload();
   } else if (btn.id === "btnBilibiliAutoResolveToggle") {
     settings.bilibili_auto_resolve = settings.bilibili_auto_resolve || {};
     settings.bilibili_auto_resolve.enabled = btn.dataset.on !== "1";
     await saveAndReload();
-  } else if (btn.id === "btnScheduledMessageToggle") {
-    await saveScheduledMessageSettings(btn.dataset.on !== "1");
   } else if (btn.id === "btnTranslationDiscord") {
     const enabled = btn.dataset.on !== "1";
     (settings.discord_channels || []).forEach(function (channel) {
@@ -7194,12 +7946,12 @@ const keyboardModalClosers = {
   youtubeApiKeyModal: closeYoutubeApiKeyModal,
   scheduledMessageContentModal: function () {
     scheduledMessageDraft = null;
-    scheduledCollapsed.clear();
     document.getElementById("scheduledMessageContentModal").style.display = "none";
   },
   messageTraceModal: closeMessageTraceModal,
   diagnosticModal: closeDiagnosticModal,
   backupRestoreModal: closeBackupRestore,
+  networkProxyModal: closeNetworkProxyModal,
   runtimeLogModal: function () { document.getElementById("runtimeLogModal").style.display = "none"; },
 };
 const keyboardModalSaveButtons = {
@@ -7211,6 +7963,7 @@ const keyboardModalSaveButtons = {
   translationConfigModal: "translationConfigSave",
   qqConfigModal: "qqConfigSave",
   discordConfigModal: "discordConfigSave",
+  networkProxyModal: "networkProxySave",
   youtubeApiKeyModal: "youtubeApiKeySave",
   scheduledMessageContentModal: "scheduledMessageContentConfirm",
 };
@@ -7274,7 +8027,7 @@ document.addEventListener("keydown", async function (event) {
     return;
   }
   const active = document.activeElement;
-  if (active && ["backfillLimit", "xRsshubBase", "xPollInterval", "bilibiliRsshubBase", "bilibiliPollInterval", "youtubePollInterval"].includes(active.id)) {
+  if (active && ["xRsshubBase", "xPollInterval", "bilibiliRsshubBase", "bilibiliPollInterval", "youtubePollInterval"].includes(active.id)) {
     event.preventDefault();
     active.dispatchEvent(new Event("change", {bubbles: true}));
     return;
@@ -7291,15 +8044,6 @@ document.addEventListener("change", async function (e) {
   if (el.id === "translationProvider" || el.id === "translationFallback") {
     if (el.id === "translationProvider") syncTranslationFallback("translationProvider", "translationFallback");
     saveAIControls();
-    await saveAndReload();
-    return;
-  }
-  if (el.id === "backfillLimit") {
-    let v = parseInt(el.value, 10);
-    if (!(v > 0)) v = 10;
-    if (v > 30) v = 30;
-    settings.backfill_limit = v;
-    el.value = v;
     await saveAndReload();
     return;
   }
@@ -7413,6 +8157,17 @@ document.addEventListener("change", async function (e) {
     await saveAndReload();
     return;
   }
+  if (el.id === "scheduledGroupTargetsAllEnabled") {
+    const group = activeScheduledMessageGroup();
+    if (!group) return;
+    const qqGroups = (settings.qq_group_openids || []).filter(groupInActiveQQBotWorkspace);
+    const targetIds = new Set(scheduledMessageGroupTargetSelection(group, qqGroups).ids.map(String));
+    (settings.qq_group_openids || []).forEach(function (item) {
+      if (targetIds.has(String(item.openid)) && groupInActiveQQBotWorkspace(item)) item.enabled = el.checked;
+    });
+    await saveAndReload();
+    return;
+  }
   if (el.id === "groupAllEnabled" || el.id === "xGroupAllEnabled" || el.id === "bilibiliGroupAllEnabled" || el.id === "youtubeGroupAllEnabled" || el.id === "qqGroupAllEnabled") {
     const ctx = el.id === "xGroupAllEnabled" ? FG_X : el.id === "bilibiliGroupAllEnabled" ? FG_BILIBILI : el.id === "youtubeGroupAllEnabled" ? FG_YOUTUBE : el.id === "qqGroupAllEnabled" ? FG_QQ : FG_DISCORD;
     const fg = getActiveFg(ctx);
@@ -7484,7 +8239,6 @@ document.addEventListener("change", async function (e) {
 
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
-let lastBackfillSeq = 0;
 let latestStatus = null;
 let latestYoutubeStatus = null;
 
@@ -7546,30 +8300,12 @@ async function refreshStatus() {
     if (owner !== activeQQBotId || epoch !== workspaceEpoch || (settings && settings._profile_bot && settings._profile_bot !== owner)) return;
     latestStatus = st;
     renderStatus(st);
-    // 同步补发开关/上限（QQ 私聊指令可能改动 settings.json）；
-    // 正在编辑的控件不覆盖，避免打断用户输入
-    if (st.backfill_enabled !== undefined) {
-      renderBackfillToggle(st.backfill_enabled !== false);
-    }
-    const bfLimit = document.getElementById("backfillLimit");
-    if (
-      bfLimit
-      && st.backfill_limit !== undefined
-      && document.activeElement !== bfLimit
-    ) {
-      bfLimit.value = Number(st.backfill_limit) > 0 ? st.backfill_limit : 10;
-    }
-    if (st.scheduled_message !== undefined && settings && !scheduledMessageEditorFocused()) {
+    if (st.scheduled_message !== undefined && settings && !scheduledMessageEditorFocused() && !scheduledMessageTargetPickerOpen) {
       settings.scheduled_message = preserveScheduledMessageAttachments(
         st.scheduled_message,
         settings.scheduled_message,
       );
       renderScheduledMessage(settings.scheduled_message);
-    }
-    // 补发/清除成功（含 QQ 私聊触发）后立即刷新待补发数量
-    if (st.backfill_seq !== lastBackfillSeq) {
-      lastBackfillSeq = st.backfill_seq;
-      await refreshBackfill();
     }
   } catch (err) {
     const badge = document.getElementById("badge");
@@ -7682,8 +8418,6 @@ async function init() {
   await refreshChannelNames();
   await refreshStatus();
   setInterval(refreshStatus, 3000);
-  await refreshBackfill();
-  setInterval(refreshBackfill, 300000);
   await refreshIdentities();
   setInterval(refreshIdentities, 30000);
   // X RSS 状态卡片：独立轻量轮询（只更新卡片文本，10 秒足够）

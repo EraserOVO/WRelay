@@ -221,6 +221,8 @@ def _schedule_for_owner(value, raw, owner):
     restrict(value)
     for message in value.get("messages", []):
         restrict(message)
+    for group in value.get("message_groups", []):
+        restrict(group)
     return value
 
 

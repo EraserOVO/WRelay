@@ -1,32 +1,25 @@
-# Code signing policy
+# Windows 发布完整性说明
 
-## Purpose
+WRelay 当前通过 GitHub Actions 构建并发布未签名的 Windows 安装包。公开仓库、版本标签和 SHA-256 校验值便于用户检查来源与文件完整性；SHA-256 不证明发布者身份，也不能保证软件没有缺陷。
 
-WRelay Windows release installers are built from this public repository and signed with Authenticode through SignPath Foundation. A signature is intended to identify the publisher and connect each installer to its reviewed source revision; it does not guarantee that the software is free of defects.
+## 发布流程
 
-Free code signing provided by SignPath.io, certificate by SignPath Foundation.
+1. 维护者从匹配的版本标签手动运行 `Build and publish unsigned Windows release`。若该标签还没有 GitHub Release，工作流会从该标签的 `CHANGELOG.md` 创建草稿；已有 Release 必须仍为草稿。
+2. GitHub 托管的 Windows runner 从标签源码构建安装包，并明确跳过 Authenticode 签名。
+3. 工作流计算安装包的 SHA-256，将 `WRelay-Setup.exe` 和 `WRelay-Setup.sha256` 上传到对应 Release，然后发布 Release。
 
-## People and responsibilities
+## 用户提示
 
-- Authors and reviewers: the WRelay repository maintainers. The primary maintainer is [EraserOVO](https://github.com/EraserOVO).
-- Signing approver: [EraserOVO](https://github.com/EraserOVO), acting as the project release maintainer. Every production signing request requires manual approval.
-- Changes to build scripts, GitHub Actions workflows, SignPath artifact configuration, and this policy receive the same review as application code. Pull requests from non-committers must be reviewed by a maintainer before merge.
+- 安装包未进行 Authenticode 签名，Windows 可能显示「未知发布者」或 SmartScreen 提示。
+- 从 WRelay 官方 GitHub Release 获取安装包和对应的 `.sha256` 文件。可在 PowerShell 中运行 `Get-FileHash .\WRelay-Setup.exe -Algorithm SHA256`，将结果与校验文件中的哈希值比较。
+- 哈希一致只能说明文件与所比较的校验值相同；如果安装包和校验值来自同一被篡改渠道，校验不能证明来源可信。
 
-All project members who can submit or approve signatures must use multi-factor authentication for GitHub and SignPath.
+## 构建范围与隐私
 
-## Build and signing process
+工作流只构建发布安装包并将安装包及校验文件上传到 GitHub Release，不调用外部签名服务。它不包含 `.env.prod`、`data/` 或运行时用户数据。WRelay 的本地运行与数据传输范围见[隐私与本地数据说明](docs/PRIVACY.md)。
 
-1. The maintainer manually starts the workflow from the matching version tag. If no release exists for the tag, the workflow creates a draft from that tag's `CHANGELOG.md`; an existing release must still be a draft. The build runs on a GitHub-hosted Windows runner from that tag.
-2. The workflow builds the unsigned installer from the checked-in source and submits that artifact through SignPath's GitHub trusted build integration.
-3. The project maintainer manually approves the signing request. SignPath applies an Authenticode signature with timestamping and returns the signed installer.
-4. The workflow verifies the Windows signature, computes SHA-256 after signing, and uploads the signed installer and checksum to that GitHub Release.
+本机仍可在维护者配置受信任的 Authenticode 证书后进行单独签名；该签名不属于当前官方 GitHub 发布流程。
 
-Only release artifacts built from this repository are submitted for signing. Third-party binaries bundled with the installer retain their upstream signatures, if any; they are not re-signed as WRelay binaries.
+## 问题反馈
 
-## Privacy
-
-WRelay is operated locally and does not transfer information to WRelay-controlled services. Network transfers occur only as described in the [privacy and local data notice](docs/PRIVACY.md), when the operator enables or requests those features. The release workflow sends build artifacts and build provenance to GitHub Actions and SignPath for signing; it does not include `.env.prod`, `data/`, or runtime user data.
-
-## Reporting
-
-Report suspected signing or release-integrity issues through [GitHub Security Advisories](https://github.com/EraserOVO/WRelay/security/advisories/new) or the repository's issue tracker.
+请通过 [GitHub Security Advisories](https://github.com/EraserOVO/WRelay/security/advisories/new) 或仓库 issue tracker 报告疑似发布完整性问题。

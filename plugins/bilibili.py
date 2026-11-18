@@ -64,8 +64,13 @@ from plugins.history import (
 from plugins.json_io import atomic_write_json, run_in_thread_to_completion
 from plugins.media import fetch_bytes, fetch_bytes_many, get_max_download_bytes, make_media_link, make_text
 from plugins.paths import data_path
+from plugins.network_proxy import proxy_for_url
 from plugins.retry import send_and_record
-from plugins.rss_polling import read_rss_poll_interval, run_rss_poll_loop
+from plugins.rss_polling import (
+    RSS_CONNECTION_RETRY_INTERVAL,
+    read_rss_poll_interval,
+    run_rss_poll_loop,
+)
 from plugins.stats import record
 from plugins.translation import translate_text_parts
 
@@ -77,7 +82,7 @@ FEED_RETRY_DELAYS = (2, 5, 15)
 FEED_REQUEST_GAP = 2
 # RSSHub 常与本程序同时开机启动（Docker Desktop 登录自启），容器需要
 # 1~2 分钟才监听端口。启动初期连接被拒属于"服务尚未就绪"，不是真的
-# 请求失败：记为 pending 并照常重试，避免开机即刷失败与三轮告警。
+# 请求失败：记为 pending 并在 60 秒后重试，避免开机即刷失败与三轮告警。
 RSSHUB_COLD_START_GRACE = 240
 _PROCESS_STARTED_AT = time.time()
 
@@ -96,6 +101,7 @@ BILIBILI_STATE_FILE = data_path("bilibili.json")
 BILIBILI_PROTECTION_FILE = data_path("bilibili_protection.json")
 
 _feed_client = None
+_proxy_feed_clients = {}
 _feed_request_tasks = set()
 _feed_stopping = False
 _state_file_lock = threading.Lock()
@@ -147,13 +153,47 @@ def _short_error(error, limit=160):
 def _get_feed_client():
     global _feed_client
     if _feed_client is None:
-        # RSSHub 通常是本机/内网服务；Bilibili 源站访问由 RSSHub 自己负责。
+        # 未显式配置代理时直连；本机/内网 RSSHub 与本机服务绕过代理。
         _feed_client = httpx.AsyncClient(
             follow_redirects=True,
             trust_env=False,
             headers={"User-Agent": "WRelay Bilibili RSS"},
         )
     return _feed_client
+
+
+def _get_feed_client_for_url(url):
+    try:
+        host = (urlparse(str(url or "")).hostname or "").lower()
+    except ValueError:
+        host = ""
+    is_bilibili_host = any(
+        host == domain or host.endswith("." + domain)
+        for domain in (
+            "bilibili.com",
+            "bilibili.tv",
+            "bilivideo.com",
+            "hdslb.com",
+            "biliapi.net",
+            "biliapi.com",
+            "b23.tv",
+            "bili2233.cn",
+        )
+    )
+    service = "bilibili" if is_bilibili_host else "rsshub"
+    proxy = proxy_for_url(service, url)
+    if not proxy:
+        return _get_feed_client()
+    client = _proxy_feed_clients.get(proxy)
+    if client is None or client.is_closed:
+        client = httpx.AsyncClient(
+            proxy=proxy,
+            follow_redirects=True,
+            trust_env=False,
+            headers={"User-Agent": "WRelay Bilibili RSS"},
+        )
+        _proxy_feed_clients[proxy] = client
+    return client
 
 
 async def _bilibili_get(*args, **kwargs):
@@ -164,7 +204,8 @@ async def _bilibili_get(*args, **kwargs):
     if task is not None:
         _feed_request_tasks.add(task)
     try:
-        return await _get_feed_client().get(*args, **kwargs)
+        url = args[0] if args else kwargs.get("url")
+        return await _get_feed_client_for_url(url).get(*args, **kwargs)
     finally:
         if task is not None:
             _feed_request_tasks.discard(task)
@@ -196,6 +237,10 @@ async def _close_feed_client():
     if _feed_client is not None:
         await _feed_client.aclose()
         _feed_client = None
+    proxy_clients = list(_proxy_feed_clients.values())
+    _proxy_feed_clients.clear()
+    if proxy_clients:
+        await asyncio.gather(*(client.aclose() for client in proxy_clients if not client.is_closed))
 
 
 async def _get_wbi_mixin_key():
@@ -1383,7 +1428,7 @@ async def _poll_all_profile():
         sources.append(source)
     if not sources:
         _runtime_status["source_health"] = []
-        return
+        return False
     sem = asyncio.Semaphore(BILIBILI_POLL_CONCURRENCY)
 
     async def poll_one(source):
@@ -1440,6 +1485,14 @@ async def _poll_all_profile():
         "last_result": last_result,
         "last_error": last_error,
     })
+    return any(
+        result.get("result") == "pending"
+        or (
+            result.get("result") == "fetch_failed"
+            and "请求异常" in str(result.get("error") or "")
+        )
+        for result in results
+    )
 
 
 async def _poll_loop():
@@ -1451,6 +1504,7 @@ async def _poll_loop():
         poll_all=_poll_all,
         read_interval=lambda: _profile_runtime.interval(_read_poll_interval),
         logger=logger,
+        retry_interval=RSS_CONNECTION_RETRY_INTERVAL,
     )
 
 
@@ -1469,7 +1523,10 @@ _profile_runtime = RSSProfiles(globals(), 'bilibili')
 
 
 async def _poll_all():
-    return await _profile_runtime.poll(_poll_all_profile)
+    return await _profile_runtime.poll(
+        _poll_all_profile,
+        retry_interval=RSS_CONNECTION_RETRY_INTERVAL,
+    )
 
 
 _loop_started = False

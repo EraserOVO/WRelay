@@ -4,9 +4,12 @@
   function externalLinkButton(button) {
     const destination = button.getAttribute("aria-label") ||
       button.closest(".settings-row")?.querySelector("strong")?.textContent || button.textContent.trim();
-    const label = "打开" + destination.replace(/^打开\s*/, "");
+    const destinationName = destination.replace(/^打开\s*/, "").trim();
+    const hasNearbyDescription = !!button.closest(".settings-row")?.querySelector(".settings-item-copy small")?.textContent.trim();
+    const visibleLabel = hasNearbyDescription ? "打开" : (button.dataset.linkLabel || destinationName);
+    const label = "打开 " + destinationName;
     button.classList.add("external-link-button");
-    button.innerHTML = externalIcon + '<span>打开</span>';
+    button.innerHTML = externalIcon + '<span>' + visibleLabel + '</span>';
     button.setAttribute("aria-label", label);
     button.title = label;
   }

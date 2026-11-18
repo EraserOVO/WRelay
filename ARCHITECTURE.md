@@ -198,7 +198,7 @@ Discord Embed 的链接仅在正文确有非空白文本时才因“正文已包
 
 启用后后台每 60 秒检查一轮，连接和手动操作仍可触发检查；所有补发发送共用最短 5 秒间隔，并在发送前重新读取开关和群路由。关闭时停止调度任务并等待其退出；单轮异常会记录，下一轮继续。
 
-频道历史扫描失败不会阻止该频道投递已经保存在本机的欠账；扫描错误显示在补发状态，后续轮次继续检查。
+频道历史扫描失败不会阻止该频道投递已经保存在本机的欠账；扫描断点保留供后续轮次续扫。扫描分页遇到网络断连或 Discord 5xx 时做有限重试，耗尽后记录频道和错误并等待下一轮。面板将“扫描任务正在运行”与“存在未完成扫描、等待重试”分开展示，失败时不再冒充持续扫描。
 
 补发目标失败时，持久缺口按目标分别记录退避时间，依次为 60、120、240、480、900 秒并在 900 秒封顶；查询可发送欠账时跳过未到期目标，避免它长期占满批次。其他路径正在处理的目标不计失败。已有旧格式数据库会自动增加退避字段，保留原有欠账。
 
@@ -272,6 +272,7 @@ RSSHub 常与本程序由同一次开机启动拉起（例如运行在 Docker De
 记为 `pending`，面板显示“等待 RSSHub 启动”，因此不会在开机阶段误报失败或触发
 “连续三轮轮询失败”告警；`pending` 与失败一样不推进游标。该宽限期按进程启动时间计算，
 只影响启动阶段，HTTP 状态码错误（如 503）在任何时候都仍按真实失败上报。
+X/Bilibili 的 `pending` 或连接异常会在 60 秒后重试，避免错过 RSSHub 启动窗口后等待完整轮询间隔；连接恢复后回到账号配置的间隔。多账号模式下，账号级计时器也采用该重试间隔；YouTube 保持原轮询行为。
 两条 RSS 链路处理成功的 200 响应时，若响应没有新 ETag，会清除旧验证器；后续请求不再携带失效的 If-None-Match 值。
 X 公开时间线的 MP4 变体按有效非负 bitrate 取最低档；无效数值（含 NaN/Infinity）按 0 处理，不会中断整份时间线解析。RSSHub 正常路径只有一条视频直链，无法选择档位。
 X 公开时间线单条视频的 `video_info` 或 `variants` 结构无效时只跳过该视频媒体，推文正文仍保留。
@@ -640,6 +641,8 @@ Discord 与 QQ 网关启动失败后由 `plugins/discord_reconnect.py` 常驻监
 
 ## 8. 重要数据文件
 
+全局出站代理由设置页维护在 `data/network_proxies.json`，字段为 Discord、X、远程 RSSHub、Bilibili、YouTube、Steam、翻译/AI。它不属于单个 QQ Bot 工作区配置；修改后由面板重启机器人。HTTP/HTTPS 地址按链路分别应用，未配置时保留各链路现有的环境变量回退行为。设置页可读取当前 Windows 回环系统代理并填入 Discord/X，但不会自动保存；本机/局域网 RSSHub 与本机 AI 服务绕过代理。完整配置备份包含该文件，备份可能含带认证信息的代理 URL。
+
 私聊 Bilibili 投稿链接的消息类型筛选保存在 settings.json 的 bilibili_c2c_relay_filter 中，由管理面板「QQ → QQ」页的统一「手动转发」卡右侧「内容筛选」二级窗口的 Bilibili Tab 读写；视频本体归入“视频”类型，旧配置缺少此字段时按全部支持类型启用处理。该筛选不区分内容类型：链接指向视频、专栏还是动态由链接本身决定，面板不提供投稿类型选项。
 
 三条手动转发的类型筛选各自使用该链路实际支持的集合（`plugins/filter.py` 的 `DISCORD_MESSAGE_TYPES` / `X_MESSAGE_TYPES` / `BILIBILI_MESSAGE_TYPES`，由 `MANUAL_RELAY_FILTER_TYPES` 关联到 settings 字段）：Discord 六类齐备，X 为文字/图片/视频，Bilibili 为文字/图片/链接/视频。不支持的类型不在面板渲染（只显示该链路可用的筛选项），不会出现点了没有效果的按钮。“视频”是 X/Bilibili 的规范类型名（Discord 的通用附件仍叫“文件”）：`LEGACY_MESSAGE_TYPE_ALIASES` 把旧配置里的“文件”映射为“视频”，`normalize_message_types` 在读取时完成迁移——只在目标名属于该链路支持集时映射，因此 Discord 的“文件”不受影响。渲染器检查的类型名必须存在于对应规范集（X/Bilibili 的媒体槽位即“视频”）。
@@ -650,9 +653,11 @@ X/Bilibili 早期与 Discord 共用六类型集合，存量配置可能存着本
 
 定时消息循环按条隔离计划时间计算与投递异常：计算抛错的计划暂停到配置变化，发送后的重算抛错也只暂停该条；发送失败则推进到下一次计划时间。其他计划继续处理，不会因一条反复抛错而每秒重试或阻塞同轮任务。
 
-定时消息的**目标按条配置**：`scheduled_message.messages[i]` 支持 `target_mode`（`groups` / `forward_group` / `all`）、消息级 `target_groups` 与 `forward_groups`；缺少 `target_mode` 的旧消息按「指定群」并沿用顶层 `target_groups`，因此旧配置零迁移。`config._scheduled_message_targets()` 归一化每条消息，`config.resolve_scheduled_targets()` 发送前结合当前 `qq_group_openids`、`qq_forwarding_groups`（跳过已暂停组）与启用群解析出实际目标，只保留全局启用的群。循环条件由「顶层目标非空」改为「任一条消息可能解析出目标」，因此顶层默认为空时不会整条链路停摆；`manage._scheduled_has_any_target()` 同步用于 `/定时消息 开启` 的前置校验，`/定时消息` 查询输出「统一默认目标 N 个群」或「按消息配置（指定群 x、转发组 y、全部群 z）」。
+定时消息配置新增 `scheduled_message.message_groups[]`：消息组保存 `id`、`name`、`target_mode`、`target_groups`、`forward_groups` 和嵌套 `messages[]`。同组消息共用目标，计划与图片仍按消息保存。读取时 `config.get_scheduled_message_config()` 将组内消息展开为现有调度器可识别的计划，并在发送前通过 `config.resolve_scheduled_targets()` 解析群组或动态的 QQ→QQ 转发组/全部已启用群；发送仍只到当前账号已启用的群。旧 `scheduled_message.messages[]` 会由面板按目标设置归组，指定群列表相同的消息合并到一组，旧转发组/全部群目标语义保留；仍可读取未迁移的旧配置。
 
-校验口径必须与「空列表 = 沿用默认目标」一致：`settings_model._validate_scheduled_messages()` 只拒绝非法的 `target_mode`、字段类型错误，以及转发组模式下 `forward_groups` 为空；**指定群模式允许空 `target_groups`**。否则前端保存时补上的空列表会让整份 settings 校验失败，连带阻塞转发组等其他保存操作。
+消息支持可选布尔字段 `enabled`，缺失时默认启用；面板按消息或当前组批量切换，编辑内容时保留状态。配置读取将停用消息排除在调度计划之外，重新启用后按当前时间重新计算下一次发送。调度不再读取全局 `scheduled_message.enabled`；私聊命令不再提供整体开启或关闭，只保留查询和清空。
+
+`settings_model._validate_scheduled_messages()` 同时校验旧消息列表和新消息组结构，包括组级目标与嵌套计划字段；遗留“指定群且目标为空”的消息仍按顶层默认目标解析，避免旧配置被拒绝。
 
 QQ 定时消息可在每条计划内保存一张 PNG、JPEG、GIF 或 WebP 附件，正文允许为空以发送纯图片。图片 data URL 与消息计划一同保存在 `settings.json`，每张最多 2 MiB、全部最多 3 MiB，因此沿用现有配置备份与恢复。投递先发送正文，再发送图片；本地图片上传失败按投递失败记录，不会生成空链接降级。定时循环的计划签名忽略图片数据，避免每秒对较大的 Base64 附件重复格式化；面板每 3 秒轮询的 `/api/status` 只返回计划摘要，不回传图片数据。
 
@@ -667,6 +672,7 @@ QQ 定时消息可在每条计划内保存一张 PNG、JPEG、GIF 或 WebP 附�
 
 | 文件 | 写入方 | 读取方 | 内容 |
 |------|--------|--------|------|
+| `data/network_proxies.json` | 设置页（`panel/network_proxy_api.py`） | bot 与对应出站客户端 | 全局按链路配置的 HTTP/HTTPS 代理；包含在配置备份中，不按 QQ Bot 分开 |
 | `data/settings.json` | 面板（主要；保存时先轮转 `settings.json.bak` 备份）；bot（仅文件完全不存在时首次默认初始化） | bot（高频，带线程安全快照缓存；损坏/结构无效时内存降级，不覆盖原文件）、面板 | 启用的群/频道/用户列表、补发开关、模式预设 |
 | `data/settings.json.bak` | 面板（每次保存前轮转写入） | 面板 / 人工（配置损坏或误写时恢复） | 上一版 settings.json 的完整备份（仅保留最近一代） |
 | `data/restore_backups/restore-before-*.zip` | 面板 | 面板恢复流程 / 管理员 | 每次恢复前的白名单快照；多文件恢复失败时用于自动回滚，最多保留最近 10 份 |
@@ -697,7 +703,9 @@ QQ 定时消息可在每条计划内保存一张 PNG、JPEG、GIF 或 WebP 附�
 
 | 文件 | 职责 | 修改频率 |
 |------|------|----------|
-| `bot.py` | 入口：适配器注册、日志轮转、运行时日志级别监听；控制台和文件日志均关闭异常局部变量诊断，避免 traceback 输出适配器对象中的 Token | 低 |
+| `bot.py` | 入口：适配器注册、日志轮转、运行时日志级别监听；在 NoneBot 初始化前加载设置页中的 Discord 代理，使首次 Gateway 连接使用已保存设置；控制台和文件日志均关闭异常局部变量诊断，避免 traceback 输出适配器对象中的 Token | 低 |
+| `plugins/network_proxy.py` | 全局代理配置的校验、原子读写、链路解析；本机/私有地址默认绕过代理 | 低 |
+| `panel/network_proxy_api.py` | 设置页代理配置读写、Windows 系统代理检测及 Discord/X 出站连接检测；检测不回显代理地址中的认证信息 | 低 |
 | `plugins/config.py` | settings.json 消费者：带文件版本缓存的配置读取；Discord 实时转发和 QQ 默认发送路由从单次快照取得频道/目标群/筛选及 Bot 绑定；文件缺失时初始化默认值，损坏/结构无效时内存降级（不写盘） | 低 |
 | `plugins/relay.py` | 实时转发主逻辑：在线程池读取频道/群/筛选快照 → 去重 → 渲染 → 在线程池复查群状态 → 发送 → 记录 | 中 |
 | `plugins/command.py` | QQ 私聊 relay 命令 + OpenID 自动发现 + 身份记录 | 中 |
@@ -724,17 +732,17 @@ QQ 定时消息可在每条计划内保存一张 PNG、JPEG、GIF 或 WebP 附�
 | `plugins/translation.py` | 统一翻译路由、后备服务和最近成功服务状态；同一消息与路由身份的并发请求合并为一个在途翻译 | 中 |
 | `plugins/ai_client.py` | OpenAI 兼容 AI 请求、模型可用性检查和自动轮换；关闭时回收请求后关闭共享客户端 | 中 |
 | `plugins/tencent_tmt.py` | 腾讯 TMT 请求适配和错误转换；关闭时回收请求后关闭共享客户端 | 低 |
-| `plugins/scheduled_message.py` | 按每条消息自己的目标（指定群 / QQ→QQ 转发组 / 全部群）和日历计划进行 QQ 定时消息投递，支持正文与本地图片附件；计划及发送前的群、转发组与启用群配置在线程池读取；关闭期间拒绝连接事件重启循环 | 中 |
+| `plugins/scheduled_message.py` | 按消息组目标和每条消息的日历计划进行 QQ 定时消息投递；支持指定 QQ 群、动态 QQ→QQ 转发组、全部已启用群及正文/本地图片附件；计划及发送前的群配置在线程池读取 | 中 |
 | `plugins/scheduled_message_media.py` | 定时消息 PNG/JPEG/GIF/WebP data URL 与单图/总量大小校验 | 低 |
 | `plugins/x_rss_parser.py` | RSS 条目解析；只接受 RSS 根节点，避免把格式正确的 HTML 错误页缓存为空 feed | 中 |
 | `plugins/bilibili_parser.py` | Bilibili RSS 条目解析与稳定游标生成；拒绝非 RSS 文档根节点；手动转发链接识别（视频/opus）与专栏、动态详情归一为统一 post 结构 | 中 |
 | `plugins/bilibili_rate_limit.py` | Bilibili 与 YouTube 投递保护共用的限速配置归一化（非有限/溢出整数回退默认值）、积压裁剪和时间窗计算 | 低 |
-| `plugins/media.py` | 文本美化（Markdown → 纯文本）+ Emoji 提取 + 并发受限、批次内按 URL 去重的媒体下载；代理配置变化后重建 Discord/X/YouTube 媒体客户端；关闭时回收在途下载后关闭共享 HTTP 客户端 | 低 |
+| `plugins/media.py` | 文本美化（Markdown → 纯文本）+ Emoji 提取 + 并发受限、批次内按 URL 去重的媒体下载；Discord、X/Twitter、YouTube 媒体分别使用对应专属代理或旧式回退值；关闭时回收在途下载后关闭共享 HTTP 客户端 | 低 |
 | `plugins/dedup.py` | 去重纯函数：该不该发、发给谁、成功后怎么记 | 低 |
 | `plugins/filter.py` | 消息筛选纯函数；各链路支持的消息类型集合（`DISCORD/X/BILIBILI/YOUTUBE_MESSAGE_TYPES`、`MANUAL_RELAY_FILTER_TYPES`、`MESSAGE_TYPE_LABELS`）按链路归一化启用类型 | 低 |
 | `plugins/history.py` | discord_last.json 读写（带 mtime 缓存；异步读写在线程池执行并串行；读取或写入被取消时均等待已启动的磁盘操作结束后才释放游标锁） | 低 |
 | `plugins/backfill.py` | 启动后自动补发离线缺失消息；每轮在工作线程读取开关、额度、频道和目标群配置快照 | 中 |
-| `plugins/backfill_api.py` | 补发 HTTP 接口（面板调用）+ 频道权限审计；补发路由快照、频道名配置和审计 JSON 在线程池读取，刷新超时会终止并回收诊断子进程 | 中 |
+| `plugins/backfill_api.py` | 补发 HTTP 接口（面板调用）+ 频道权限审计；待补发状态区分运行中扫描与等待重试的未完成扫描；补发路由快照、频道名配置和审计 JSON 在线程池读取，刷新超时会终止并回收诊断子进程 | 中 |
 | `plugins/identities.py` | OpenID 身份资料库（昵称/群名/备注） | 低 |
 | `plugins/stats.py` | 转发统计；异步首次读取和计数落盘在线程池执行，取消时等待已启动的读写完成再释放计数锁，防止阻塞事件循环或新旧计数快照倒序落盘 | 低 |
 | `plugins/json_io.py` | JSON 原子读写与跨进程锁；提供线程池 I/O 完成等待器，调用重复取消也会等底层操作完成后再传播取消，即使后台操作失败也保留调用方取消；读改写遇到已存在的损坏文件会中止，不以默认值覆盖 | 低 |

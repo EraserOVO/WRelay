@@ -767,17 +767,6 @@
   $("steamResetDraft").addEventListener("click", () => showConfirmDlg("重新加载 Steam 设置", "将放弃尚未保存的 Steam 来源和转发组修改。", () => {
     clearTimeout(draftSaveTimer); drafts.delete(draftOwner); draft = null; draftDirty = false; draftConflict = false; draftSaveError = ""; renderSteamPage();
   }, "重新加载"));
-  $("steamClearPaused").addEventListener("click", () => {
-    const owner = currentQQBotId();
-    showConfirmDlg("清理暂停的待发送消息", "将删除当前账号中因来源、监控内容或目标群已停用或移除而暂停的消息。此操作无法撤回；正在发送的消息会先完成。", async () => {
-      if (owner !== currentQQBotId()) return showAlert("清理失败", "账号已切换，请重新操作。");
-      if (!await flushDraftSave()) return showAlert("清理失败", "请先处理 Steam 来源或转发组的未完成保存。");
-      const result = await jpost("/api/steam/clear-paused");
-      if (!result.ok) return showAlert("清理失败", result.msg || "清理失败");
-      showAlert("清理完成", "已清理 " + result.removed + " 条暂停消息。");
-      await status();
-    }, "清理消息");
-  });
   async function status() {
     if (typeof activePage === "undefined" || activePage !== "steam") return;
     const owner = currentQQBotId();
@@ -817,7 +806,6 @@
       badge.textContent = badgeText;
       badge.className = "badge " + state;
       badge.title = hasError ? errorHint : badgeText;
-      $("steamClearPaused").disabled = !(data.queue_paused > 0);
       if (typeof renderChainStatusShortcut === "function") renderChainStatusShortcut();
     } catch (error) {
       const statusElement = $("steamStatus");
@@ -826,7 +814,6 @@
       statusElement.dataset.state = "off";
       $("steamBadge").textContent = "读取失败";
       $("steamBadge").className = "badge off";
-      $("steamClearPaused").disabled = true;
       if (typeof renderChainStatusShortcut === "function") renderChainStatusShortcut();
     }
   }

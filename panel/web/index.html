@@ -18,7 +18,7 @@
   html.panel-styles-ready body { visibility: visible; }
 </style>
 <link rel="icon" type="image/svg+xml" href="./wrelay-logo.svg">
-<link rel="stylesheet" href="./style.css?v=20261116-credential-health-r2">
+<link rel="stylesheet" href="./style.css?v=20261118-registry-picker-edit-r1">
 <link rel="stylesheet" href="./ui-components.css?v=20261116-profile-import-summary-r1">
 <link rel="stylesheet" href="./onboarding.css?v=20261107-restart">
 <link rel="stylesheet" href="./personal-qq.css">
@@ -76,12 +76,10 @@
           <span class="robot-action-slot" data-slot="2">
             <button id="btnStart" class="panel-action-icon" type="button" title="启动机器人" aria-label="启动机器人" disabled><svg data-mingcute-icon="play" data-mingcute-size="18"></svg></button>
             <button id="btnStop" class="danger panel-action-icon" type="button" title="停止机器人" aria-label="停止机器人"><svg data-mingcute-icon="stop" data-mingcute-size="18"></svg></button>
-            <button id="discordConfigShortcut" class="sec panel-action-icon page-key-shortcut" type="button" title="配置 Discord Bot 凭据" aria-label="配置 Discord Bot 凭据" hidden><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"></circle><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"></path></svg></button>
-            <button id="youtubeApiKeyShortcut" class="sec panel-action-icon page-key-shortcut" type="button" title="配置 YouTube Data API Key" aria-label="配置 YouTube Data API Key" hidden><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"></circle><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"></path></svg></button>
           </span>
           <span class="robot-action-slot" data-slot="3">
             <button id="btnRestart" class="sec panel-action-icon" type="button" title="重启机器人" aria-label="重启机器人"><svg data-mingcute-icon="refresh-3" data-mingcute-size="18"></svg></button>
-            <button id="chainStatusShortcut" class="sec panel-action-icon chain-status-shortcut" type="button" aria-controls="backfillCard" title="链路状态" hidden><svg data-mingcute-icon="rss" data-mingcute-size="18"></svg><span>链路状态</span></button>
+            <button id="chainStatusShortcut" class="sec panel-action-icon chain-status-shortcut" type="button" aria-controls="chainDetailModal" title="链路状态" hidden><svg data-mingcute-icon="cloud-download" data-mingcute-size="18"></svg><span>上游状态</span></button>
             <button id="failureNotificationShortcut" class="sec panel-action-icon chain-status-shortcut" type="button" role="switch" aria-checked="false" aria-label="接收失败通知：已关闭" title="接收失败通知 · 已关闭" hidden><svg data-mingcute-icon="warning" data-mingcute-size="18"></svg></button>
           </span>
         </span>
@@ -89,36 +87,15 @@
       <div class="hint" id="managedHint" style="display:none"></div>
     </div>
 
-    <div class="card" id="backfillCard">
-      <h2 style="display:flex;align-items:center;gap:6px;">离线补发 <button class="hintbtn" data-hint="hint-backfill" data-title="离线补发"><svg class="help-icon" data-mingcute-icon="question" data-mingcute-size="16"></svg></button></h2>
-      <div id="backfillContent">
-        <div class="row bf-row">
-          <span class="row bf-limit-row">
-            <span class="bf-limit-label">单次补发上限</span>
-            <input type="number" id="backfillLimit" min="1" max="30" step="1" class="bf-limit-input">
-            <span class="bf-limit-label">条/频道</span>
-          </span>
-          <span class="row bf-pending-row">
-            <span class="bf-limit-label">待补发</span>
-            <b id="backfillPending" class="bf-limit-label">0</b>
-          </span>
-        </div>
-        <div class="row backfill-actions">
-          <button id="btnBackfillToggle" class="sec pill-switch" type="button" role="switch" aria-checked="false"><span class="pill-switch-label">启用补发</span><span class="settings-switch-track" aria-hidden="true"></span></button>
-          <button id="btnBackfillRun" class="sec" disabled>立即补发</button>
-          <span class="row bf-right-group">
-            <button id="btnBackfillRefresh" class="sec rowicon"><svg data-mingcute-icon="refresh-3" data-mingcute-size="18"></svg></button>
-            <button id="btnBackfillClear" class="danger rowicon bf-clear" disabled><svg data-mingcute-icon="delete-2" data-mingcute-size="18"></svg></button>
-          </span>
-        </div>
-        <div id="backfillState" class="hint" role="status">等待检查</div>
-        <div class="hint" id="hint-backfill" style="display:none">启用后定期检查并分批补发；扫描中数量可能增加。清空后不再补发已清除的消息。</div>
-      </div>
+    <div class="card" id="discordUpstreamCard" style="display:none">
+      <h2>Discord 上游状态</h2>
+      <div class="row rss-status-line"><span id="discordUpstreamBadge" class="badge neutral">检测中…</span><span id="discordUpstreamSummary" class="xrss-summary">频道配置读取中…</span></div>
+      <div class="row rss-config-row chain-status-action-row" style="margin-top:10px;"><div class="chain-status-actions"><button id="discordConfigShortcut" class="sec iconbtn page-key-shortcut" type="button" title="配置 Discord Bot 凭据" aria-label="配置 Discord Bot 凭据" hidden><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"></circle><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"></path></svg></button></div></div>
     </div>
 
-    <!-- X RSS 状态：仅 X → QQ 页显示（占离线补发的位置，见 setActivePage） -->
+    <!-- X RSS 状态：仅 X → QQ 页显示 -->
     <div class="card" id="xrssCard" style="display:none">
-      <h2 style="display:flex;align-items:center;gap:6px;">X RSS 状态 <button class="hintbtn" data-hint="hint-xrss" data-title="X RSS 状态"><svg class="help-icon" data-mingcute-icon="question" data-mingcute-size="16"></svg></button></h2>
+      <h2 style="display:flex;align-items:center;gap:6px;">X 上游状态 <button class="hintbtn" data-hint="hint-xrss" data-title="X RSS 状态"><svg class="help-icon" data-mingcute-icon="question" data-mingcute-size="16"></svg></button></h2>
       <div class="row rss-status-line">
         <span id="xrssBadge" class="badge neutral">检测中…</span>
         <span id="xrssSummary" class="xrss-summary">—</span>
@@ -137,7 +114,7 @@
     </div>
 
     <div class="card" id="bilibiliCard" style="display:none">
-      <h2 style="display:flex;align-items:center;gap:6px;">Bilibili RSS 状态 <button class="hintbtn" data-hint="hint-bilibili" data-title="Bilibili RSS 状态"><svg class="help-icon" data-mingcute-icon="question" data-mingcute-size="16"></svg></button></h2>
+      <h2 style="display:flex;align-items:center;gap:6px;">Bilibili 上游状态 <button class="hintbtn" data-hint="hint-bilibili" data-title="Bilibili RSS 状态"><svg class="help-icon" data-mingcute-icon="question" data-mingcute-size="16"></svg></button></h2>
       <div class="row rss-status-line">
         <span id="bilibiliBadge" class="badge neutral">检测中…</span>
         <span id="bilibiliSummary" class="xrss-summary">—</span>
@@ -156,7 +133,7 @@
     </div>
 
     <div class="card" id="youtubeCard" style="display:none">
-      <h2 style="display:flex;align-items:center;gap:6px;">YouTube 状态 <button class="hintbtn" data-hint="hint-youtube" data-title="YouTube 状态"><svg class="help-icon" data-mingcute-icon="question" data-mingcute-size="16"></svg></button></h2>
+      <h2 style="display:flex;align-items:center;gap:6px;">YouTube 上游状态 <button class="hintbtn" data-hint="hint-youtube" data-title="YouTube 状态"><svg class="help-icon" data-mingcute-icon="question" data-mingcute-size="16"></svg></button></h2>
       <div class="row rss-status-line">
         <span id="youtubeBadge" class="badge neutral">检测中…</span>
         <span id="youtubeSummary" class="xrss-summary">—</span>
@@ -165,20 +142,36 @@
         <span class="bf-limit-label">轮询间隔</span>
         <input type="number" id="youtubePollInterval" min="30" step="1" class="bf-limit-input" style="width:70px;">
         <span class="bf-limit-label">秒</span>
-        <div class="bilibili-card-actions">
+        <div class="bilibili-card-actions chain-status-actions">
           <button id="btnYoutubeProtection" class="sec iconbtn" type="button" title="投递保护（限速设置）" aria-label="投递保护（限速设置）"><svg data-mingcute-icon="dashboard-2" data-mingcute-size="18"></svg></button>
+          <button id="youtubeApiKeyShortcut" class="sec iconbtn page-key-shortcut" type="button" title="配置 YouTube Data API Key" aria-label="配置 YouTube Data API Key" hidden><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"></circle><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"></path></svg></button>
         </div>
       </div>
-      <div class="hint" id="hint-youtube" style="display:none">使用 YouTube 官方频道 RSS，无需 RSSHub；轮询间隔至少 30 秒，保存后下一轮生效。第一期只转发视频标题、封面和链接，不转发视频本体。来源支持频道 ID（UC 开头）或 @handle。</div>
+      <div class="hint" id="hint-youtube" style="display:none">使用 Data API 或 YouTube 官方频道 RSS 获取频道更新；轮询间隔至少 30 秒，保存后下一轮生效。第一期只转发视频标题、封面和链接，不转发视频本体。来源支持频道 ID（UC 开头）或 @handle。</div>
     </div>
 
-    <div class="card" id="scheduledMessageCard" style="display:none">
-      <h2 style="display:flex;align-items:center;gap:6px;">定时消息 <button class="hintbtn" data-hint="hint-scheduled-message" data-title="定时消息"><svg class="help-icon" data-mingcute-icon="question" data-mingcute-size="16"></svg></button></h2>
-      <div class="hint" id="hint-scheduled-message" style="display:none">点击添加或编辑可配置多条消息，并分别设置间隔或日历发送计划；仅当前启用的目标群会接收消息。</div>
-      <div id="scheduledMessageSummary" class="scheduled-message-summary">尚未添加消息</div>
-      <div class="row scheduled-message-actions">
-        <button id="btnScheduledMessageEdit" class="rowicon sec" type="button" title="管理定时消息" aria-label="管理定时消息"></button>
-        <button id="btnScheduledMessageToggle" class="sec pill-switch" type="button" role="switch" aria-checked="false"><span class="pill-switch-label">启用定时发送</span><span class="settings-switch-track" aria-hidden="true"></span></button>
+    <div class="card scheduled-message-workspace" id="scheduledMessageCard" style="display:none">
+      <div class="scheduled-message-workspace-heading">
+        <h2 style="display:flex;align-items:center;gap:6px;">定时消息 <button class="hintbtn" data-hint="hint-scheduled-message" data-title="定时消息"><svg class="help-icon" data-mingcute-icon="question" data-mingcute-size="16"></svg></button></h2>
+      </div>
+      <div class="hint" id="hint-scheduled-message" style="display:none">每个消息组包含多条定时消息和一组 QQ 接收群；只有当前启用的群会接收消息。</div>
+      <div class="fgtabs scheduled-message-group-tabs" id="scheduledMessageGroupTabs"></div>
+      <div id="scheduledMessageSummary" class="scheduled-message-summary scheduled-message-group-tools" hidden>尚未添加消息</div>
+      <div class="scheduled-message-group-layout">
+        <div class="fgsection">
+          <h3 class="fgh3"><span>定时消息</span><button class="foldbtn" data-fold="scheduledGroupMessageContent" aria-label="展开/折叠"><svg data-mingcute-icon="down" data-mingcute-size="10"></svg></button></h3>
+          <div id="scheduledGroupMessageContent">
+            <div class="tablewrap"><table id="scheduledGroupMessageTable" style="table-layout:fixed"><thead><tr><th style="width:34px"></th><th style="width:38px;text-align:center"><input type="checkbox" id="scheduledMessageAllEnabled" aria-label="启用或停用全部消息"></th><th>消息</th><th style="width:180px">发送计划</th><th style="width:88px"></th></tr></thead><tbody id="scheduledGroupMessageList"></tbody></table></div>
+            <div class="row addrow"><span class="pane-main-actions"><button type="button" id="btnScheduledMessageEdit">＋ 新增</button></span></div>
+          </div>
+        </div>
+        <div class="fgsection">
+          <h3 class="fgh3"><span>QQ 接收群</span><button class="foldbtn" data-fold="scheduledGroupTargetContent" aria-label="展开/折叠"><svg data-mingcute-icon="down" data-mingcute-size="10"></svg></button></h3>
+          <div id="scheduledGroupTargetContent">
+            <div class="tablewrap"><table id="scheduledGroupTargetTable" style="table-layout:fixed"><thead><tr><th style="width:34px"></th><th style="width:38px;text-align:center" class="col-muted" title="启用 = 是否允许该群接收转发"><input type="checkbox" id="scheduledGroupTargetsAllEnabled" aria-label="启用或停用当前消息组的全部接收群"></th><th>名称</th><th style="width:120px">账号</th><th>Group OpenID</th><th style="width:72px"></th></tr></thead><tbody id="scheduledGroupTargetList"></tbody></table></div>
+            <div class="row addrow"><span class="pane-main-actions"><button type="button" id="btnScheduledGroupTargets">＋ 新增</button></span></div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -286,14 +279,7 @@
     <div class="scheduled-picker-dialog scheduled-message-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="scheduledMessageContentTitle">
       <button type="button" class="modal-x" data-close="scheduledMessageContentModal" aria-label="关闭"><svg data-mingcute-icon="close" data-mingcute-size="18"></svg></button>
       <h3 id="scheduledMessageContentTitle">编辑定时消息</h3>
-      <p>每条消息可单独设置发送目标；未单独设置时沿用顶部默认目标。</p>
       <div class="modal-span-all">
-        <div class="scheduled-message-list-header">
-          <div class="scheduled-message-group-title">消息列表</div>
-          <button id="btnScheduledFoldAll" class="sec" type="button">全部折叠</button>
-          <button id="btnScheduledUnfoldAll" class="sec" type="button">全部展开</button>
-          <button id="btnAddScheduledMessage" class="sec icon-label-button" type="button"><svg data-mingcute-icon="add" data-mingcute-size="16"></svg><span>添加消息</span></button>
-        </div>
         <div id="scheduledMessageEntries" class="scheduled-message-entries"></div>
       </div>
       <div class="scheduled-picker-actions">
@@ -494,7 +480,7 @@
 
   <div id="pageSteam" class="page-content" style="display:none">
     <div class="card steam-runtime-card" id="steamStatusCard">
-      <h2>Steam 运行状态</h2>
+      <h2>Steam 上游状态</h2>
       <div class="row rss-status-line steam-status-line">
         <span id="steamBadge" class="badge neutral">等待状态</span>
         <span id="steamStatus" class="xrss-summary steam-status-copy" data-state="neutral" role="status" aria-live="polite">等待机器人状态</span>
@@ -523,7 +509,6 @@
         <span class="bf-limit-label">轮询间隔</span>
         <input type="number" id="steamPollInterval" min="300" max="86400" step="1" class="bf-limit-input" style="width:70px;">
         <span class="bf-limit-label">秒</span>
-        <div class="steam-status-actions"><button type="button" id="steamClearPaused" class="sec" title="清理暂停的待发送消息" aria-label="清理暂停的待发送消息" disabled>清理暂停消息</button></div>
         <div class="bilibili-card-actions"><button id="btnSteamProtection" class="sec iconbtn" type="button" title="投递保护（限速设置）" aria-label="设置 Steam 投递保护参数"><svg data-mingcute-icon="dashboard-2" data-mingcute-size="18"></svg></button></div>
       </div>
     </div>
@@ -740,6 +725,10 @@
         <div class="settings-row">
           <div class="settings-item-copy"><strong>开机自启</strong><small>登录 Windows 后启动 WRelay 与机器人</small></div>
           <button id="btnSettingsAutostart" type="button" class="sec" disabled aria-label="开机自启" aria-pressed="false"><span class="settings-switch-track" aria-hidden="true"></span></button>
+        </div>
+        <div class="settings-row">
+          <div class="settings-item-copy"><strong>网络代理</strong><small>按链路设置外网代理并检测 Discord、X 连通性</small></div>
+          <button type="button" class="sec icon-label-button" id="btnNetworkProxy"><span>配置</span><svg data-mingcute-icon="right" data-mingcute-size="14"></svg></button>
         </div>
         <div class="settings-row">
           <div class="settings-item-copy"><strong>备份与维护</strong><small id="maintenanceStatus" aria-live="polite">正在检查维护状态…</small></div>
@@ -1048,7 +1037,7 @@
       <input type="password" id="discordConfigToken" autocomplete="new-password" spellcheck="false" style="flex:1;min-width:0;">
     </div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
-      <button id="btnDiscordDev" class="sec linkbtn" type="button" aria-label="打开 Discord 开发者门户">Discord 开发者门户</button>
+      <button id="btnDiscordDev" class="sec linkbtn" type="button" data-link-label="Discord 开发者" aria-label="打开 Discord 开发者门户">Discord 开发者</button>
       <button id="discordConfigSave">保存</button>
     </div>
   </div>
@@ -1095,6 +1084,58 @@
       <div><button type="button" id="profileImportSave" disabled>确认导入</button></div>
     </div>
   </div>
+<div id="networkProxyModal" class="modal-overlay" style="display:none">
+  <section class="modal-shell modal-large network-proxy-modal" role="dialog" aria-modal="true" aria-labelledby="networkProxyTitle">
+    <header class="modal-header">
+      <div class="modal-heading"><h3 id="networkProxyTitle">网络代理</h3><p>留空表示直连或使用该链路原有回退设置。修改后需要重启机器人。</p></div>
+      <div class="modal-header-actions"><button type="button" class="modal-x" data-close="networkProxyModal" aria-label="关闭"><svg data-mingcute-icon="close" data-mingcute-size="18"></svg></button></div>
+    </header>
+    <div class="modal-body network-proxy-body">
+      <div class="network-proxy-autodetect">
+        <div class="network-proxy-copy"><strong>不确定端口？</strong><small>在 Clash Verge 开启「系统代理」后，可自动读取当前 Windows 代理并填入 Discord 和 X。</small></div>
+        <button type="button" class="sec" id="networkProxyDetectSystem">自动读取系统代理</button>
+        <span id="networkProxySystemStatus" role="status" aria-live="polite"></span>
+      </div>
+      <div class="network-proxy-row">
+        <div class="network-proxy-copy"><label for="networkProxyDiscord">Discord 代理</label><small>用于 Discord Gateway 与 API 连接；提供连接检测。</small></div>
+        <input id="networkProxyDiscord" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
+        <div class="network-proxy-actions"><button type="button" class="sec" data-proxy-test="discord">检测连接</button><span id="networkProxyDiscordStatus" role="status" aria-live="polite"></span></div>
+      </div>
+      <div class="network-proxy-row">
+        <div class="network-proxy-copy"><label for="networkProxyX">X 代理</label><small>用于 WRelay 进程访问 X/Twitter；提供连接检测。</small></div>
+        <input id="networkProxyX" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
+        <div class="network-proxy-actions"><button type="button" class="sec" data-proxy-test="x">检测连接</button><span id="networkProxyXStatus" role="status" aria-live="polite"></span></div>
+      </div>
+      <div class="network-proxy-row">
+        <div class="network-proxy-copy"><label for="networkProxyRsshub">远程 RSSHub 代理</label><small>仅作用于 WRelay 请求远程 RSSHub；本机/局域网 RSSHub 自动直连。RSSHub 容器访问上游需在 RSSHub 服务内配置。</small></div>
+        <input id="networkProxyRsshub" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
+        <span class="network-proxy-spacer" aria-hidden="true"></span>
+      </div>
+      <div class="network-proxy-row">
+        <div class="network-proxy-copy"><label for="networkProxyBilibili">Bilibili 代理</label><small>用于 WRelay 直接访问 Bilibili API 和下载视频；通过 RSSHub 获取来源时仍使用上面的 RSSHub 代理。</small></div>
+        <input id="networkProxyBilibili" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
+        <span class="network-proxy-spacer" aria-hidden="true"></span>
+      </div>
+      <div class="network-proxy-row">
+        <div class="network-proxy-copy"><label for="networkProxyYoutube">YouTube 代理</label><small>用于 YouTube RSS 与 API 请求。</small></div>
+        <input id="networkProxyYoutube" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
+        <span class="network-proxy-spacer" aria-hidden="true"></span>
+      </div>
+      <div class="network-proxy-row">
+        <div class="network-proxy-copy"><label for="networkProxySteam">Steam 代理</label><small>用于 Steam 商店、公告与游戏数据请求。</small></div>
+        <input id="networkProxySteam" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
+        <span class="network-proxy-spacer" aria-hidden="true"></span>
+      </div>
+      <div class="network-proxy-row">
+        <div class="network-proxy-copy"><label for="networkProxyTranslation">翻译与 AI API 代理</label><small>用于远程 AI/Tencent TMT 接口；本机 Ollama 地址自动直连。</small></div>
+        <input id="networkProxyTranslation" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
+        <span class="network-proxy-spacer" aria-hidden="true"></span>
+      </div>
+      <p class="network-proxy-note">支持 HTTP/HTTPS 代理地址，可带用户名和密码；配置保存在本机，并会包含在 WRelay 配置备份中。</p>
+    </div>
+    <footer class="modal-footer"><button type="button" class="sec" data-close="networkProxyModal">取消</button><button type="button" id="networkProxySave">保存并重启机器人</button></footer>
+  </section>
+</div>
 <div id="chainDetailModal" class="modal-overlay" style="display:none">
   <section class="modal-shell modal-large chain-detail-modal" role="dialog" aria-modal="true" aria-labelledby="chainDetailTitle">
     <header class="modal-header">
@@ -1102,14 +1143,14 @@
       <div class="modal-header-actions"><button type="button" class="modal-x" data-close="chainDetailModal" aria-label="关闭"><svg data-mingcute-icon="close" data-mingcute-size="18"></svg></button></div>
     </header>
     <div id="chainDetailBody" class="modal-body"></div>
-    <footer class="modal-footer"><button type="button" class="sec" data-close="chainDetailModal">关闭</button></footer>
+    <footer class="modal-footer chain-detail-footer"><button type="button" class="sec chain-detail-close" data-close="chainDetailModal">关闭</button></footer>
   </section>
 </div>
   <script src="./local-api.js"></script>
-<script src="./mingcute-icons.js?v=20261116-youtube-key-visibility-r1"></script>
-<script src="./app.js?v=20261116-credential-health-r3-backfill-status-r1"></script>
+<script src="./mingcute-icons.js?v=20261118-upstream-icon-r1"></script>
+<script src="./app.js?v=20261118-registry-picker-edit-r1"></script>
 <script src="./desktop.js?v=20261107-select-sheen"></script>
-<script src="./ui-components.js?v=20261116-youtube-key-modal-r1"></script>
+<script src="./ui-components.js?v=20261118-link-destination-labels-r1"></script>
 <script src="./personal-qq.js"></script>
   <script src="./bot-profiles.js?v=20261116-profile-menu-actions-r4"></script>
 <script src="./discord-page.js?v=20261114-steam-workspace"></script>

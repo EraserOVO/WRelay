@@ -1,0 +1,98 @@
+name: Build and publish unsigned Windows release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PYTHONUTF8: "1"
+
+jobs:
+  build-publish-unsigned:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Prepare draft release and confirm matching version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ($env:GITHUB_REF_TYPE -ne 'tag' -or $env:GITHUB_REF_NAME -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "Run this workflow from a version tag such as v0.4.0"
+          }
+          $tag = $env:GITHUB_REF_NAME
+          $project = Get-Content pyproject.toml -Raw
+          if ($project -notmatch '(?m)^version\s*=\s*"([^"]+)"') { throw "Project version not found" }
+          $version = $Matches[1]
+          if ($version -ne $tag.Substring(1)) { throw "Git tag and project version do not match" }
+
+          $isDraft = gh release view $tag --json isDraft --jq .isDraft 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            $changelog = Get-Content CHANGELOG.md -Raw
+            $notesPattern = "(?ms)^##\s+$([regex]::Escape($version))\s*\r?\n(.*?)(?=^##\s|\z)"
+            $notesMatch = [regex]::Match($changelog, $notesPattern)
+            if (-not $notesMatch.Success) { throw "Release notes for version $version were not found in CHANGELOG.md" }
+
+            $notesPath = Join-Path $env:RUNNER_TEMP "release-notes-$version.md"
+            [IO.File]::WriteAllText($notesPath, $notesMatch.Groups[1].Value.Trim() + "`n", [Text.UTF8Encoding]::new($false))
+            gh release create $tag --draft --verify-tag --title "WRelay $version" --notes-file $notesPath
+            if ($LASTEXITCODE -ne 0) { throw "Could not create a draft GitHub Release for $tag" }
+
+            $isDraft = gh release view $tag --json isDraft --jq .isDraft
+            if ($LASTEXITCODE -ne 0) { throw "Could not verify the draft GitHub Release for $tag" }
+          }
+          if ($isDraft -ne 'true') { throw "The existing GitHub Release for $tag must be a draft before publishing" }
+
+      - name: Prepare bundled runtime
+        shell: pwsh
+        run: .\scripts\prepare_runtime.ps1
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Prepare compiler environment
+        shell: pwsh
+        run: |
+          python -m venv .runtime\compile-env
+          .\.runtime\compile-env\Scripts\python.exe -m pip install -r requirements-lock.txt -r requirements-build.txt
+
+      - name: Build unsigned release installer
+        shell: pwsh
+        run: .\scripts\build_installer.ps1 -Edition release -Unsigned
+
+      - name: Prepare checksum and release notes
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $installer = Join-Path $PWD 'dist/WRelay-Setup.exe'
+          if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw "Unsigned installer was not created" }
+          $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
+          "$hash  WRelay-Setup.exe" | Set-Content -LiteralPath 'dist/WRelay-Setup.sha256' -Encoding ascii
+
+          $tag = $env:GITHUB_REF_NAME
+          $body = gh release view $tag --json body --jq .body
+          if ($body -notmatch 'Windows 安装包未进行 Authenticode 签名') {
+            $body = $body.TrimEnd() + "`n`nWindows 安装包未进行 Authenticode 签名，Windows 可能显示未知发布者或 SmartScreen 提示。`n请使用附件 WRelay-Setup.sha256 核对下载文件。`n`n发布完整性说明：https://github.com/EraserOVO/WRelay/blob/main/CODE_SIGNING_POLICY.md`n"
+            $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+            [IO.File]::WriteAllText($notesPath, $body, [Text.UTF8Encoding]::new($false))
+            gh release edit $tag --notes-file $notesPath
+            if ($LASTEXITCODE -ne 0) { throw "Could not update release notes" }
+          }
+
+      - name: Upload unsigned installer and checksum, then publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload $env:GITHUB_REF_NAME dist/WRelay-Setup.exe dist/WRelay-Setup.sha256 --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Could not upload unsigned release assets" }
+          gh release edit $env:GITHUB_REF_NAME --draft=false
+          if ($LASTEXITCODE -ne 0) { throw "Could not publish the GitHub Release" }

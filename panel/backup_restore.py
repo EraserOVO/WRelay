@@ -19,6 +19,7 @@ from plugins.state_validation import validate_runtime
 
 
 BACKUP_SETTINGS_NAME = "settings.json"
+BACKUP_CONFIG_NAMES = ("network_proxies.json",)
 BACKUP_DELIVERY_DEDUP_NAME = "delivery_dedup.sqlite3"
 BACKUP_DISCORD_GAPS_NAME = "discord_gaps.sqlite3"
 BACKUP_SQLITE_NAMES = (BACKUP_DELIVERY_DEDUP_NAME, BACKUP_DISCORD_GAPS_NAME)
@@ -86,6 +87,7 @@ class BackupRestoreService:
     def backup_targets(self):
         targets = {
             BACKUP_SETTINGS_NAME: self.settings_file,
+            "network_proxies.json": os.path.join(os.path.dirname(self.settings_file), "network_proxies.json"),
             "discord_last.json": self.discord_last_file,
             "retry_pending.json": self.retry_pending_file,
             "personal_qq_uncertain.json": os.path.join(os.path.dirname(self.settings_file), "personal_qq_uncertain.json"),
@@ -295,6 +297,7 @@ class BackupRestoreService:
         """生成只含白名单文件的 ZIP。"""
         targets = self.backup_targets()
         requested_names = [BACKUP_SETTINGS_NAME]
+        requested_names.extend(BACKUP_CONFIG_NAMES)
         requested_names.extend(name for name in targets if name.startswith("bot_profiles/"))
         if include_runtime_state:
             requested_names.extend(BACKUP_RUNTIME_NAMES)
@@ -363,6 +366,7 @@ class BackupRestoreService:
                 allowed = {
                     BACKUP_MANIFEST_NAME,
                     BACKUP_SETTINGS_NAME,
+                    *BACKUP_CONFIG_NAMES,
                     *BACKUP_RUNTIME_NAMES,
                 }
                 for name in names:
