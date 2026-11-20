@@ -1,10 +1,11 @@
 """配置向导的纯数据操作。复用既有实体和路由，不从发现记录自动授权。"""
 
 from copy import deepcopy
+import hashlib
 import re
 from urllib.parse import urlsplit, quote
 
-PURPOSES = ("discord", "x", "bilibili", "qq")
+PURPOSES = ("discord", "x", "bilibili", "youtube", "steam", "qq")
 DRAFT_FIELDS = ("purpose", "bot_id", "source_id", "source_kind", "source_value",
                 "rsshub", "name", "step")
 
@@ -42,7 +43,7 @@ def rss_base(value):
 
 def source_spec(draft, settings):
     purpose = draft["purpose"]
-    key = {"discord": "discord_channels", "x": "x_rss_sources", "bilibili": "bilibili_sources"}.get(purpose)
+    key = {"discord": "discord_channels", "x": "x_rss_sources", "bilibili": "bilibili_sources", "youtube": "youtube_sources", "steam": "steam_sources"}.get(purpose)
     if not key:
         return None, None, None
     selected = draft.get("source_id", "")
@@ -71,18 +72,42 @@ def source_spec(draft, settings):
         if not re.fullmatch(r"[A-Za-z0-9_]{1,15}", value):
             raise ValueError("请填写 X 用户名，例如 example，不包含链接或 @")
         item = {"source": value, "name": name, **translation_defaults}
-    else:
+    elif purpose == "bilibili":
         kind = draft.get("source_kind") or "up"
         if kind not in ("up", "tag", "keyword") or not value:
             raise ValueError("请填写 UP 主 UID、标签或关键词")
         if kind == "up" and not value.isdigit():
             raise ValueError("UP 主 UID 应为数字，可从个人空间地址 space.bilibili.com/ 后获取")
         item = {"id": kind + ":" + value, "kind": kind, "value": value, **translation_defaults}
+    elif purpose == "youtube":
+        from plugins.youtube_parser import normalize_channel_value, youtube_source_id
+        value = normalize_channel_value(value)
+        if not value:
+            raise ValueError("请填写有效的 YouTube 频道 ID、@用户名或频道主页地址")
+        item = {"id": youtube_source_id(value), "kind": "channel", "value": value,
+                "name": draft.get("name", "").strip() or value, **translation_defaults}
+    else:
+        from plugins.steam_data import app_id, creator_url
+        kind = draft.get("source_kind") or "game"
+        if kind not in ("game", "creator"):
+            raise ValueError("请选择 Steam 来源类型")
+        normalized = app_id(value) if kind == "game" else creator_url(value)
+        if not normalized:
+            raise ValueError("请填写有效的 Steam 游戏 AppID、游戏地址或开发商／发行商主页地址")
+        for existing in settings.get(key, []):
+            old_value = app_id(existing.get("value")) if kind == "game" else creator_url(existing.get("value"))
+            if existing.get("kind") == kind and old_value and old_value.casefold() == normalized.casefold():
+                return key, source_id(purpose, existing), deepcopy(existing)
+        ident = "setup_steam_" + hashlib.sha256((kind + ":" + normalized.casefold()).encode("utf-8")).hexdigest()[:24]
+        item = {"id": ident, "kind": kind, "value": normalized, "name": draft.get("name", "").strip(),
+                "events": ["announcements", "news", "discount"] if kind == "game" else
+                          ["discount", "new_listing", "early_access", "release", "full_release"],
+                "news_feeds": [], "translation_enabled": True, "translation_append_original": True}
     ident = item.get("source", item.get("id"))
     # 新增输入与已登记的来源相同，复用原条目及筛选条件。
     for existing in settings.get(key, []):
         old_id = source_id(purpose, existing)
-        if old_id.casefold() == ident.casefold():
+        if (old_id == ident if purpose == "youtube" else old_id.casefold() == ident.casefold()):
             copied = deepcopy(existing)
             if purpose == "bilibili":
                 copied.pop("name", None)
@@ -95,6 +120,9 @@ def source_id(purpose, item):
         return str(item.get("source") or "")
     if purpose == "bilibili":
         return str(item.get("id") or (item.get("kind", "up") + ":" + str(item.get("value") or item.get("uid") or "")))
+    if purpose == "youtube":
+        from plugins.youtube_parser import youtube_source_id
+        return str(item.get("id") or youtube_source_id(item.get("value") or item.get("channel")))
     return str(item.get("id") or "")
 
 
@@ -125,7 +153,8 @@ def apply_draft(settings, draft, flow_id, known_bot_ids):
         if item is None:
             raise ValueError("接收群尚未注册审核或已被移除")
         owner = str(item.get("bot_id") or "")
-        if (owner and owner != bot_id) or (not owner and len(known_bot_ids) != 1):
+        official_bot_ids = [known for known in known_bot_ids if not known.startswith("personal:")]
+        if (owner and owner != bot_id) or (not owner and (len(official_bot_ids) != 1 or bot_id.startswith("personal:"))):
             raise ValueError("请选择属于当前 QQ 机器人的群；旧版未绑定群请先在现有管理页确认归属")
         item["enabled"] = True
     purpose = draft["purpose"]
@@ -146,7 +175,7 @@ def apply_draft(settings, draft, flow_id, known_bot_ids):
         items.append(source)
     if purpose in ("x", "bilibili"):
         data[purpose + "_rsshub_base"] = rss_base(draft["rsshub"])
-    route_key = {"discord": "forwarding_groups", "x": "x_forwarding_groups", "bilibili": "bilibili_forwarding_groups"}[purpose]
+    route_key = {"discord": "forwarding_groups", "x": "x_forwarding_groups", "bilibili": "bilibili_forwarding_groups", "youtube": "youtube_forwarding_groups", "steam": "steam_forwarding_groups"}[purpose]
     member_key = "channels" if purpose == "discord" else "sources"
     # X 路由使用归一化 source key（URL 来源可能与 source 原值不同）。
     if purpose == "x":
@@ -162,8 +191,8 @@ def apply_draft(settings, draft, flow_id, known_bot_ids):
              member_key: [ident], "groups": list(groups)}
     if existing is not None:
         routes[routes.index(existing)] = route
-    elif len(routes) >= 10:
-        raise ValueError("转发组已达到 10 个，请在现有页面中整理后重试")
+    elif len(routes) >= (30 if purpose in ("youtube", "steam") else 10):
+        raise ValueError("转发组已达到上限，请在现有页面中整理后重试")
     else:
         routes.append(route)
     return data

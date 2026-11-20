@@ -75,41 +75,45 @@ def load_token_proxy():
     """从 .env.prod 读取 Discord token 与代理（不输出 token 本身）"""
     if not os.path.exists(ENV_FILE):
         print(f"[错误] 未找到 {ENV_FILE}")
-        return "", None
+        return [], None
     env = load_env(ENV_FILE)
     try:
-        bots = json.loads(env.get("DISCORD_BOTS", "[]"))
-        token = bots[0]["token"] if bots else ""
+        from plugins.credential_entries import enabled_bots
+        bots = enabled_bots(json.loads(env.get("DISCORD_BOTS", "[]")))
+        tokens = [bot["token"] for bot in bots if bot.get("token")]
     except Exception:
-        token = ""
+        tokens = []
     # 频道扫描与 Bot 使用同一套专用代理；代理软件重启后端口变化时跟随当前系统代理。
     proxy = env.get("DISCORD_PROXY") or None
     if proxy and align_discord_proxy(env):
         proxy = env.get("DISCORD_PROXY") or None
-    return token, proxy
+    return tokens, proxy
 
 
 async def main():
-    token, proxy = load_token_proxy()
-    if not token:
+    tokens, proxy = load_token_proxy()
+    if not tokens:
         print("[错误] 未读取到 DISCORD_BOTS token，请检查 .env.prod 配置")
         return 1
 
-    headers = {"Authorization": f"Bot {token}"}
     # guild 名 → {guild_id, 频道列表 [(name, id, readable)]}
     result = []
     total_visible = 0
     total_readable = 0
+    successful_bots = 0
 
     # 不继承启动扫描器的进程代理变量，和 Bot 一样只使用 DISCORD_PROXY；
     # 未配置时由系统网络路由（包括 TUN）直连 Discord。
     async with httpx.AsyncClient(proxy=proxy, timeout=20, trust_env=False) as client:
+      for token in tokens:
+        headers = {"Authorization": f"Bot {token}"}
         r = await client.get(
             "https://discord.com/api/v10/users/@me/guilds", headers=headers
         )
         if r.status_code != 200:
             print(f"[错误] 服务器列表请求失败: {r.status_code} {r.text}")
-            return 1
+            continue
+        successful_bots += 1
 
         for g in r.json():
             gid = g["id"]
@@ -149,6 +153,19 @@ async def main():
                 channels.append((ch.get("name", "?"), ch["id"], readable))
 
             result.append((gname, gid, channels))
+
+    if not successful_bots:
+        return 1
+    # Merge identical channels from different bots and preserve readability if any bot can read it.
+    merged = {}
+    for gname, gid, channels in result:
+        server = merged.setdefault(gid, {"name": gname, "channels": {}})
+        for cname, cid, readable in channels:
+            previous = server["channels"].get(cid)
+            server["channels"][cid] = (cname, cid, readable or bool(previous and previous[2]))
+    result = [(server["name"], gid, list(server["channels"].values())) for gid, server in merged.items()]
+    total_visible = sum(len(channels) for _, _, channels in result)
+    total_readable = sum(1 for _, _, channels in result for _, _, readable in channels if readable)
 
     # 报告含真实服务器名称、频道名称与 ID，只保存在被忽略的本机 data/ 目录。
     lines = []

@@ -12,6 +12,7 @@ from nonebot import on_notice
 from nonebot.adapters import Bot, Event
 
 from nonebot.adapters.qq import Bot as QQBot
+from nonebot.adapters.qq import MessageSegment as QQMessageSegment
 from nonebot.adapters.qq.event import (
     C2CMessageCreateEvent,
     GroupAddRobotEvent,
@@ -19,6 +20,7 @@ from nonebot.adapters.qq.event import (
 )
 
 from plugins import identities
+from plugins.qq_identity_lookup import schedule_identity_lookup
 from plugins import qq_fwd
 from plugins.config import (
     get_all_channels,
@@ -28,6 +30,8 @@ from plugins.config import (
     get_bilibili_c2c_relay_filter,
     get_channel_translation_config,
     get_x_c2c_relay_filter,
+    get_steam_c2c_relay_filter,
+    get_steam_polling_snapshot,
     get_x_source_translation_config,
     get_image_card_options,
     get_translation_config,
@@ -47,6 +51,7 @@ from plugins.filter import (
     DISCORD_MESSAGE_TYPES,
     X_MESSAGE_TYPES,
     BILIBILI_MESSAGE_TYPES,
+    STEAM_MESSAGE_TYPES,
     get_enabled_message_types,
 )
 from plugins.x_rss import (
@@ -63,6 +68,7 @@ from plugins.json_io import (
 from plugins.paths import data_path
 from plugins.c2c_consumed import mark_consumed
 from plugins.qq_keyboard import send_titled_reply
+from plugins.media import fetch_bytes, make_media_link, make_text
 
 
 relay_command = on_message(
@@ -144,7 +150,7 @@ def save_user_openid(openid):
     )
 
 
-def _record_user_openid_activity(openid, nickname, last_active):
+def _record_user_openid_activity(openid, nickname, last_active, bot_id=""):
     """Persist QQ user discovery and identity outside the event-loop thread."""
     save_user_openid(openid)
     try:
@@ -152,6 +158,7 @@ def _record_user_openid_activity(openid, nickname, last_active):
             openid,
             nickname=nickname,
             last_active=last_active,
+            bot_id=bot_id,
         )
     except Exception as exc:
         logger.warning("QQ 用户身份资料写入失败，已跳过展示信息更新: {}", exc)
@@ -165,6 +172,7 @@ def _record_group_openid_activity(openid, bot_id, group_name, last_active):
             openid,
             group_name=group_name,
             last_active=last_active,
+            bot_id=bot_id,
         )
     except Exception as exc:
         logger.warning("QQ 群身份资料写入失败，已跳过展示信息更新: {}", exc)
@@ -178,9 +186,8 @@ def _record_group_openid_activity(openid, bot_id, group_name, last_active):
 # 用于面板展示识别，绝不参与放行判断（qq_user_openids 仍是唯一
 # 权限来源）。新发现的用户只记录身份，不会自动加入白名单。
 #
-# 昵称取事件自带（FriendAuthor/GroupMemberAuthor.username），
-# 缺失时保持「未命名」，由面板兜底显示并允许手动备注。
-# QQ 官方 API 不提供群名/昵称查询接口，无法主动补全。
+# 私聊优先使用事件昵称，缺失时尝试查询；群名按所属 Bot 查询。
+# 查询失败时保留已有资料，不影响发现和授权。
 # =====================================================
 
 def _event_ts(event):
@@ -244,7 +251,10 @@ async def log_group_message_openid(
             openid,
             username or None,
             _event_ts(event),
+            _qq_bot_id(bot),
         )
+        if not username:
+            schedule_identity_lookup(bot, "users", openid)
 
         return
 
@@ -261,6 +271,7 @@ async def log_group_message_openid(
         None,
         _event_ts(event),
     )
+    schedule_identity_lookup(bot, "groups", event.group_openid)
 
 
 group_notice = on_notice(
@@ -294,6 +305,7 @@ async def log_group_add_openid(
         None,
         _event_ts(event),
     )
+    schedule_identity_lookup(bot, "groups", event.group_openid)
 
 
 # =====================================================
@@ -623,7 +635,7 @@ class _ManualRelaySilentSkip(Exception):
     """内容为空但不应回复提示（如仅启用视频且视频本体拿不到）。"""
 
 
-async def _prepare_discord_relay_content(message):
+async def _prepare_discord_relay_content(message, user=None):
     logger.info("检测到Discord消息链接")
     msg, fetch_err = await fetch_message(message)
     if msg is None:
@@ -635,7 +647,7 @@ async def _prepare_discord_relay_content(message):
     # 频道名：面板配置名优先，未配置时由 build_parts 兜底查真实名。
     all_channels = await asyncio.to_thread(get_all_channels)
     msg["channel_name"] = all_channels.get(msg["channel_id"])
-    relay_filter = await asyncio.to_thread(get_qq_c2c_relay_filter)
+    relay_filter = await asyncio.to_thread(get_qq_c2c_relay_filter, user)
     translation_config = await asyncio.to_thread(
         get_channel_translation_config, msg["channel_id"], manual=True
     )
@@ -661,7 +673,7 @@ async def _prepare_discord_relay_content(message):
     return _ManualRelayContent(text_parts, media_items, translation_key, translation_config, source)
 
 
-async def _prepare_x_relay_content(message):
+async def _prepare_x_relay_content(message, user=None):
     logger.info("检测到 X 消息链接")
     post, source_name, fetch_err = await fetch_x_post(message)
     if post is None:
@@ -670,7 +682,7 @@ async def _prepare_x_relay_content(message):
             + (f"（{localize_user_error(fetch_err)}）" if fetch_err else "")
         )
 
-    x_filter = await asyncio.to_thread(get_x_c2c_relay_filter)
+    x_filter = await asyncio.to_thread(get_x_c2c_relay_filter, user)
     x_match = is_x_status_url(message)
     translation_config = await asyncio.to_thread(
         get_x_source_translation_config,
@@ -695,7 +707,7 @@ async def _prepare_x_relay_content(message):
     return _ManualRelayContent(text_parts, media_items, translation_key, translation_config, source)
 
 
-async def _prepare_bilibili_relay_content(message):
+async def _prepare_bilibili_relay_content(message, user=None):
     logger.info("检测到 Bilibili 投稿链接")
     post, source_name, fetch_err = await fetch_bilibili_manual_post(message)
     if post is None:
@@ -704,7 +716,7 @@ async def _prepare_bilibili_relay_content(message):
             + (f"（{localize_user_error(fetch_err)}）" if fetch_err else "")
         )
 
-    bilibili_filter = await asyncio.to_thread(get_bilibili_c2c_relay_filter)
+    bilibili_filter = await asyncio.to_thread(get_bilibili_c2c_relay_filter, user)
     enabled_types = get_enabled_message_types(
         bilibili_filter, BILIBILI_MESSAGE_TYPES
     )
@@ -726,18 +738,69 @@ async def _prepare_bilibili_relay_content(message):
     return _ManualRelayContent(text_parts, media_items, translation_key, card_source=source)
 
 
+_STEAM_STORE_URL = re.compile(r"^https://store\.steampowered\.com/app/([1-9]\d*)(?:/[^?#\s]*)?(?:\?[^#\s]*)?(?:#[^\s]*)?$", re.I)
+
+
+async def _prepare_steam_relay_content(match, user=None):
+    from plugins.steam import _details
+    appid = match.group(1)
+    enabled = get_enabled_message_types(
+        await asyncio.to_thread(get_steam_c2c_relay_filter, user), STEAM_MESSAGE_TYPES
+    )
+    if not enabled:
+        raise _ManualRelayContentError("消息被筛选，未转发")
+    try:
+        region = (await asyncio.to_thread(get_steam_polling_snapshot)).get("region", "CN")
+        game = await _details(appid, region, {})
+        if game.get("type") != "game":
+            raise ValueError("该商店页面不是游戏")
+    except Exception as exc:
+        logger.warning("获取 Steam 游戏失败: {}", exc)
+        raise _ManualRelayContentError("获取 Steam 游戏页面失败") from exc
+    url = "https://store.steampowered.com/app/" + appid + "/"
+    lines = []
+    if "文字" in enabled:
+        lines.append(str(game["name"]))
+        price = game.get("price") or {}
+        if game.get("free"):
+            lines.append("免费游玩")
+        elif price.get("final_formatted"):
+            lines.append("价格：" + str(price["final_formatted"]))
+        release = game.get("release") or {}
+        if release.get("date"):
+            lines.append("发行日期：" + str(release["date"]))
+    if "链接" in enabled:
+        lines.append(url)
+    media = []
+    image = "https://cdn.cloudflare.steamstatic.com/steam/apps/" + appid + "/header.jpg"
+    if "图片" in enabled:
+        data = await fetch_bytes(image)
+        segment = QQMessageSegment.file_image(data, "steam-cover.jpg") if data else make_media_link("图片", image)
+        media.append({"kind": "图片", "url": image, "segment": segment})
+    if not lines and not media:
+        raise _ManualRelayContentError("消息被筛选，未转发")
+    source = CardSource("Steam", game["name"] if "文字" in enabled else "Steam", "商店游戏",
+                        url if "链接" in enabled else "", avatar_url=image if "图片" in enabled else "")
+    return _ManualRelayContent([make_text("\n".join(lines))] if lines else [], media,
+                               ("steam_manual", appid), card_source=source)
+
+
 async def _prepare_manual_relay_content(
     message,
     qq_message=None,
     content_event=None,
+    user=None,
 ):
     text = str((message or {}).get("content") or "").strip()
     if is_discord_url(text):
-        return await _prepare_discord_relay_content(text)
+        return await _prepare_discord_relay_content(text, user)
     if is_x_status_url(text):
-        return await _prepare_x_relay_content(text)
+        return await _prepare_x_relay_content(text, user)
     if parse_manual_post_url(text):
-        return await _prepare_bilibili_relay_content(text)
+        return await _prepare_bilibili_relay_content(text, user)
+    steam_match = _STEAM_STORE_URL.fullmatch(text)
+    if steam_match:
+        return await _prepare_steam_relay_content(steam_match, user)
 
     text_parts, media_items = await qq_fwd.build_forward_content(qq_fwd.relay_message_payload(message or {}))
 
@@ -811,6 +874,7 @@ async def _consume_next(
             message,
             qq_message=qq_message,
             content_event=content_event,
+            user=user,
         )
     except _ManualRelaySilentSkip:
         _stop_propagation()

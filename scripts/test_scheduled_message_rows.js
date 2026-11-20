@@ -193,6 +193,12 @@ async function run() {
   assert.equal(merged[0].image_data, undefined, "A newly inserted row must not inherit the old first row's image");
   assert.equal(merged[1].image_data, oldMessages[0].image_data);
   assert.equal(merged[2].attachment_id, undefined, "A removed attachment must not reappear after refresh");
+  const legacyPrevious = {messages: oldMessages, message_groups: []};
+  const legacyStatus = {messages: statusMessages, message_groups: []};
+  const legacyMerged = context.preserveScheduledMessageAttachments(legacyStatus, legacyPrevious).messages;
+  assert.equal(legacyMerged[1].image_data, oldMessages[0].image_data, "Empty groups must preserve legacy image data by message ID");
+  assert.equal(legacyMerged[1].image_name, "legacy.png");
+  assert.equal(legacyMerged[0].image_data, "", "New legacy rows must not inherit another row's image");
   console.log("PASS - scheduled messages edit, delete, refresh, workspace and attachment limits");
 }
 

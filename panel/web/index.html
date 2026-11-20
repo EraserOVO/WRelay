@@ -18,10 +18,10 @@
   html.panel-styles-ready body { visibility: visible; }
 </style>
 <link rel="icon" type="image/svg+xml" href="./wrelay-logo.svg">
-<link rel="stylesheet" href="./style.css?v=20261120-registration-empty-text">
-<link rel="stylesheet" href="./ui-components.css?v=20261120-filter-checkbox-alignment">
+<link rel="stylesheet" href="./style.css?v=20261120-translation-settings">
+<link rel="stylesheet" href="./ui-components.css?v=20261120-translation-toggles">
 <link rel="stylesheet" href="./onboarding.css?v=20261107-restart">
-<link rel="stylesheet" href="./personal-qq.css">
+<link rel="stylesheet" href="./personal-qq.css?v=20261120-personal-qq-grid">
 </head>
 <body>
   <script>
@@ -76,6 +76,8 @@
           <span class="robot-action-slot" data-slot="2">
             <button id="btnStart" class="panel-action-icon" type="button" title="启动机器人" aria-label="启动机器人" disabled><svg data-mingcute-icon="play" data-mingcute-size="18"></svg></button>
             <button id="btnStop" class="danger panel-action-icon" type="button" title="停止机器人" aria-label="停止机器人"><svg data-mingcute-icon="stop" data-mingcute-size="18"></svg></button>
+            <button id="scheduledMessageShortcut" class="sec panel-action-icon chain-status-shortcut" type="button" aria-controls="chainDetailModal" aria-label="打开定时消息组" title="定时消息组" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3.5 2"></path></svg></button>
+            <button id="btnBilibiliAutoResolveToggle" class="sec panel-action-icon chain-status-shortcut" type="button" role="switch" aria-checked="false" aria-label="Bilibili 自动解析：已关闭" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13.5a4 4 0 0 0 5.7 0l2.8-2.8a4 4 0 0 0-5.7-5.7l-1.6 1.6"></path><path d="M14 10.5a4 4 0 0 0-5.7 0l-2.8 2.8a4 4 0 0 0 5.7 5.7l1.6-1.6"></path></svg></button>
           </span>
           <span class="robot-action-slot" data-slot="3">
             <button id="btnRestart" class="sec panel-action-icon" type="button" title="重启机器人" aria-label="重启机器人"><svg data-mingcute-icon="refresh-3" data-mingcute-size="18"></svg></button>
@@ -152,7 +154,7 @@
 
     <div class="card scheduled-message-workspace" id="scheduledMessageCard" style="display:none">
       <div class="scheduled-message-workspace-heading">
-        <h2 style="display:flex;align-items:center;gap:6px;">定时消息 <button class="hintbtn" data-hint="hint-scheduled-message" data-title="定时消息"><svg class="help-icon" data-mingcute-icon="question" data-mingcute-size="16"></svg></button></h2>
+        <h2 id="scheduledMessageHeading" style="display:flex;align-items:center;gap:6px;">定时消息 <button class="hintbtn" data-hint="hint-scheduled-message" data-title="定时消息"><svg class="help-icon" data-mingcute-icon="question" data-mingcute-size="16"></svg></button></h2>
       </div>
       <div class="hint" id="hint-scheduled-message" style="display:none">每个消息组包含多条定时消息和一组 QQ 接收群；只有当前启用的群会接收消息。</div>
       <div class="fgtabs scheduled-message-group-tabs" id="scheduledMessageGroupTabs"></div>
@@ -407,16 +409,6 @@
         </div>
       </div>
     </div>
-    <div class="relay-translation-row func-cards">
-      <div class="card" id="bilibiliAutoResolveCard">
-        <h2 style="display:flex;align-items:center;gap:6px;">自动解析 <button class="hintbtn" data-hint="hint-bilibili-auto-resolve" data-title="Bilibili 自动解析"><svg class="help-icon" data-mingcute-icon="question" data-mingcute-size="16"></svg></button></h2>
-        <div class="hint" id="hint-bilibili-auto-resolve" style="display:none">打开后，群里有人发 B 站视频链接，机器人会把视频发回本群。需要群管理员先在机器人资料页开启「接收所有消息」。拿不到视频时不回复。</div>
-        <div class="relay-link-description">群成员发送 Bilibili 视频链接时，机器人把视频发回本群。</div>
-        <div class="row relay-link-actions">
-          <button id="btnBilibiliAutoResolveToggle" class="sec pill-switch" type="button" role="switch" aria-checked="false"><span class="pill-switch-label">启用自动解析</span><span class="settings-switch-track" aria-hidden="true"></span></button>
-        </div>
-      </div>
-    </div>
     </div>
 
   <div id="pageYoutube" class="page-content" style="display:none">
@@ -614,32 +606,11 @@
               <span class="pane-main-actions">
                 <button id="btnAddUser">＋ 新增</button>
                 <button id="btnSyncUsers" class="sec">注册审核</button>
+                <button id="btnUnifiedRelaySources" class="sec" type="button">已注册来源</button>
               </span>
             </div>
           </div>
         </div>
-      </div>
-    </div>
-    <div class="card" id="unifiedRelayCard">
-      <h2 style="display:flex;align-items:center;gap:6px;">手动转发 <button class="hintbtn" data-hint="hint-unified-relay" data-title="手动转发"><svg class="help-icon" data-mingcute-icon="question" data-mingcute-size="16"></svg></button></h2>
-      <div class="hint" id="hint-unified-relay" style="display:none">在私聊发送 relay 序号选定目标群，再发一条 Discord / X / Bilibili 链接即可转发到该群。「内容筛选」按链路设置要转发的消息类型，「已注册来源」查看已登记的频道与账号。</div>
-      <div class="relay-link-description">私聊发送 relay 序号后，下一条链接转发到选定的目标群。</div>
-      <div class="row relay-link-actions">
-        <button id="btnUnifiedRelaySources" class="sec" type="button">已注册来源</button>
-        <button id="btnUnifiedRelayFilter" class="sec iconbtn" type="button" title="内容筛选" aria-label="内容筛选"></button>
-      </div>
-    </div>
-    <div class="card" id="autoTranslationCard">
-      <h2 style="display:flex;align-items:center;gap:6px;">自动翻译 <button class="hintbtn" data-hint="hint-auto-translation" data-title="自动翻译"><svg class="help-icon" data-mingcute-icon="question" data-mingcute-size="16"></svg></button></h2>
-      <div class="hint" id="hint-auto-translation" style="display:none">设置自动转发链路和 QQ → QQ 手动转发共用的首选 / 次选翻译服务。点「翻译链路」可批量开关；单个来源仍可在内容筛选中单独设置。</div>
-      <div class="auto-translation-section">
-        <div class="row auto-translation-fields">
-          <label class="auto-translation-field"><span>首选方式</span><select id="translationProvider"><option value="tencent_tmt">腾讯 TMT</option><option value="ai">AI API</option></select></label>
-          <label class="auto-translation-field"><span>次选方式</span><select id="translationFallback"><option value="ai">AI API</option><option value="tencent_tmt">腾讯 TMT</option><option value="">仅原文</option></select></label>
-        </div>
-      </div>
-      <div class="row relay-link-actions">
-        <button id="btnTranslationChains" class="sec" type="button">翻译链路</button>
       </div>
     </div>
 </div>
@@ -656,10 +627,6 @@
         <div class="settings-row">
           <div class="settings-item-copy"><strong>WRelay 版本</strong><small>当前版本与更新状态</small></div>
           <span id="appVersion" class="settings-static-value version-badge">读取中…</span>
-        </div>
-        <div class="settings-row" aria-live="polite">
-          <div class="settings-item-copy"><strong>自动检查更新</strong><small>启动后自动检查一次，发现新版本时在这里提示</small></div>
-          <button id="btnAutoUpdateCheck" type="button" class="sec settings-switch" role="switch" aria-checked="true" aria-label="启动后自动检查更新"><span class="settings-switch-track" aria-hidden="true"></span></button>
         </div>
         <div class="settings-row" aria-live="polite">
           <div class="settings-item-copy"><strong>更新状态</strong><small id="updateStatus">检查 GitHub 官方稳定版，不会自动下载安装。</small></div>
@@ -710,6 +677,10 @@
         <div class="settings-row">
           <div class="settings-item-copy"><strong>翻译服务</strong><small>管理翻译服务与凭据</small></div>
           <button type="button" class="sec icon-label-button" id="btnTranslationConfig" aria-label="配置翻译服务"><span>配置</span><svg data-mingcute-icon="right" data-mingcute-size="14"></svg></button>
+        </div>
+        <div class="settings-row">
+          <div class="settings-item-copy"><strong>图片化转发</strong><small>将各链路的转发内容呈现为图片卡片</small></div>
+          <button id="btnImageCardConfig" type="button" class="sec icon-label-button" aria-label="配置图片化转发"><span>配置</span><svg data-mingcute-icon="right" data-mingcute-size="14"></svg></button>
         </div>
         <div class="settings-row">
           <div class="settings-item-copy"><strong>配置向导</strong><small>按用途配置账号、来源和接收群，也可继续上次的设置</small></div>
@@ -824,7 +795,7 @@
       <h3 id="bilibiliSourceModalTitle">注册 Bilibili 来源</h3>
       <p id="bilibiliSourceModalContext">选择来源范围，并填写对应的 UID、标签名称或关键词</p>
     </div>
-    <div id="bilibiliSourceModalBody" class="bilibili-source-form-grid"></div>
+    <div id="bilibiliSourceModalBody"></div>
     <div class="bilibili-source-actions">
       <button type="button" class="sec" data-close="bilibiliSourceModal">取消</button>
       <button type="button" id="bilibiliSourceSave">注册来源</button>
@@ -850,28 +821,26 @@
   <div class="backup-dialog" role="dialog" aria-modal="true" aria-labelledby="backupRestoreTitle">
     <button type="button" class="modal-x" data-close="backupRestoreModal" aria-label="关闭"><svg data-mingcute-icon="close" data-mingcute-size="18"></svg></button>
     <div class="backup-title"><h3 id="backupRestoreTitle">安全备份与恢复</h3></div>
-    <section class="backup-section">
+    <div class="backup-columns">
+    <section class="backup-section backup-manual">
+      <strong>手动备份与恢复</strong>
+      <p class="backup-note">默认仅导出配置；包含运行状态时请先停止机器人再恢复，恢复可能造成重复投递或漏发。ZIP 上限为 32 MB。</p>
+      <label class="backup-runtime"><input id="backupIncludeRuntime" type="checkbox"> <span>包含运行状态（游标和重试队列）</span></label>
+      <p id="backupSelectedFile" class="backup-note" aria-live="polite">尚未选择 ZIP 文件</p>
+      <div class="backup-section-actions backup-manual-actions"><button id="btnBackupExport" class="sec" type="button">导出 ZIP</button><label class="sec backup-file-select">选择 ZIP<input id="backupRestoreFile" type="file" accept="application/zip,.zip"></label><button id="btnBackupRestoreConfirm" class="danger" type="button">恢复配置</button></div>
+    </section>
+    <section class="backup-section backup-automatic">
+      <strong>自动备份与恢复</strong>
+      <p class="backup-note">保留最近 30 份，包含运行状态</p>
       <div class="backup-auto">
-        <div class="settings-item-copy"><strong>每小时自动备份</strong><small>保留最近 30 份，包含运行状态</small></div>
+        <div class="settings-item-copy"><strong>每小时自动备份</strong></div>
         <button id="btnAutoBackupToggle" type="button" class="sec pill-switch" role="switch" aria-pressed="true" aria-checked="true"><span class="pill-switch-label">已开启</span><span class="settings-switch-track" aria-hidden="true"></span></button>
       </div>
       <label class="backup-select-label" for="autoBackupSelect">自动备份记录</label>
       <select id="autoBackupSelect" aria-label="选择自动备份"><option value="">正在读取备份…</option></select>
-      <div class="backup-section-actions"><button id="btnAutoBackupNow" class="sec" type="button">立即备份</button><button id="btnAutoBackupRestore" class="danger" type="button">恢复所选备份</button></div>
       <p id="maintenanceDetail" class="backup-status" aria-live="polite"></p>
+      <div class="backup-section-actions"><button id="btnAutoBackupNow" class="sec" type="button">立即备份</button><button id="btnAutoBackupRestore" class="danger" type="button">恢复所选备份</button></div>
     </section>
-    <section class="backup-section backup-manual">
-      <strong>手动备份与恢复</strong>
-      <p class="backup-note">默认仅导出配置；包含运行状态时请先停止机器人再恢复，恢复可能造成重复投递或漏发。ZIP 上限为 5 MB。</p>
-      <label class="backup-runtime"><input id="backupIncludeRuntime" type="checkbox"> <span>包含运行状态（游标和重试队列）</span></label>
-      <p id="backupSelectedFile" class="backup-note" aria-live="polite">尚未选择 ZIP 文件</p>
-    </section>
-    <div class="modal-actions">
-      <span class="modal-actions-start">
-        <button id="btnBackupExport" class="sec" type="button">导出 ZIP</button>
-        <label class="sec backup-file-select">选择 ZIP<input id="backupRestoreFile" type="file" accept="application/zip,.zip"></label>
-      </span>
-      <button id="btnBackupRestoreConfirm" class="danger" type="button">恢复配置</button>
     </div>
   </div>
 </div>
@@ -883,13 +852,15 @@
       <button type="button" class="sec fscope-tab" data-scope="relay">Discord</button>
       <button type="button" class="sec fscope-tab" data-scope="xrelay">X</button>
       <button type="button" class="sec fscope-tab" data-scope="birelay">Bilibili</button>
+      <button type="button" class="sec fscope-tab" data-scope="youtube-unavailable" disabled>YouTube</button>
+      <button type="button" class="sec fscope-tab" data-scope="steamrelay">Steam</button>
     </div>
     <div id="filterAudienceFields" style="display:flex;gap:14px;">
       <div id="filterUsernameField" style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">
         <span class="flt-col-title">用户名筛选 <span class="flt-col-hint">（不区分大小写）</span></span>
         <div id="filterUsernameList" class="flt-list"></div>
         <div style="display:flex;gap:6px;">
-          <input type="text" id="filterUsernameInput" placeholder="Discord 用户名" style="flex:1;min-width:0;">
+          <input type="text" id="filterUsernameInput" aria-label="Discord 用户名" style="flex:1;min-width:0;">
           <button type="button" id="filterUsernameAdd" class="sec" style="flex:none;padding:6px 14px;">确认</button>
         </div>
       </div>
@@ -897,13 +868,13 @@
         <span id="filterKeywordTitle" class="flt-col-title">关键词筛选 <span class="flt-col-hint">（不区分大小写）</span></span>
         <div id="filterKeywordList" class="flt-list"></div>
         <div style="display:flex;gap:6px;">
-          <input type="text" id="filterKeywordInput" placeholder="关键词" style="flex:1;min-width:0;">
+          <input type="text" id="filterKeywordInput" aria-label="关键词" style="flex:1;min-width:0;">
           <button type="button" id="filterKeywordAdd" class="sec" style="flex:none;padding:6px 14px;">确认</button>
         </div>
       </div>
     </div>
     <div id="filterMessageTypeFields" style="margin-top:14px;">
-      <span class="flt-col-title">消息类型 <span class="flt-col-hint">（未选择时转发全部类型；与推文/投稿类型同时启用时需同时符合）</span></span>
+      <span class="flt-col-title">消息类型 <span id="filterTypeHint" class="flt-col-hint">（未选择时转发全部类型；与推文/投稿类型同时启用时需同时符合）</span></span>
       <div id="filterTypeList" class="content-filter-checks" style="margin-top:8px;"></div>
     </div>
     <div id="filterXPostTypeFields" style="display:none;margin-top:14px;">
@@ -922,14 +893,6 @@
         <label class="content-filter-check"><input id="filterTranslationShowDatetime" type="checkbox">显示时间</label>
       </div>
     </div>
-    <div id="filterImageCardFields" style="margin-top:14px;"></div>
-    <template id="imageCardOptionsTemplate">
-      <span class="flt-col-title">消息呈现 <span class="flt-col-hint">（全局）</span></span>
-      <div class="content-filter-checks" style="margin-top:8px;">
-        <label class="content-filter-check"><input data-image-card="enabled" type="checkbox" checked>图片化转发</label>
-        <label class="content-filter-check"><input data-image-card="light" type="checkbox">浅色模式</label>
-      </div>
-    </template>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
       <button id="filterSave">保存</button>
     </div>
@@ -952,11 +915,15 @@
     </div>
   </div>
 </div>
-<div id="translationChainsModal" style="display:none;">
-  <div class="translation-chains-dialog" role="dialog" aria-modal="true" aria-labelledby="translationChainsTitle">
-    <button type="button" class="modal-x" data-close="translationChainsModal" aria-label="关闭"><svg data-mingcute-icon="close" data-mingcute-size="18"></svg></button>
-    <h3 id="translationChainsTitle">翻译链路</h3>
-    <p>开关批量作用于该链路的全部来源，点击后立即保存；关闭后该链路只发原文。</p>
+<div id="qqWhitelistModal" class="legacy-whitelist-modal" style="display:none"></div>
+<div id="translationConfigModal" style="display:none;">
+  <div>
+    <button type="button" class="modal-x" data-close="translationConfigModal" aria-label="关闭"><svg data-mingcute-icon="close" data-mingcute-size="18"></svg></button>
+    <h3>翻译服务配置</h3>
+    <div class="translation-service-fields">
+      <label class="form-field"><span>首选方式</span><select id="translationProvider"><option value="tencent_tmt">腾讯 TMT</option><option value="ai">AI API</option></select></label>
+      <label class="form-field"><span>次选方式</span><select id="translationFallback"><option value="ai">AI API</option><option value="tencent_tmt">腾讯 TMT</option><option value="">仅原文</option></select></label>
+    </div>
     <div class="translation-chain-toggles">
       <button id="btnTranslationDiscord" class="sec translation-toggle pill-switch" type="button" role="switch" aria-checked="false" title="启用或关闭 Discord→QQ 翻译"><span class="pill-switch-label">Discord → QQ 翻译</span><span class="settings-switch-track" aria-hidden="true"></span></button>
       <button id="btnTranslationX" class="sec translation-toggle pill-switch" type="button" role="switch" aria-checked="false" title="启用或关闭 X→QQ 翻译"><span class="pill-switch-label">X → QQ 翻译</span><span class="settings-switch-track" aria-hidden="true"></span></button>
@@ -965,13 +932,13 @@
       <button id="btnTranslationSteam" class="sec translation-toggle pill-switch" type="button" role="switch" aria-checked="false" title="启用或关闭 Steam→QQ 翻译"><span class="pill-switch-label">Steam → QQ 翻译</span><span class="settings-switch-track" aria-hidden="true"></span></button>
       <button id="btnTranslationManual" class="sec translation-toggle pill-switch" type="button" role="switch" aria-checked="false" title="启用或关闭 QQ→QQ 手动转发翻译"><span class="pill-switch-label">QQ → QQ 手动转发翻译</span><span class="settings-switch-track" aria-hidden="true"></span></button>
     </div>
+    <div><div class="translation-settings-actions"><button id="btnTranslationCredentials" class="sec iconbtn" type="button" title="配置翻译服务凭据" aria-label="配置翻译服务凭据"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"></circle><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"></path></svg></button></div><button id="translationSettingsClose" class="sec" type="button" data-close="translationConfigModal">关闭</button></div>
   </div>
 </div>
-<div id="qqWhitelistModal" class="legacy-whitelist-modal" style="display:none"></div>
-<div id="translationConfigModal" style="display:none;">
+<div id="translationCredentialsModal" style="display:none;">
   <div class="translation-config-dialog" style="position:relative;display:flex;flex-direction:column;">
-    <button type="button" class="modal-x" data-close="translationConfigModal" aria-label="关闭"><svg data-mingcute-icon="close" data-mingcute-size="18"></svg></button>
-    <h3 style="margin:0 0 10px;">翻译服务配置</h3>
+    <button type="button" class="modal-x" data-close="translationCredentialsModal" aria-label="关闭"><svg data-mingcute-icon="close" data-mingcute-size="18"></svg></button>
+    <h3 style="margin:0 0 10px;">AI 与腾讯 TMT 配置</h3>
     <div class="translation-config-heading-row">
       <h4 class="translation-config-section-title">AI API 配置</h4>
     </div>
@@ -986,8 +953,8 @@
     <input type="text" id="aiModel" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
     <label for="aiApiKeyEnv" class="translation-config-label">API 密钥环境变量名</label>
     <input type="text" id="aiApiKeyEnv" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
-    <label for="aiApiKey" class="translation-config-label">API 密钥</label>
-    <input type="password" id="aiApiKey" autocomplete="new-password" spellcheck="false" placeholder="留空表示保持已保存的密钥" style="width:100%;box-sizing:border-box;">
+    <label for="aiApiKey" class="translation-config-label">API 密钥（留空保留已保存的密钥）</label>
+    <input type="password" id="aiApiKey" autocomplete="new-password" spellcheck="false" style="width:100%;box-sizing:border-box;">
         <div class="translation-config-test-row">
           <div class="translation-config-test-actions">
             <button id="aiApiTest" class="sec" type="button">检测当前 API</button>
@@ -1024,9 +991,8 @@
     <button type="button" class="modal-x" data-close="qqConfigModal" aria-label="关闭"><svg data-mingcute-icon="close" data-mingcute-size="18"></svg></button>
     <h3 style="margin:0;">QQ Bot 配置</h3>
     <div id="qqConfigBots"></div>
-    <div style="margin-top:12px;"><button type="button" id="qqConfigAddBot" class="sec">＋ 添加 QQ Bot</button></div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
-      <button id="btnQQPlatform" class="sec linkbtn" type="button" aria-label="打开 QQ 机器人平台">QQ 机器人平台</button>
+      <div class="credential-footer-start"><button id="btnQQPlatform" class="sec linkbtn" type="button" aria-label="打开 QQ 机器人平台">QQ 机器人平台</button><button type="button" id="qqConfigAddBot" class="sec">＋ 新增</button></div>
       <button id="qqConfigSave">保存</button>
     </div>
   </div>
@@ -1035,12 +1001,9 @@
   <div style="position:relative;display:flex;flex-direction:column;">
     <button type="button" class="modal-x" data-close="discordConfigModal" aria-label="关闭"><svg data-mingcute-icon="close" data-mingcute-size="18"></svg></button>
     <h3 style="margin:0;">Discord Bot 配置</h3>
-    <label for="discordConfigToken" style="font-size:13px;color:var(--muted);margin-bottom:4px;">Token</label>
-    <div style="display:flex;gap:8px;align-items:center;">
-      <input type="password" id="discordConfigToken" autocomplete="new-password" spellcheck="false" style="flex:1;min-width:0;">
-    </div>
+    <div id="discordConfigEntries" class="credential-list"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
-      <button id="btnDiscordDev" class="sec linkbtn" type="button" data-link-label="Discord 开发者" aria-label="打开 Discord 开发者门户">Discord 开发者</button>
+      <div class="credential-footer-start"><button id="btnDiscordDev" class="sec linkbtn" type="button" data-link-label="Discord 开发者" aria-label="打开 Discord 开发者门户">Discord 开发者</button><button id="discordConfigAdd" class="sec" type="button">＋ 新增</button></div>
       <button id="discordConfigSave">保存</button>
     </div>
   </div>
@@ -1049,15 +1012,8 @@
   <div>
     <button type="button" class="modal-x" data-close="youtubeApiKeyModal" aria-label="关闭"><svg data-mingcute-icon="close" data-mingcute-size="18"></svg></button>
     <h3>YouTube Data API Key</h3>
-    <p>设置后优先使用官方 Data API 读取频道上传；留空时使用 YouTube 官方 RSS。保存后机器人会自动重启。</p>
-    <div class="youtube-api-key-config youtube-api-key-modal-config" aria-label="YouTube Data API Key 设置">
-      <div class="youtube-api-key-copy"><strong>API Key</strong><small id="youtubeApiKeyStatus" role="status">检查配置中…</small></div>
-      <div class="youtube-api-key-input-wrap">
-        <input id="youtubeApiKeyInput" type="password" autocomplete="new-password" spellcheck="false" placeholder="粘贴新 Key；留空不修改" aria-label="YouTube Data API Key">
-        <button id="youtubeApiKeyToggle" class="secret-input-toggle" type="button" aria-label="显示 API Key" title="显示 API Key" aria-pressed="false"><svg data-mingcute-icon="eye" data-mingcute-size="18"></svg></button>
-      </div>
-    </div>
-    <div class="youtube-api-key-actions"><button id="youtubeApiKeySave" class="sec" type="button">保存并重启</button></div>
+    <div id="youtubeApiKeyEntries" class="credential-list"></div><small id="youtubeApiKeyStatus" role="status"></small>
+    <div class="youtube-api-key-actions"><div class="credential-footer-start"><button id="btnYoutubeApiKeyCreate" class="sec linkbtn" type="button" data-link-label="Google Cloud" aria-label="打开 Google Cloud 凭据页面">Google Cloud</button><button id="youtubeApiKeyAdd" class="sec" type="button">＋ 新增</button></div><button id="youtubeApiKeySave" class="sec" type="button">保存并重启</button></div>
   </div>
 </div>
 <div id="personalQQModal" style="display:none;">
@@ -1066,9 +1022,8 @@
     <h3>个人 QQ 配置</h3>
     <label class="form-field">反向连接地址<input id="personalQQAddress" readonly></label>
     <div id="personalQQRows"></div>
-    <button type="button" class="sec" id="personalQQAdd">＋ 添加连接</button>
     <section id="personalQQUncertainSection" hidden><h4>发送结果待确认</h4><div id="personalQQUncertain"></div></section>
-    <div><button type="button" id="personalQQSave">保存</button></div>
+    <div><div class="credential-footer-start"><button type="button" class="sec linkbtn" id="personalQQNapCat" data-link-label="NapCat" aria-label="打开 NapCat 官网">NapCat</button><button type="button" class="sec linkbtn" id="personalQQSnowLuma" data-link-label="SnowLuma" aria-label="打开 SnowLuma 官网">SnowLuma</button><button type="button" class="sec" id="personalQQAdd">＋ 新增</button></div><button type="button" id="personalQQSave">保存</button></div>
   </div>
 </div>
   <input id="profileImportFile" type="file" accept=".json,application/json" aria-label="Bot 配置 JSON 文件" hidden>
@@ -1096,43 +1051,43 @@
     <div class="modal-body network-proxy-body">
       <div class="network-proxy-row">
         <label for="networkProxyDiscord">Discord 代理</label>
-        <input id="networkProxyDiscord" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
+        <input id="networkProxyDiscord" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:7890">
         <button type="button" class="sec rowicon" data-proxy-test="discord" title="检测 Discord 代理连接" aria-label="检测 Discord 代理连接"><svg data-mingcute-icon="dashboard-2" data-mingcute-size="18" aria-hidden="true"></svg></button>
         <span class="network-proxy-test-status" id="networkProxyDiscordStatus" role="status" aria-live="polite"></span>
       </div>
       <div class="network-proxy-row">
         <label for="networkProxyX">X 代理</label>
-        <input id="networkProxyX" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
+        <input id="networkProxyX" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:7890">
         <button type="button" class="sec rowicon" data-proxy-test="x" title="检测 X 代理连接" aria-label="检测 X 代理连接"><svg data-mingcute-icon="dashboard-2" data-mingcute-size="18" aria-hidden="true"></svg></button>
         <span class="network-proxy-test-status" id="networkProxyXStatus" role="status" aria-live="polite"></span>
       </div>
       <div class="network-proxy-row">
         <label for="networkProxyRsshub">远程 RSSHub 代理</label>
-        <input id="networkProxyRsshub" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
+        <input id="networkProxyRsshub" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:7890">
         <button type="button" class="sec rowicon" data-proxy-test="rsshub" title="检测远程 RSSHub 代理连接" aria-label="检测远程 RSSHub 代理连接"><svg data-mingcute-icon="dashboard-2" data-mingcute-size="18" aria-hidden="true"></svg></button>
         <span class="network-proxy-test-status" id="networkProxyRsshubStatus" role="status" aria-live="polite"></span>
       </div>
       <div class="network-proxy-row">
         <label for="networkProxyBilibili">Bilibili 代理</label>
-        <input id="networkProxyBilibili" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
+        <input id="networkProxyBilibili" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:7890">
         <button type="button" class="sec rowicon" data-proxy-test="bilibili" title="检测 Bilibili 代理连接" aria-label="检测 Bilibili 代理连接"><svg data-mingcute-icon="dashboard-2" data-mingcute-size="18" aria-hidden="true"></svg></button>
         <span class="network-proxy-test-status" id="networkProxyBilibiliStatus" role="status" aria-live="polite"></span>
       </div>
       <div class="network-proxy-row">
         <label for="networkProxyYoutube">YouTube 代理</label>
-        <input id="networkProxyYoutube" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
+        <input id="networkProxyYoutube" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:7890">
         <button type="button" class="sec rowicon" data-proxy-test="youtube" title="检测 YouTube 代理连接" aria-label="检测 YouTube 代理连接"><svg data-mingcute-icon="dashboard-2" data-mingcute-size="18" aria-hidden="true"></svg></button>
         <span class="network-proxy-test-status" id="networkProxyYoutubeStatus" role="status" aria-live="polite"></span>
       </div>
       <div class="network-proxy-row">
         <label for="networkProxySteam">Steam 代理</label>
-        <input id="networkProxySteam" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
+        <input id="networkProxySteam" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:7890">
         <button type="button" class="sec rowicon" data-proxy-test="steam" title="检测 Steam 代理连接" aria-label="检测 Steam 代理连接"><svg data-mingcute-icon="dashboard-2" data-mingcute-size="18" aria-hidden="true"></svg></button>
         <span class="network-proxy-test-status" id="networkProxySteamStatus" role="status" aria-live="polite"></span>
       </div>
       <div class="network-proxy-row">
         <label for="networkProxyTranslation">翻译与 AI API 代理</label>
-        <input id="networkProxyTranslation" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
+        <input id="networkProxyTranslation" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:7890">
         <button type="button" class="sec rowicon" data-proxy-test="translation" title="检测翻译与 AI API 代理连接" aria-label="检测翻译与 AI API 代理连接"><svg data-mingcute-icon="dashboard-2" data-mingcute-size="18" aria-hidden="true"></svg></button>
         <span class="network-proxy-test-status" id="networkProxyTranslationStatus" role="status" aria-live="polite"></span>
       </div>
@@ -1143,6 +1098,19 @@
       <button type="button" class="sec" data-close="networkProxyModal">取消</button>
       <button type="button" id="networkProxySave">保存并重启机器人</button>
     </footer>
+  </section>
+</div>
+<div id="imageCardModal" class="modal-overlay" style="display:none">
+  <section class="modal-shell modal-small" role="dialog" aria-modal="true" aria-labelledby="imageCardModalTitle">
+    <header class="modal-header">
+      <div class="modal-heading"><h3 id="imageCardModalTitle">图片化转发</h3></div>
+      <div class="modal-header-actions"><button type="button" class="modal-x" data-close="imageCardModal" aria-label="关闭"><svg data-mingcute-icon="close" data-mingcute-size="18"></svg></button></div>
+    </header>
+    <div class="modal-body image-card-options">
+      <label class="content-filter-check"><input id="btnImageCardToggle" type="checkbox">启用图片化转发</label>
+      <label class="content-filter-check"><input id="btnImageCardLightToggle" type="checkbox">浅色模式</label>
+    </div>
+    <footer class="modal-footer"><button type="button" class="sec" data-close="imageCardModal">关闭</button></footer>
   </section>
 </div>
 <div id="chainDetailModal" class="modal-overlay" style="display:none">
@@ -1157,13 +1125,13 @@
 </div>
   <script src="./local-api.js"></script>
 <script src="./mingcute-icons.js?v=20261118-upstream-icon-r1"></script>
-<script src="./app.js?v=20261120-registration-empty"></script>
+<script src="./app.js?v=20261120-translation-toggles"></script>
 <script src="./desktop.js?v=20261107-select-sheen"></script>
-<script src="./ui-components.js?v=20261118-link-destination-labels-r1"></script>
-<script src="./personal-qq.js"></script>
+<script src="./ui-components.js?v=20261120-translation-toggles"></script>
+<script src="./personal-qq.js?v=20261120-personal-qq-grid"></script>
   <script src="./bot-profiles.js?v=20261116-profile-menu-actions-r4"></script>
-<script src="./discord-page.js?v=20261114-steam-workspace"></script>
-<script src="./onboarding.js?v=20261114-mingcute-buttons"></script>
-<script src="./steam-page.js?v=20261120-registration-empty"></script>
+<script src="./discord-page.js?v=20261120-translation-settings"></script>
+<script src="./onboarding.js?v=20261120-personal-all-guides"></script>
+<script src="./steam-page.js?v=20261120-input-examples"></script>
 </body>
 </html>

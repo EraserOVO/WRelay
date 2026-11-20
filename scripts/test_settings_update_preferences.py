@@ -1,7 +1,7 @@
-"""校验设置页更新区域的自动检查开关与「检查更新 / 立即更新」按钮行为。
+"""校验设置页自动更新检查与「检查更新 / 立即更新」按钮行为。
 
 在真实 index.html 上注入探针，验证：
-  1) 自动检查开关默认开启、点击后写入 localStorage 并可恢复
+  1) 桌面端即使存在旧的关闭偏好也会自动检查，设置页不再显示开关
   2) 已移除的折叠分组与「更新详情」行不再存在
   3) 按钮文案随检查结果切换：无更新→「检查更新」，有更新→「立即更新」
 用法：.venv/Scripts/python.exe scripts/test_settings_update_preferences.py
@@ -30,7 +30,8 @@ if not edge:
 
 for name in ("index.html", "style.css", "ui-components.css", "app.js",
              "ui-components.js", "desktop.js", "local-api.js", "discord-page.js",
-             "onboarding.js", "wrelay-logo.svg"):
+             "onboarding.js", "mingcute-icons.js", "personal-qq.js", "bot-profiles.js",
+             "steam-page.js", "wrelay-logo.svg"):
     src = WEB / name
     if src.exists():
         shutil.copy2(src, OUT / name)
@@ -45,7 +46,6 @@ window.addEventListener("load", async function () {
   try { if (typeof setActivePage === "function") setActivePage("settings"); } catch (e) {}
   await new Promise(function (r) { setTimeout(r, 300); });
 
-  var sw = document.getElementById("btnAutoUpdateCheck");
   var btn = document.getElementById("btnCheckUpdates");
   var status = document.getElementById("updateStatus");
   // 结构：折叠分组、更新详情、发布页入口均应已移除；配置向导应落在机器人卡片内
@@ -69,16 +69,12 @@ window.addEventListener("load", async function () {
 
   // 文案
   add("label_version", (document.querySelector("#pageSettings .settings-item-copy strong") || {}).textContent);
-  add("label_auto", (sw.closest(".settings-row").querySelector("strong") || {}).textContent);
+  add("no_auto_switch", !document.getElementById("btnAutoUpdateCheck"));
   add("label_status", (status.closest(".settings-item-copy").querySelector("strong") || {}).textContent);
 
-  // 开关默认开启并持久化
-  add("switch_default", sw.getAttribute("aria-checked"));
-  if (sw.getAttribute("aria-checked") === "true") {
-    sw.click();
-    await new Promise(function (r) { setTimeout(r, 200); });
-  }
-  add("switch_saved", String(localStorage.getItem("wrelay_auto_update_check")));
+  // 桌面端忽略旧版关闭偏好。
+  localStorage.setItem("wrelay_auto_update_check", "0");
+  add("desktop_auto_check", shouldAutoCheckForUpdates());
 
   // 按钮文案：检查到有更新 -> 立即更新
   pendingUpdate = { latest: "9.9.9", release_url: "" };
@@ -128,10 +124,9 @@ expect = {
     "no_release_link": "true",
     "wizard_in_service_card": "true",
     "label_version": "WRelay 版本",
-    "label_auto": "自动检查更新",
+    "no_auto_switch": "true",
     "label_status": "更新状态",
-    "switch_default": "true",
-    "switch_saved": "0",
+    "desktop_auto_check": "true",
     "btn_after_update_found": "立即更新",
     "btn_after_no_update": "检查更新",
     "stage_download": "正在下载安装包… 42%",

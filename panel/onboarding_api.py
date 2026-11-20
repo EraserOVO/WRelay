@@ -60,13 +60,16 @@ def install_onboarding(app, namespace):
         return data
 
     def public_credentials(saved=None):
+        from plugins import personal_qq_config
         qq = p._read_qq_bots()
         dc = p._read_discord_bots()
         if saved is None:
             saved = state()
         return {
-            "bots": [{"appid": str(bot["id"])} for bot in (qq[0] if qq else []) if qq_ready(bot)],
-            "discord_configured": bool(dc and any(discord_ready(bot) for bot in dc[0])),
+            "bots": [{"appid": str(bot["id"])} for bot in (qq[0] if qq else []) if isinstance(bot, dict) and bot.get("enabled", True) and qq_ready(bot)],
+            "personal_bots": [{"appid": "personal:" + item["uin"], "name": item.get("name") or item["uin"]}
+                              for item in personal_qq_config.public_config()["connections"] if item.get("enabled")],
+            "discord_configured": bool(dc and any(isinstance(bot, dict) and bot.get("enabled", True) and discord_ready(bot) for bot in dc[0])),
             "restart_needed": bool(saved.get("restart_needed")),
         }
 
@@ -138,7 +141,8 @@ def install_onboarding(app, namespace):
                 audit = p.api_channels_audit()
                 if not any(str(item.get("id")) == draft["source_value"] for item in (audit.get("audit") or {}).get("readable", [])):
                     raise ValueError("请重新扫描并选择机器人有权读取的频道")
-            updated = apply_draft(data, draft, saved["flow_id"], [bot["appid"] for bot in creds["bots"]])
+            known_bots = creds["bots"] + (creds["personal_bots"] if draft["purpose"] != "qq" else [])
+            updated = apply_draft(data, draft, saved["flow_id"], [bot["appid"] for bot in known_bots])
             if draft["purpose"] != "qq":
                 _, draft["source_id"], _ = source_spec(draft, updated)
             failure = p._validate_settings(updated)
@@ -162,6 +166,31 @@ def install_onboarding(app, namespace):
         # Validate persisted wizard state before credentials can be written.
         state()
         with p._ENV_WRITE_LOCK:
+            if appid.startswith("personal:"):
+                from plugins import personal_qq_config
+                if draft["purpose"] != "discord" or appid.removeprefix("personal:") not in personal_qq_config.enabled_connections():
+                    raise ValueError("请先选择已启用的个人 QQ 账号")
+                if secret:
+                    raise ValueError("个人 QQ 无需填写官方机器人密钥")
+                if not os.path.exists(p.ENV_PROD):
+                    shutil.copyfile(os.path.join(p.PROJECT_ROOT, ".env.example"), p.ENV_PROD)
+                dc = p._read_discord_bots()
+                if dc is None:
+                    raise ValueError("现有 Discord 账号配置格式无法解析，请先从设置中修复")
+                dc_bots = [dict(bot) for bot in dc[0]]
+                if token.strip():
+                    chosen = next((bot for bot in dc_bots if bot.get("enabled", True)), None)
+                    if chosen is None:
+                        chosen = {"enabled": True}; dc_bots.append(chosen)
+                    chosen["token"] = token.strip()
+                if not any(bot.get("enabled", True) and discord_ready(bot) for bot in dc_bots):
+                    raise ValueError("请填写 Discord Token")
+                p._write_discord_bots(dc_bots, dc[2], dc[1], dc[3])
+                with lock:
+                    saved = state()
+                    saved["restart_needed"] = True
+                    p.atomic_write_json(path(), saved)
+                return {"ok": True, "credentials": public_credentials()}
             if not os.path.exists(p.ENV_PROD):
                 shutil.copyfile(os.path.join(p.PROJECT_ROOT, ".env.example"), p.ENV_PROD)
             qq = p._read_qq_bots()
@@ -182,8 +211,11 @@ def install_onboarding(app, namespace):
             dc_bots = [dict(bot) for bot in dc[0]]
             if draft["purpose"] == "discord":
                 if token.strip():
-                    dc_bots[0]["token"] = token.strip()
-                if not any(discord_ready(bot) for bot in dc_bots):
+                    chosen = next((bot for bot in dc_bots if bot.get("enabled", True)), None)
+                    if chosen is None:
+                        chosen = {"enabled": True}; dc_bots.append(chosen)
+                    chosen["token"] = token.strip()
+                if not any(bot.get("enabled", True) and discord_ready(bot) for bot in dc_bots):
                     raise ValueError("请填写 Discord Token")
             # 先在内存合并两个键，再原子替换一次文件，避免部分保存及逐步重启。
             lines = list(qq[2])
@@ -209,11 +241,12 @@ def install_onboarding(app, namespace):
     @app.get("/api/onboarding")
     def get_state():
         try:
+            from plugins import personal_qq_config
             saved = state()
             credentials = public_credentials(saved)
             settings = p.load_settings()
-            existing = bool(credentials["bots"] or credentials["discord_configured"] or any(
-                settings.get(key) for key in ("qq_group_openids", "qq_user_openids", "discord_channels", "x_rss_sources", "bilibili_sources")
+            existing = bool(credentials["bots"] or credentials["discord_configured"] or personal_qq_config.public_config()["connections"] or any(
+                settings.get(key) for key in ("qq_group_openids", "qq_user_openids", "discord_channels", "x_rss_sources", "bilibili_sources", "youtube_sources", "steam_sources")
             ))
             return {"ok": True, "state": saved, "credentials": credentials,
                     "show_welcome": not saved and not existing}
@@ -262,6 +295,33 @@ def install_onboarding(app, namespace):
                 return result
         except OnboardingStateError:
             return error("向导进度文件读取失败或格式无效，请修复后重试", 500)
+
+    @app.post("/api/onboarding/personal-start")
+    def personal_start():
+        from plugins import personal_qq_config
+        try:
+            if not personal_qq_config.enabled_connections():
+                return error("请先添加并启用个人 QQ 连接")
+            with p._ENV_WRITE_LOCK:
+                if not os.path.exists(p.ENV_PROD):
+                    template = os.path.join(p.PROJECT_ROOT, ".env.example")
+                    try:
+                        with open(template, "rb") as source:
+                            content = source.read()
+                        with open(p.ENV_PROD, "xb") as target:
+                            try:
+                                target.write(content)
+                            except OSError:
+                                target.close()
+                                os.remove(p.ENV_PROD)
+                                raise
+                    except FileExistsError:
+                        pass
+            if p.bot_status()["running"]:
+                return {"ok": True, "already_running": True}
+            return p.start_bot()
+        except (OSError, ValueError):
+            return error("无法启动机器人，请检查个人 QQ 配置和程序目录权限", 500)
 
     @app.post("/api/onboarding/authorize")
     async def authorize(request: Request):
@@ -322,6 +382,21 @@ def install_onboarding(app, namespace):
             return await run_in_thread_to_completion(confirm_receipt, body)
         except OnboardingStateError:
             return error("向导进度文件读取失败或格式无效，请修复后重试", 500)
+
+    @app.post("/api/onboarding/source-check")
+    async def source_check(request: Request):
+        body, failure = await json_object_body(request)
+        if failure:
+            return failure
+        try:
+            draft = clean_draft(body)
+            if draft["purpose"] not in ("youtube", "steam"):
+                raise ValueError("此来源无需格式检查")
+            settings = await run_in_thread_to_completion(p.load_settings)
+            await run_in_thread_to_completion(source_spec, draft, settings)
+            return {"ok": True}
+        except (ValueError, TypeError) as exc:
+            return error(str(exc))
 
     @app.post("/api/onboarding/apply")
     async def apply(request: Request):

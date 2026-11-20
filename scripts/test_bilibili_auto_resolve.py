@@ -157,20 +157,17 @@ def _div_close_index(markup, open_index):
 
 
 async def check_panel_markup():
-    """面板：卡片位于 Bilibili 页转发组工作区之外，开关有渲染与保存分支。"""
+    """面板：状态栏提供自动解析快捷开关，保留说明与保存分支。"""
     root = Path(auto.__file__).resolve().parents[1]
     html = (root / "panel" / "web" / "index.html").read_text(encoding="utf-8")
     app_js = (root / "panel" / "web" / "app.js").read_text(encoding="utf-8")
 
-    page = html.split('<div id="pageBilibili"', 1)[1].split('<div id="pageQQ"', 1)[0]
-    card = page.index('id="bilibiliAutoResolveCard"')
-    fg_body_end = _div_close_index(page, page.rfind("<div", 0, page.index('id="bilibiliFgBody"')))
-    assert card > fg_body_end, "新卡片必须在 bilibiliFgBody 工作区之外"
-    assert 'id="btnBilibiliAutoResolveToggle"' in page
-    assert 'id="hint-bilibili-auto-resolve"' in page
-    hint_text = page.split('id="hint-bilibili-auto-resolve"', 1)[1].split("</div>", 1)[0]
-    assert "接收所有消息" in hint_text
-    assert "拿不到视频时不回复" in hint_text
+    assert 'id="bilibiliAutoResolveCard"' not in html
+    slot = html.split('<span class="robot-action-slot" data-slot="2">', 1)[1].split('</span>', 1)[0]
+    assert 'id="btnBilibiliAutoResolveToggle"' in slot
+    assert 'role="switch"' in slot
+    assert "接收所有消息" in app_js
+    assert "拿不到视频时不回复" in app_js
 
     assert "renderBilibiliAutoResolveToggle(!!(settings.bilibili_auto_resolve" in app_js
     render_body = app_js.split("function renderBilibiliPage()", 1)[1].split("\n}", 1)[0]

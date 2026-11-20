@@ -709,22 +709,22 @@
   }
   /* Bot 配置弹窗的密钥框：统一输入样式，并让浏览器原生眼睛图标在夜间模式可见 */
   #qqConfigModal input[type=password], #discordConfigModal input[type=password],
-  #translationConfigModal input[type=password] {
+  #translationCredentialsModal input[type=password] {
     background: var(--field-bg); border: 1px solid var(--field-border); color: var(--field-fg);
     border-radius: 5px; padding: 6px 8px; font-size: 14px; width: 100%; color-scheme: dark;
   }
-  #translationConfigModal {
+  #translationCredentialsModal {
     overflow-y: auto; padding: 16px; box-sizing: border-box;
   }
-  #translationConfigModal .translation-config-dialog {
+  #translationCredentialsModal .translation-config-dialog {
     max-height: min(78vh, 720px); overflow-y: auto; box-sizing: border-box;
   }
   @media (max-height: 720px) {
-    #translationConfigModal .translation-config-dialog { max-height: calc(100vh - 20px); padding: 14px; }
+    #translationCredentialsModal .translation-config-dialog { max-height: calc(100vh - 20px); padding: 14px; }
   }
   body.theme-light #qqConfigModal input[type=password],
   body.theme-light #discordConfigModal input[type=password],
-  body.theme-light #translationConfigModal input[type=password] {
+  body.theme-light #translationCredentialsModal input[type=password] {
     color-scheme: light;
   }
   /* 数字输入框：隐藏自带的手动增减箭头（上下三角），保留直接输入 */
@@ -848,6 +848,7 @@
     background: color-mix(in srgb, var(--card-bg) 72%, var(--sec-bg));
     color: var(--fg);
   }
+  .filter-scope-tabs.multi-chain-switch .fscope-tab:disabled { opacity: .35; cursor: not-allowed; }
   .filter-scope-tabs.multi-chain-switch .fscope-tab.active {
     background: var(--card-bg);
     border-color: var(--field-border);
@@ -1272,6 +1273,8 @@
   .content-filter-check input { flex: 0 0 18px; width: 18px; height: 18px; margin: 0; }
   .content-filter-check:focus-within { border-color: var(--primary-border); }
   .content-filter-check.disabled { opacity: .45; cursor: not-allowed; }
+  .image-card-options { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+  .image-card-options .content-filter-check { align-self: flex-start; max-width: 100%; box-sizing: border-box; border-radius: var(--radius-control); }
   .source-content-form { display: flex; flex-direction: column; gap: 12px; }
   .source-content-field { display: flex; min-width: 0; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; }
   .source-content-field input { width: 100%; min-width: 0; box-sizing: border-box; }
@@ -3194,7 +3197,10 @@ body.desktop-host:is([data-active-page="discord"], [data-active-page="x"], [data
 body.desktop-host .discord-log-heading { justify-content: flex-end; }
 body.desktop-host #log { font-family: Consolas, "Cascadia Mono", monospace; }
 body.desktop-host[data-active-page="settings"] .page-header-actions { display: none; }
-#pageSettings .desktop-settings-grid { grid-template-columns: 1fr; gap: 16px; align-items: start; }
+#pageSettings .desktop-settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+@media (max-width: 1050px) {
+  #pageSettings .desktop-settings-grid { grid-template-columns: minmax(0, 1fr); }
+}
 #pageSettings .settings-card { min-height: 0; height: auto; margin: 0; padding: 12px 18px; }
 #pageSettings .settings-card h2 { min-height: var(--control-height); display: flex; align-items: center; margin: 0; }
 #pageSettings .settings-row {
@@ -3954,7 +3960,7 @@ body.desktop-host:not([data-active-page="overview"]) .robot-core-actions
   background: var(--badge-on-bg);
   color: var(--badge-on-fg);
 }
-#failureNotificationShortcut[data-state="on"] {
+:is(#failureNotificationShortcut, #btnBilibiliAutoResolveToggle)[data-state="on"] {
   border-color: var(--filter-active-border);
   background: var(--filter-active-bg);
   color: var(--btn-fg);
@@ -3990,6 +3996,14 @@ body .modal-overlay > .chain-detail-modal {
   height: auto;
   min-height: 0;
   max-height: 85vh;
+}
+#chainDetailModal { z-index: 990; }
+body .scheduled-message-detail > .chain-detail-modal { --modal-width: 1100px; }
+body .scheduled-message-detail .modal-shell .chain-detail-footer { display: none; }
+.scheduled-message-detail .modal-heading .scheduled-message-workspace-heading { min-height: 0; margin: 0; }
+.scheduled-message-detail .modal-heading .scheduled-message-workspace-heading h2 { min-height: 0; font-size: 18px; font-weight: 600; line-height: 1.4; }
+body.desktop-host[data-active-page="qq"] .scheduled-message-detail #scheduledMessageCard.scheduled-message-workspace {
+  width: 100%; box-sizing: border-box; margin: 0;
 }
 #chainDetailBody.modal-body {
   flex: 0 1 auto;

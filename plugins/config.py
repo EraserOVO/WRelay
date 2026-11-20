@@ -856,24 +856,41 @@ def _c2c_relay_filter(data, key, supported):
     return {"filter_message_types": normalized}
 
 
-def get_qq_c2c_relay_filter():
+def _user_c2c_relay_filter(data, user, key, supported):
+    if user:
+        for item in data.get("qq_user_openids", []):
+            if isinstance(item, dict) and str(item.get("openid", "")) == str(user):
+                if key in item:
+                    return _c2c_relay_filter(item, key, supported)
+                break
+    return _c2c_relay_filter(data, key, supported)
+
+
+def get_qq_c2c_relay_filter(user=None):
     """返回私聊 Discord 链接 relay 的全局筛选配置。"""
-    return _c2c_relay_filter(
-        _load_settings(), "qq_c2c_relay_filter", DISCORD_MESSAGE_TYPES
+    return _user_c2c_relay_filter(
+        _load_settings(), user, "qq_c2c_relay_filter", DISCORD_MESSAGE_TYPES
     )
 
 
-def get_x_c2c_relay_filter():
+def get_x_c2c_relay_filter(user=None):
     """返回私聊 X 链接手动转发的全局消息类型筛选配置。"""
-    return _c2c_relay_filter(
-        _load_settings(), "x_c2c_relay_filter", X_MESSAGE_TYPES
+    return _user_c2c_relay_filter(
+        _load_settings(), user, "x_c2c_relay_filter", X_MESSAGE_TYPES
     )
 
 
-def get_bilibili_c2c_relay_filter():
+def get_bilibili_c2c_relay_filter(user=None):
     """返回私聊 Bilibili 投稿链接手动转发的全局消息类型筛选配置。"""
-    return _c2c_relay_filter(
-        _load_settings(), "bilibili_c2c_relay_filter", BILIBILI_MESSAGE_TYPES
+    return _user_c2c_relay_filter(
+        _load_settings(), user, "bilibili_c2c_relay_filter", BILIBILI_MESSAGE_TYPES
+    )
+
+
+def get_steam_c2c_relay_filter(user=None):
+    from plugins.filter import STEAM_MESSAGE_TYPES
+    return _user_c2c_relay_filter(
+        _load_settings(), user, "steam_c2c_relay_filter", STEAM_MESSAGE_TYPES
     )
 
 

@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 from panel.onboarding import apply_draft, clean_draft, feed_url
 from plugins.startup_config import needs_discord, qq_ready, discord_ready
 from plugins.settings_model import SettingsModel
+from plugins.credential_entries import enabled_bots
 
 
 def draft(purpose="x"):
@@ -92,7 +93,7 @@ def test_startup():
     tree = ast.parse((ROOT / "bot.py").read_text(encoding="utf-8"))
     node = next(item for item in tree.body if isinstance(item, ast.FunctionDef) and item.name == "_first_run_config_check")
     from types import SimpleNamespace
-    namespace = {"os": os, "sys": sys, "ENV_PROD": __file__, "needs_discord": needs_discord,
+    namespace = {"os": os, "sys": sys, "json": json, "enabled_bots": enabled_bots, "ENV_PROD": __file__, "needs_discord": needs_discord,
                  "data_path": lambda name: name, "load_json": lambda *args, **kwargs: {},
                  "_QQ_PLACEHOLDER_APPID": "你的AppID", "_QQ_PLACEHOLDER_APPSECRET": "你的AppSecret",
                  "_DC_PLACEHOLDER_TOKEN": "在这里粘贴你的DiscordBotToken"}
@@ -104,6 +105,7 @@ def test_startup():
             patch("plugins.personal_qq_config.enabled_connections", return_value={}) as personal_connections:
         namespace["_first_run_config_check"]()
         assert os.environ["DISCORD_BOTS"] == "[]"
+        os.environ["DISCORD_BOTS"] = json.dumps([{"token": "在这里粘贴你的DiscordBotToken"}])
         namespace["load_json"] = lambda *args, **kwargs: {"discord_channels": [{"enabled": True}]}
         try:
             namespace["_first_run_config_check"]()
@@ -253,7 +255,7 @@ async def test_api():
                 env_path = Path(panel.ENV_PROD)
                 assert not env_path.exists()
                 onboarding_state_path = Path(panel.DATA_DIR, "onboarding.json")
-                for endpoint in ("progress", "credentials", "authorize", "probe", "apply", "receipt"):
+                for endpoint in ("progress", "credentials", "authorize", "probe", "source-check", "apply", "receipt"):
                     for raw_body in (b"[]", b"null", b"{"):
                         invalid = await post_raw(endpoint, raw_body)
                         assert invalid.status_code == 400, (endpoint, raw_body, invalid.text)

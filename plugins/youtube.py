@@ -311,7 +311,20 @@ async def _youtube_get(*args, **kwargs):
 
 def _youtube_data_api_key():
     """Read the server-side Data API key loaded from .env.prod."""
-    return str(os.environ.get("YOUTUBE_DATA_API_KEY") or "").strip()
+    keys = _youtube_data_api_keys()
+    return keys[0] if keys else ""
+
+
+def _youtube_data_api_keys():
+    from plugins.credential_entries import parse_youtube_keys
+    try:
+        items = parse_youtube_keys(os.environ.get("YOUTUBE_DATA_API_KEYS"), str(os.environ.get("YOUTUBE_DATA_API_KEY") or "").strip())
+        return [item["key"].strip() for item in items if item.get("enabled", True) and item["key"].strip()]
+    except ValueError:
+        return []
+
+
+_youtube_api_key_index = 0
 
 
 def _retry_after_seconds(value):
@@ -369,6 +382,7 @@ async def _youtube_data_api_get(endpoint, params):
     global _last_youtube_api_request_ts, _youtube_api_failure_count
     global _youtube_api_cooldown_until, _youtube_api_cooldown_reason
     global _youtube_api_cooldown_rate_limited, _youtube_api_healthy
+    global _youtube_api_key_index
     key = _youtube_data_api_key()
     if not key:
         _youtube_api_healthy = False
@@ -389,6 +403,9 @@ async def _youtube_data_api_get(endpoint, params):
         elapsed = time.monotonic() - _last_youtube_api_request_ts
         if elapsed < YOUTUBE_DATA_API_REQUEST_GAP:
             await asyncio.sleep(YOUTUBE_DATA_API_REQUEST_GAP - elapsed)
+        keys = _youtube_data_api_keys() or [key]
+        key = keys[_youtube_api_key_index % len(keys)]
+        _youtube_api_key_index += 1
         _youtube_api_healthy = False
         try:
             response = await _youtube_get(

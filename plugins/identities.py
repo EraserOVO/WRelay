@@ -38,7 +38,7 @@ def load_identities():
     return data
 
 
-def _record(kind, openid, name_field, name, last_active):
+def _record(kind, openid, name_field, name, last_active, bot_id=""):
     """写入/更新一条身份资料；仅在确实变化时落盘"""
     openid = str(openid or "").strip()
     if not openid:
@@ -57,6 +57,16 @@ def _record(kind, openid, name_field, name, last_active):
             bucket[openid] = entry
 
         changed = is_new
+        if bot_id:
+            scopes = entry.setdefault("by_bot", {})
+            if not isinstance(scopes, dict):
+                return False
+            scoped = scopes.get(bot_id)
+            if not isinstance(scoped, dict):
+                scoped = {}
+                scopes[bot_id] = scoped
+                changed = True
+            entry = scoped
         if name:
             clean_name = str(name).strip()
             if entry.get(name_field) != clean_name:
@@ -72,14 +82,14 @@ def _record(kind, openid, name_field, name, last_active):
     update_json(IDENTITIES_FILE, mutate, default={}, indent=4, write_if=bool)
 
 
-def record_user_identity(openid, nickname=None, last_active=None):
+def record_user_identity(openid, nickname=None, last_active=None, bot_id=""):
     """记录用户身份：openid + 昵称（可为空）+ 最后活动时间"""
-    _record("users", openid, "nickname", nickname, last_active)
+    _record("users", openid, "nickname", nickname, last_active, bot_id)
 
 
-def record_group_identity(openid, group_name=None, last_active=None):
+def record_group_identity(openid, group_name=None, last_active=None, bot_id=""):
     """记录群身份：openid + 群名（可为空）+ 最后活动时间"""
-    _record("groups", openid, "group_name", group_name, last_active)
+    _record("groups", openid, "group_name", group_name, last_active, bot_id)
 
 
 def set_admin_remark(kind, openid, remark):

@@ -27,6 +27,7 @@ body .modal-overlay > .modal-small { --modal-width: 520px; }
 body .modal-overlay > .modal-large { --modal-width: 880px; }
 body #filterModal.modal-overlay > .modal-shell,
 body #relayChannelsModal.modal-overlay > .modal-shell { box-sizing: border-box; height: min(760px, 85vh); min-height: 0; }
+body #filterModal.manual-relay-filter-modal.modal-overlay > .modal-shell { height: auto; }
 body .modal-shell .modal-header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--panel-border); }
 .modal-heading { min-width: 0; flex: 1; }
 body .modal-shell .modal-header h3 { margin: 0 !important; padding: 0; font-size: 18px; font-weight: 600; line-height: 1.4; }
@@ -177,9 +178,8 @@ body .modal-shell .pill-switch:is([data-on="1"], [aria-checked="true"]) > .setti
   opacity: 1; transform: rotate(45deg);
 }
 body .modal-shell .pill-switch:not(:disabled):hover { background: var(--sec-bg); }
-/* 「翻译链路」窗口里的开关各占一行，按钮按内容宽度起排。 */
-body .modal-shell .modal-grid > .translation-chain-toggles { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
-body .modal-shell .translation-chain-toggles > .pill-switch { justify-self: start; }
+/* 翻译链路开关按内容宽度排列，空间不足时自动换行。 */
+body .modal-shell .modal-grid > .translation-chain-toggles { display: flex; flex-wrap: wrap; gap: 10px; }
 /* 多链路图标胶囊在弹窗标题栏保持紧凑的固有宽度。 */
 .modal-header-actions .filter-scope-tabs.multi-chain-switch { flex: 0 0 auto; }
 @media (max-width: 620px) {
@@ -192,31 +192,49 @@ body .modal-shell .danger-text { color: var(--badge-off-fg); background: var(--b
 .modal-body::-webkit-scrollbar-thumb, .modal-body *::-webkit-scrollbar-thumb { background: var(--field-border); border-radius: 8px; }
 body .modal-shell :is(#confirmBody, .relay-channels-list, .message-trace-wrap, .scheduled-message-entries) { max-height: none; overflow: visible; }
 body #confirmBody { margin: 0 !important; overflow: visible !important; }
-body #translationConfigModal > .modal-shell { max-width: 880px; max-height: 85vh; padding: 0; overflow: hidden; }
-#translationConfigModal .modal-body { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); column-gap: 20px; align-content: start; }
-#translationConfigModal .modal-body > :is(div, h4, details, p) { grid-column: 1 / -1; }
-#translationConfigModal .translation-config-label { grid-column: 1 / -1; margin: 14px 0 6px; }
-#translationConfigModal .modal-body > input { grid-column: 1 / -1; width: 100%; }
-#translationConfigModal .translation-config-section-title { color: var(--fg); font-size: 14px; font-weight: 600; padding: 16px 0 10px; margin: 16px 0 0; border-top: 1px solid var(--panel-border); }
-#translationConfigModal .translation-config-heading-row { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 10px; }
-#translationConfigModal .translation-config-heading-row .translation-config-section-title { flex: 1 1 auto; padding: 0; margin: 0; border-top: 0; }
-#translationConfigModal .translation-config-test-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; margin-top: 10px; }
-#translationConfigModal .translation-config-test-actions { display: flex; flex: 1 1 auto; align-items: center; gap: 10px; min-width: 0; }
-#translationConfigModal .translation-config-test-actions #aiApiTestStatus { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#translationConfigModal .translation-config-test-row .ai-profile-toolbar { flex: 0 0 auto; }
-#translationConfigModal .translation-runtime-banner { margin: 0; padding: 12px; border-radius: var(--radius-control); }
-#translationConfigModal .ai-profile-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0; }
-#translationConfigModal .ai-profile-toolbar select { flex: 1; min-width: 160px; }
-#translationConfigModal .translation-test-history { margin: 14px 0 0; padding: 12px; border: 1px solid var(--field-border); border-radius: var(--radius-control); }
-#translationConfigModal .translation-test-history-list { max-height: none; }
+body #translationCredentialsModal > .modal-shell { max-width: 880px; max-height: 85vh; padding: 0; overflow: hidden; }
+#translationConfigModal .translation-service-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+#translationConfigModal .translation-service-fields .form-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+#translationConfigModal .translation-service-fields select { width: 100%; }
+#translationConfigModal .translation-settings-actions { display: flex; align-items: center; gap: 8px; margin-right: auto; }
+#translationConfigModal #btnTranslationCredentials { width: 32px; height: 32px; min-width: 32px; padding: 0; }
+@media (max-width: 480px) { #translationConfigModal .translation-service-fields { grid-template-columns: minmax(0, 1fr); } }
+#translationCredentialsModal .modal-body { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); column-gap: 20px; align-content: start; }
+#translationCredentialsModal .modal-body > :is(div, h4, details, p) { grid-column: 1 / -1; }
+#translationCredentialsModal .translation-config-label { grid-column: 1 / -1; margin: 14px 0 6px; }
+#translationCredentialsModal .modal-body > input { grid-column: 1 / -1; width: 100%; }
+#translationCredentialsModal .translation-config-section-title { color: var(--fg); font-size: 14px; font-weight: 600; padding: 16px 0 10px; margin: 16px 0 0; border-top: 1px solid var(--panel-border); }
+#translationCredentialsModal .translation-config-heading-row { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 10px; }
+#translationCredentialsModal .translation-config-heading-row .translation-config-section-title { flex: 1 1 auto; padding: 0; margin: 0; border-top: 0; }
+#translationCredentialsModal .translation-config-test-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; margin-top: 10px; }
+#translationCredentialsModal .translation-config-test-actions { display: flex; flex: 1 1 auto; align-items: center; gap: 10px; min-width: 0; }
+#translationCredentialsModal .translation-config-test-actions #aiApiTestStatus { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#translationCredentialsModal .translation-config-test-row .ai-profile-toolbar { flex: 0 0 auto; }
+#translationCredentialsModal .translation-runtime-banner { margin: 0; padding: 12px; border-radius: var(--radius-control); }
+#translationCredentialsModal .ai-profile-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0; }
+#translationCredentialsModal .ai-profile-toolbar select { flex: 1; min-width: 160px; }
+#translationCredentialsModal .translation-test-history { margin: 14px 0 0; padding: 12px; border: 1px solid var(--field-border); border-radius: var(--radius-control); }
+#translationCredentialsModal .translation-test-history-list { max-height: none; }
 @media (max-width: 560px) {
-  #translationConfigModal .translation-config-test-row { flex-wrap: wrap; }
-  #translationConfigModal .translation-config-test-actions { flex-wrap: wrap; width: 100%; }
-  #translationConfigModal .translation-config-test-row .ai-profile-toolbar { margin-left: auto; }
+  #translationCredentialsModal .translation-config-test-row { flex-wrap: wrap; }
+  #translationCredentialsModal .translation-config-test-actions { flex-wrap: wrap; width: 100%; }
+  #translationCredentialsModal .translation-config-test-row .ai-profile-toolbar { margin-left: auto; }
 }
-.qq-bot-form-row { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)) auto; gap: 12px; align-items: end; padding: 12px 0; border-bottom: 1px solid var(--panel-border); }
+.credential-card, .qq-bot-form-row, .personal-qq-row { box-sizing: border-box; padding: 14px; border: 1px solid var(--field-border); border-radius: 10px; background: var(--field-bg); }
+.credential-card label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.credential-card input:not([type="checkbox"]) { width: 100%; }
+.credential-footer-start { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-right: auto; }
+.credential-footer-start > button { flex: 0 0 auto; }
+.credential-list { display: grid; gap: 10px; min-width: 0; }
+.credential-entry { display: grid; grid-template-columns: 18px minmax(0,1fr) auto; align-items: center; gap: 12px; }
+.credential-entry > .form-field { min-width: 0; }
+.credential-entry > input[type="checkbox"] { width: 18px; height: 18px; align-self: end; margin: 0 0 9px; }
+.qq-bot-form-row { display: grid; grid-template-columns: auto repeat(3,minmax(0,1fr)) auto; gap: 12px; align-items: end; margin-bottom: 10px; }
+.credential-enabled { display: flex; align-items: center; align-self: center; }
+.qq-bot-form-row > .credential-enabled { align-self: end; margin-bottom: 9px; }
+.qq-bot-form-row > .credential-enabled input { width: 18px; height: 18px; margin: 0; }
 .qq-bot-form-row label { min-width: 0; }
-.modal-shell .qq-bot-remove { min-width: 64px; border: 1px solid var(--field-border) !important; }
+.modal-shell .qq-bot-remove { min-width: 36px; }
 /* 复选框行需要横向排布：必须比 .modal-grid > label.form-field（含 id 级选择器）更具体才能覆盖。 */
 body .modal-shell .modal-body.modal-grid > .backup-runtime.form-field { flex-direction: row; align-items: center; gap: 8px; width: 100%; margin: 0; }
 body .modal-shell .modal-body.modal-grid > .backup-runtime.form-field input { margin: 0; }
@@ -224,18 +242,19 @@ body .modal-shell .modal-body.modal-grid > .backup-runtime.form-field input { ma
 .modal-shell .backup-auto { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .modal-shell .backup-auto .settings-item-copy { flex: 1 1 auto; min-width: 0; }
 .modal-shell .backup-auto .pill-switch { flex: 0 0 auto; width: auto; }
-.modal-shell .backup-section { display: grid; gap: 10px; min-width: 0; }
-.modal-shell .backup-manual { border-top: 1px solid var(--panel-border); padding-top: 16px; }
+.modal-shell .backup-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+.modal-shell .backup-section { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--panel-border); border-radius: 10px; }
 .modal-shell .backup-section > select { width: 100%; min-width: 0; box-sizing: border-box; }
 .modal-shell .backup-select-label { color: var(--muted); font-size: 13px; }
-.modal-shell .backup-section-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.modal-shell .backup-section-actions { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; min-width: 0; margin-top: auto; overflow-x: auto; }
+.modal-shell .backup-section-actions > * { flex: 0 0 auto; }
 .modal-shell .backup-section-actions #btnAutoBackupRestore { margin-left: auto; }
 .modal-shell .backup-status { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .modal-shell .backup-status.has-alert { color: var(--danger); }
 .modal-shell .backup-manual .backup-runtime.form-field { display: flex; flex-direction: row; align-items: center; gap: 8px; margin: 0; }
 .modal-shell .backup-manual .backup-runtime.form-field input { margin: 0; }
 .modal-shell .backup-warning:empty { display: none; }
-.modal-footer .backup-file-select { display: inline-flex; align-items: center; justify-content: center; min-width: 88px; padding: 0 12px; border: 1px solid var(--field-border); border-radius: var(--radius-control); background: var(--sec-bg); }
+.modal-shell .backup-file-select { display: inline-flex; align-items: center; justify-content: center; min-width: 88px; padding: 0 12px; border: 1px solid var(--field-border); border-radius: var(--radius-control); background: var(--sec-bg); }
 body .modal-shell :is(.diagnostic-row, .status-row) { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border: 0; border-bottom: 1px solid var(--panel-border); background: transparent; border-radius: 0; }
 .modal-shell :is(.diagnostic-row, .status-row):last-child { border-bottom: 0; }
 .modal-shell .diagnostic-result.ok { color: var(--badge-on-fg); }
@@ -244,7 +263,11 @@ body .modal-shell :is(.diagnostic-row, .status-row) { display: flex; align-items
 @media (max-width: 620px) {
   body .modal-overlay { padding: 12px; }
   .qq-bot-form-row { grid-template-columns: minmax(0,1fr); }
+  .qq-bot-form-row > .credential-enabled { justify-self: start; margin-bottom: 0; }
   .qq-bot-form-row .qq-bot-remove { justify-self: end; }
+}
+@media (max-width: 760px) {
+  .modal-shell .backup-columns { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* The document (HTML) is the page scroller; reserve its gutter on every route. */
@@ -261,7 +284,7 @@ body :is(#xrssCard, #bilibiliCard, #youtubeCard) .rss-status-line > .xrss-summar
 .youtube-api-key-input-wrap { display: flex; align-items: center; flex: 1 1 320px; min-width: 220px; max-width: 480px; }
 .youtube-api-key-input-wrap .secret-input-wrap { width: 100%; }
 .youtube-api-key-config button { flex: 0 0 auto; }
-#youtubeApiKeyModal .youtube-api-key-modal-config { margin-top: 8px; }
+#youtubeApiKeyModal .youtube-api-key-modal-config { margin-top: 0; }
 #youtubeApiKeyModal .youtube-api-key-copy { min-width: 150px; }
 #youtubeApiKeyModal .youtube-api-key-input-wrap { max-width: none; }
 .secret-input-wrap { position: relative; display: block; width: 100%; min-width: 0; }

@@ -88,7 +88,7 @@ async def notify_delivery_failure(qq_bot, failed_groups, channel_id="", message_
         "来源：{}\n"
         "消息：{}\n"
         "未送达群：{}\n"
-        "已完成自动重试，请在管理面板日志中查看详情。"
+        "请在管理面板日志中查看详情。"
     ).format(
         channel_id or "手动/定时消息",
         message_id or "-",

@@ -14,6 +14,7 @@ from plugins.startup_config import needs_discord
 from plugins.json_io import load_json
 from plugins.proxy_guard import align_discord_proxy
 from plugins.network_proxy import get_proxy as get_network_proxy
+from plugins.credential_entries import enabled_bots
 
 from nonebot.adapters.qq import Adapter as QQAdapter
 from plugins.personal_qq import PersonalQQAdapter
@@ -66,6 +67,9 @@ def _build_adapter_config(config_model):
     from nonebot.config import BaseSettings
 
     vals = dict(dotenv_values(ENV_PROD))
+    for key in ("QQ_BOTS", "DISCORD_BOTS"):
+        if vals.get(key):
+            vals[key] = json.dumps(enabled_bots(json.loads(vals[key])), ensure_ascii=False)
     built = BaseSettings._settings_build_values(
         config_model,
         vals,
@@ -136,7 +140,12 @@ def _first_run_config_check():
         startup_settings = load_json(data_path("settings.json"), default={})
         if startup_settings.get(bot_profiles.INDEX):
             startup_settings = bot_profiles.read(data_path("settings.json"))
-        if not dc_ok and needs_discord(startup_settings):
+        try:
+            dc_entries = json.loads(os.environ.get("DISCORD_BOTS", "[]"))
+            dc_disabled = "DISCORD_BOTS" in os.environ and isinstance(dc_entries, list) and not enabled_bots(dc_entries)
+        except (TypeError, ValueError):
+            dc_disabled = False
+        if not dc_ok and needs_discord(startup_settings) and not dc_disabled:
             dc_missing = ["token"]
         elif not dc_ok:
             # 未使用 Discord 时屏蔽模板占位配置，仅影响本次进程，不改用户文件。
@@ -184,6 +193,14 @@ def _first_run_config_check():
 # 首次配置检查必须早于 nonebot.init()：init 会读取 .env.prod 并注册
 # 适配器，若带着占位符继续会直接对外认证失败
 _first_run_config_check()
+
+# The adapter receives only enabled accounts; the persisted list retains inactive credentials.
+for _credential_key in ("QQ_BOTS", "DISCORD_BOTS"):
+    if os.environ.get(_credential_key):
+        try:
+            os.environ[_credential_key] = json.dumps(enabled_bots(json.loads(os.environ[_credential_key])), ensure_ascii=False)
+        except (TypeError, ValueError) as _exc:
+            raise RuntimeError("机器人账号配置格式无效") from _exc
 
 
 def _use_tun_network_routing():

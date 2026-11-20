@@ -380,8 +380,7 @@ YouTube 没有 QQ 手动转发。投递复用 `send_and_record` 的 `youtube:<vi
 
 ### Bilibili 自动解析（plugins/bilibili_auto_resolve.py）
 
-`settings.json` 的 `bilibili_auto_resolve.enabled`（默认 `false`）控制，面板在「Bilibili」页
-转发组卡片下方与其他小卡片同规格的「自动解析」卡片中切换。该链路只做群内被动回复，不进入 RSS 队列、不参与限速与
+`settings.json` 的 `bilibili_auto_resolve.enabled`（默认 `false`）控制，面板在「Bilibili」页状态栏的自动解析图标切换。该链路只做群内被动回复，不进入 RSS 队列、不参与限速与
 跨来源去重，也不改动 Discord、X、QQ→QQ 的行为。
 
 ```
@@ -414,9 +413,7 @@ YouTube 没有 QQ 手动转发。投递复用 `send_and_record` 的 `youtube:<vi
 Discord、X RSS、Bilibili RSS、YouTube RSS、Steam 和 QQ 手动转发在完成消息渲染后，统一通过 `plugins/translation.py`
 按当前链路配置尝试首选服务和后备服务：
 
-服务路由保存在 `settings.translation`，管理面板只在「QQ → QQ」页显示一张共享「自动翻译」卡片；
-卡片只放首选/次选服务与左下角的「翻译链路」入口，六个链路开关在该按钮打开的 `#translationChainsModal`
-二级窗口内（六个整行胶囊开关，链路名在左、轨道在右）：Discord、X、Bilibili、YouTube、Steam 开关分别批量写入对应来源的 `translation_enabled`，
+服务路由保存在 `settings.translation`，设置页「翻译服务配置」窗口提供首选/次选服务及六个链路开关，底栏钥匙按钮打开 AI API 与腾讯 TMT 凭据窗口。六个链路开关位于 `#translationConfigModal`：Discord、X、Bilibili、YouTube、Steam 开关分别批量写入对应来源的 `translation_enabled`，
 「手动转发」开关写入 `settings.translation.enabled`。自动转发仍按来源条目决定是否翻译；
 新增 Discord、X、YouTube 和 Steam 来源显式默认开启翻译，Bilibili 来源和 QQ 手动转发默认关闭；已有来源及旧配置迁移保持原有行为。没有来源时，批量开关显示新来源默认状态并禁用，添加来源后才能切换。
 Discord/X 手动转发通过 `manual=True` 读取配置，`enabled` 只看共享手动开关，而
@@ -563,7 +560,7 @@ QQ 私聊的 `/补发状态 开启/关闭` 走字段级接口 `POST /api/setting
     │                        × 拒绝 → 申请消失（重新注册会再次出现）
     │
     ├──► 身份记录（plugins/identities.py）
-    │      把昵称/群名、最后活动时间写入 data/qq_identities.json；无效、非有限或超前超过 5 分钟的事件时间回退到当前时间
+    │      把昵称/群名、最后活动时间按 Bot 写入 data/qq_identities.json，保留旧资料与管理员备注；无效、非有限或超前超过 5 分钟的事件时间回退到当前时间
     │      QQ 高频消息触发的 OpenID 与身份文件操作在线程池执行，避免阻塞 asyncio 消息循环
     │      身份资料落盘失败只记录警告并跳过展示信息更新，不影响已完成的自动发现
     │      面板读取身份库时，缺失文件视为空资料；损坏 JSON 或无效容器结构会报告错误，不伪装成名称和备注被清空
@@ -648,10 +645,7 @@ Discord 与 QQ 网关启动失败后由 `plugins/discord_reconnect.py` 常驻监
 
 全局出站代理由设置页维护在 `data/network_proxies.json`，字段为 Discord、X、远程 RSSHub、Bilibili、YouTube、Steam、翻译/AI。它不属于单个 QQ Bot 工作区配置；修改后由面板重启机器人。HTTP/HTTPS 地址按链路分别应用，未配置时保留各链路现有的环境变量回退行为。网络代理窗口底栏可读取当前 Windows 回环系统代理，填入并检测全部七项，需通过保存按钮提交；本机/局域网 RSSHub 与本机 AI 服务绕过代理。完整配置备份包含该文件，备份可能含带认证信息的代理 URL。
 
-私聊 Bilibili 投稿链接的消息类型筛选保存在 settings.json 的 bilibili_c2c_relay_filter 中，由管理面板「QQ → QQ」页的统一「手动转发」卡右侧「内容筛选」二级窗口的 Bilibili Tab 读写；视频本体归入“视频”类型，旧配置缺少此字段时按全部支持类型启用处理。该筛选不区分内容类型：链接指向视频、专栏还是动态由链接本身决定，面板不提供投稿类型选项。
-
-三条手动转发的类型筛选各自使用该链路实际支持的集合（`plugins/filter.py` 的 `DISCORD_MESSAGE_TYPES` / `X_MESSAGE_TYPES` / `BILIBILI_MESSAGE_TYPES`，由 `MANUAL_RELAY_FILTER_TYPES` 关联到 settings 字段）：Discord 六类齐备，X 为文字/图片/视频，Bilibili 为文字/图片/链接/视频。不支持的类型不在面板渲染（只显示该链路可用的筛选项），不会出现点了没有效果的按钮。“视频”是 X/Bilibili 的规范类型名（Discord 的通用附件仍叫“文件”）：`LEGACY_MESSAGE_TYPE_ALIASES` 把旧配置里的“文件”映射为“视频”，`normalize_message_types` 在读取时完成迁移——只在目标名属于该链路支持集时映射，因此 Discord 的“文件”不受影响。渲染器检查的类型名必须存在于对应规范集（X/Bilibili 的媒体槽位即“视频”）。
-X/Bilibili 早期与 Discord 共用六类型集合，存量配置可能存着本链路不支持的值。读取层 `config._c2c_relay_filter` 按支持集归一化，校验层 `settings_model._validate_qq_c2c_filters` 继续接受这些老值——若在校验层直接拒绝，`config` 会把配置判为结构无效并内存降级到默认值，导致用户全部配置丢失。归一化后为空且原列表非空（只存了不支持的类型）时按“未筛选”处理，避免这类配置让转发意外全部失效；用户明确清空全部类型（空列表）仍保持“不转发任何内容”的语义。
+授权用户的 Discord、X、Bilibili 和 Steam 手动转发筛选分别存放在该账号 `qq_user_openids` 对应用户条目内；缺少某链路字段时沿用旧版顶层全局配置。`command.py` 将发起用户 OpenID 传给配置读取，逐用户应用消息类型筛选；Steam 商店游戏页面复用 Steam 请求和地区设置，按文字、图片、链接过滤，DLC 和捆绑包页面不作为游戏处理。YouTube 手动转发不可用。空类型列表表示不转发；旧全局配置中仅含不支持类型时继续回退为全部支持类型。图片化呈现设置仍为全局。
 
 定时消息的年度计划必须使用日历中存在的日期。管理面板会拒绝不存在的月日组合；遗留无效计划会在配置未变期间记录一次错误并暂停该条，不会每分钟重算；2 月 29 日仍只在闰年触发。
 定时消息配置读取时，间隔及月/年日期字段的整数转换溢出会回退到已有安全默认值；磁盘配置仍先经过整体结构校验。每条到期消息发送前重新在线程池读取启用群，并与该计划显式目标群取交集，避免等待 settings 文件检查时阻塞事件循环。
@@ -722,7 +716,7 @@ QQ 定时消息可在每条计划内保存一张 PNG、JPEG、GIF 或 WebP 附�
 | `plugins/proxy_guard.py` | 本机 HTTP 代理端口自检：`DISCORD_PROXY` 指向不可用的回环端口时改用 Windows 系统代理当前端口；纯函数，便于测试 | 低 |
 | `plugins/fetch.py` | Discord 消息抓取 + 归一化 + 渲染为 QQ 消息段（唯一渲染逻辑）；消息抬头/时间/回复引用由上下文 helper 组装；正文提及/Markdown/Emoji、Embed 标题/链接/图片与附件分类分别由专责 helper 处理；图片/音频/视频附件共用下载与富媒体构造；图片/音频失败回退链接，视频失败跳过且不补链接；单条消息 200 响应 JSON 无效或根节点非对象时返回格式错误；频道元数据查询合并并限制 5 个并发，成功缓存最多 2048 项，失败（包括无效 JSON）缓存 30 秒，渲染回退为频道 ID；REST 消息作者结构无效时显示 unknown、username 类型无效时筛选值归一为空、正文类型无效时归一为空、Embed/附件集合无效时归一为空列表，媒体字段只保留字符串；内联及回退回复引用的作者结构无效时显示 unknown，昵称仅接受非空字符串，提及列表结构无效时忽略映射、正文类型无效时跳过引用行；代理配置变化后按新端口重建 REST 客户端；关闭时回收元数据与其他 REST 请求后关闭 HTTP 客户端 | 中 |
 | `plugins/forward_service.py` | Discord 实时转发、补发和重试共用的消息准备与翻译流程；频道筛选及翻译配置读取在线程池执行 | 中 |
-| `plugins/sender.py` | QQ 群发送：在线程池读取目标群及 Bot 绑定路由；分片、图片媒体、重试、限流退避、图片/音频链接降级、视频按 no_link_fallback 跳过 | 低 |
+| `plugins/sender.py` | QQ 群发送：在线程池读取目标群及 Bot 绑定路由；分片、图片媒体、重试、限流退避、图片/音频链接降级、视频按 no_link_fallback 跳过；官方 QQ 明确的认证/权限不足、文件过大和可识别的内容违规停止本轮重试，其余未知错误沿用重试；日志记录可用 HTTP 状态、错误码和 Trace ID | 低 |
 | `plugins/retry.py` | 发送失败欠账队列、持久化恢复与延迟重试；到期重试入口负责内容重建和发送，发送结果 helper 单独更新逐群欠账、重试次数及退避；`send_and_record` 可接收 RSS 幂等键，跨来源按群过滤已确认投递；关闭时回收频道 worker 并保留队列供下次启动恢复 | 中 |
 | `plugins/delivery_dedup.py` | SQLite 持久记录 X/Bilibili 投稿 ID、YouTube 视频 ID 与已成功接收的 QQ 群；保留 90 天并限制 100,000 条；写入异常时用有界进程内记录兜底，数据库读写在线程池执行 | 低 |
 | `plugins/message_trace.py` | 投递结果追踪与持久化；异步写入在线程完成后再传播取消 | 低 |
@@ -771,7 +765,7 @@ QQ 定时消息可在每条计划内保存一张 PNG、JPEG、GIF 或 WebP 附�
 | **修改 X RSS 转发** | `plugins/x_rss.py`（轮询/队列/投递）+ `plugins/x_rss_parser.py`（解析）+ `plugins/x_rate_limit.py`（保护策略） |
 | **修改 Bilibili RSS 转发** | `plugins/bilibili.py`（多投稿类型轮询/投递/限速队列）+ `plugins/bilibili_parser.py`（解析）+ `plugins/bilibili_rate_limit.py`（保护策略）+ `plugins/filter.py`（关键词/投稿类型筛选） |
 | **修改 YouTube RSS 转发** | `plugins/youtube.py`（频道轮询/投递/限速队列）+ `plugins/youtube_parser.py`（频道解析/Feed 解析）+ `plugins/bilibili_rate_limit.py`（保护策略复用）+ `plugins/filter.py`（关键词/消息类型筛选） |
-| **修改群内 Bilibili 链接自动解析** | `plugins/bilibili_auto_resolve.py`（触发范围、去重、被动回复）+ `plugins/bilibili.py`（短链解析/投稿详情/单段下载复用）+ `plugins/settings_model.py` 与 `plugins/config.py`（`bilibili_auto_resolve` 开关）+ `panel/web/index.html`、`panel/web/app.js`（Bilibili 页卡片） |
+| **修改群内 Bilibili 链接自动解析** | `plugins/bilibili_auto_resolve.py`（触发范围、去重、被动回复）+ `plugins/bilibili.py`（短链解析/投稿详情/单段下载复用）+ `plugins/settings_model.py` 与 `plugins/config.py`（`bilibili_auto_resolve` 开关）+ `panel/web/index.html`、`panel/web/app.js`（Bilibili 状态栏开关） |
 | **修改自动翻译或 AI 模型轮换** | `plugins/translation.py`（服务路由）+ `plugins/ai_client.py`（AI 请求/轮换）+ `plugins/tencent_tmt.py`（TMT） |
 | **修改 OpenID 自动发现** | `plugins/command.py`（`save_group_openid` / `save_user_openid`） |
 | **修改注册/审核机制** | `plugins/registration.py`（指令 + 存储）+ `panel/管理面板.pyw`（`/api/registrations*`）+ `panel/web/app.js`（审核弹窗） |
@@ -853,7 +847,7 @@ QQ 定时消息可在每条计划内保存一张 PNG、JPEG、GIF 或 WebP 附�
 - 桌面窗口保留 PyWebView 可缩放窗口样式和 960×640 最小尺寸；`windows_titlebar.py` 使用现有 .NET 运行时在内存中编译 `windows_titlebar.cs`，绘制 38px（按 DPI 缩放）的 Windows 标题栏。原生命中测试将拖动、边缘缩放和系统菜单交给 Windows，最大化区域返回 HTMAXBUTTON 供系统 Snap 使用；按钮通过 WM_SYSCOMMAND 操作，关闭统一进入桌面关闭偏好处理。最大化图标直接读取 IsZoomed。JS 桥负责主题同步及关闭偏好读写，不承接拖动/resize。模块加载失败时记录桌面日志并保留系统标题栏。
 - 窗口位置、尺寸与最大化状态保存到 `data/desktop_window.json`。启动时以 PyWebView 的逻辑像素坐标核对可用显示器，旧位置不可见时将窗口放到当前可用屏幕。
 - 原生窗口从最大化或最小化还原时，标题栏模块在同步窗口位置消息期间保留 Windows 已选定的外部尺寸，阻止 WinForms 将已移除的标准边框高度再次叠加；不覆盖位置，也不约束后续普通缩放。相关回归检查位于 `scripts/test_desktop_titlebar.py`。
-- `panel/web/discord-page.js` 为五个转发功能页共用的展示适配层（沿用 Discord 模板文件名），通过页面配置管理共用控件的位置还原、状态栏连接/统计分组及开关可访问状态；不调用 API 或修改 settings。桌面功能页顺序为机器人状态栏、转发组及其余功能卡片；Discord 离线补发与 X/Bilibili/YouTube RSS 卡片在桌面页面中隐藏，由状态栏最右侧图标入口打开统一二级窗口，关闭后按原位还原；普通网页端仍显示这些卡片。五页其余卡片采用统一间距，CSS 在 `desktop-host` 下复用同一套功能页规则，总览及设置不采用该布局。表格渲染、复制、排序及保存仍由原 `app.js` 处理。机器人进程控制主入口在总览，Windows 原生托盘提供快捷操作；全局配置与维护按钮直接归属设置页，使用原 ID 与事件处理，不再由功能页的运行工具容器搬运。Discord/QQ/翻译配置入口均唯一，设置页提供失败通知开关、重启管理程序和问题反馈行。QQ 用户白名单不再有设置页入口：其表格（`#userList`/`#userBody`）与「＋ 新增」「注册审核」按钮直接位于「QQ → QQ」页转发组工作区的第二个分栏，与「QQ 转发群」左右并排（`#qqFgBody` 在 `desktop-host` 下为两列网格，1280px 及以下单栏），沿用原元素 ID、事件绑定与拖动排序；`#btnManageQQWhitelist` 与 `#qqWhitelistModal` 的旧弹窗内容已移除，`openQQWhitelistModal()` 仅保留为切到 QQ 页的兼容入口。设置页“应用”卡片为平铺行：版本、自动检查更新开关（`wrelay_auto_update_check`，默认开启，开启时页面首次加载自动查询一次 GitHub 稳定版）、更新状态（说明由原“更新详情”行并入，行尾只保留“检查更新/立即更新”按钮，发布页入口已移除）和问题反馈；配置向导位于“机器人与服务”卡片底部。检查到可安装的新版本后按钮文案切换为“立即更新”，点击后下载安装包并显示百分比与当前步骤，页面刷新时会通过 `/api/app/update-progress` 接续显示进度。界面动画偏好通过 `localStorage` 的 `wrelay_status_sheen` 保存，由前端状态渲染和 CSS 控制状态卡渐变扫光，不调用后端 API；浅色主题提高扫光明度，开启中的「界面动画」设置行使用与运行徽标一致的绿色。全局运行日志从设置的“启动与维护”打开 `runtimeLogModal`，保留原日志节点 ID 与请求处理，消息追踪/清空确认位于日志窗口上层；功能页不再创建日志卡片。根滚动容器为 HTML，使用 scrollbar-gutter: stable，不支持时回退 overflow-y: scroll。
+- `panel/web/discord-page.js` 为五个转发功能页共用的展示适配层（沿用 Discord 模板文件名），通过页面配置管理共用控件的位置还原、状态栏连接/统计分组及开关可访问状态；不调用 API 或修改 settings。桌面功能页顺序为机器人状态栏、转发组及其余功能卡片；Discord 离线补发与 X/Bilibili/YouTube RSS 卡片在桌面页面中隐藏，由状态栏最右侧图标入口打开统一二级窗口，关闭后按原位还原；普通网页端仍显示这些卡片。五页其余卡片采用统一间距，CSS 在 `desktop-host` 下复用同一套功能页规则，总览及设置不采用该布局。表格渲染、复制、排序及保存仍由原 `app.js` 处理。机器人进程控制主入口在总览，Windows 原生托盘提供快捷操作；全局配置与维护按钮直接归属设置页，使用原 ID 与事件处理，不再由功能页的运行工具容器搬运。Discord/QQ/翻译配置入口均唯一，设置页提供失败通知开关、重启管理程序和问题反馈行。QQ 用户白名单不再有设置页入口：其表格（`#userList`/`#userBody`）与「＋ 新增」「注册审核」按钮直接位于「QQ → QQ」页转发组工作区的第二个分栏，与「QQ 转发群」左右并排（`#qqFgBody` 在 `desktop-host` 下为两列网格，1280px 及以下单栏），沿用原元素 ID、事件绑定与拖动排序；`#btnManageQQWhitelist` 与 `#qqWhitelistModal` 的旧弹窗内容已移除，`openQQWhitelistModal()` 仅保留为切到 QQ 页的兼容入口。设置页宽屏为双栏、窄屏为单栏；桌面端每次启动自动查询一次 GitHub 稳定版，忽略旧的关闭偏好。设置页“应用”卡片为平铺行：版本、更新状态（说明由原“更新详情”行并入，行尾只保留“检查更新/立即更新”按钮，发布页入口已移除）和问题反馈；配置向导位于“机器人与服务”卡片底部。检查到可安装的新版本后按钮文案切换为“立即更新”，点击后下载安装包并显示百分比与当前步骤，页面刷新时会通过 `/api/app/update-progress` 接续显示进度。界面动画偏好通过 `localStorage` 的 `wrelay_status_sheen` 保存，由前端状态渲染和 CSS 控制状态卡渐变扫光，不调用后端 API；浅色主题提高扫光明度，开启中的「界面动画」设置行使用与运行徽标一致的绿色。全局运行日志从设置的“启动与维护”打开 `runtimeLogModal`，保留原日志节点 ID 与请求处理，消息追踪/清空确认位于日志窗口上层；功能页不再创建日志卡片。根滚动容器为 HTML，使用 scrollbar-gutter: stable，不支持时回退 overflow-y: scroll。
 - 桌面自定义标题栏与任务栏/托盘使用 `panel/wrelay_panel.ico`；应用内品牌标识使用 `wrelay-logo.svg`。
 - 转发组、来源、接收群和白名单表格共用列宽、行高、状态复选框与操作按钮规则；表格按卡片宽度布局，不设置强制最小宽度。长值保留头尾并在中间省略，悬停或聚焦可查看完整值，点击或使用键盘可复制并获得反馈；转发组两侧分栏同步折叠。
 - 桌面窗口在窄宽度下将侧栏收起为图标导航、转发列表切换单栏；更窄时隐藏次要的 QQ 账号列，保持主要 ID 和操作可见。
@@ -874,7 +868,7 @@ QQ 定时消息可在每条计划内保存一张 PNG、JPEG、GIF 或 WebP 附�
 | 注册审核 | 点击菜单按钮（或发送裸命令 `/注册` / `/注册群`）即按当前 OpenID 提交并返回识别码，无需 QQ 号/昵称/群号/群名；通过 = 按现有同步流程加入 settings（默认 `enabled: false`），仅在提供可选资料时写入条目名称/账号，空值不覆盖已有字段，`remark` 原样保留；拒绝 = 申请消失；同一 openid 同时只有一条注册记录（重新注册覆盖） |
 | `qq_registrations.json` | 注册申请存储，与白名单数据独立；**不参与任何权限判断**，审核通过 ≠ 自动启用 |
 | `qq_identities.json` | 纯身份资料库（昵称、群名、管理员备注），只用于面板展示，**绝不参与任何权限判断** |
-| 不存在主动反查群名 | QQ 官方 API 不提供群名/昵称查询接口。群名只在机器人收到群消息时从事件中提取并记录，无法通过 openid 主动查询 |
+| 身份资料补全 | 官方 Bot 收到群事件时按 Bot 查询群资料；私聊优先采用事件昵称，缺失时查询用户资料。查询受平台权限限制，失败保留原资料；按 Bot 分开存储，同一 OpenID 有多个 Bot 归属时面板不猜测名称 |
 | 自动转发方向 | 自动链路为 Discord → QQ、X RSS → QQ、Bilibili RSS → QQ、YouTube RSS → QQ；项目不做 QQ → Discord 或双向同步；QQ → QQ 仅限授权用户手动 relay 命令 |
 
 
@@ -882,17 +876,20 @@ QQ 定时消息可在每条计划内保存一张 PNG、JPEG、GIF 或 WebP 附�
 
 ## 14. 首次配置向导
 
+机器人凭据列表的 `enabled` 默认兼容旧数据为启用；Bot 初始化前过滤已停用的 QQ/Discord 配置，持久配置保留原凭据。Discord 频道审计合并所有已启用 Bot 的可读频道。YouTube 多密钥存于环境配置列表，旧单密钥自动兼容，已启用密钥轮流用于 Data API 请求，仍共享请求间隔和退避；接口只返回索引、状态和并发版本，不回传密钥。个人 QQ 沿用原连接配置及启停逻辑。
+
 - `panel/web/onboarding.js` 独立管理七步流程：用途、账号、授权用户、接收群、内容来源、确认启用、验证结果；复用 `app.js` 的认证请求、确认窗口和主页面刷新入口。
-- `panel/onboarding_api.py` 在静态资源挂载前注册 `/api/onboarding` 及 progress、credentials、authorize、probe、apply、receipt 子接口，全部沿用面板 Origin/API 令牌校验。进度、收件确认、用户授权、配置应用和账号凭据事务在线程池执行文件操作；来源检测也在线程池读取 settings 并验证有大小上限的 RSS XML，不阻塞面板事件循环。只有显式保存账号才写凭据文件，先校验两个账号输入，再合并为一次原子替换；不逐步自动重启。RSS 检测对 Bilibili HTTP 503 按 UP 主与标签／关键词来源给出针对性排查提示。
-- 向导的六个写/检测接口要求对象 JSON；无效 JSON 或数组、`null` 等非对象请求统一返回 400，且不会触发进度、凭据、授权、来源检测、应用或收件确认事务。
+- `panel/onboarding_api.py` 在静态资源挂载前注册 `/api/onboarding` 及 progress、credentials、authorize、probe、source-check、apply、receipt 等子接口，全部沿用面板 Origin/API 令牌校验。进度、收件确认、用户授权、配置应用和账号凭据事务在线程池执行文件操作；来源检测也在线程池读取 settings 并验证有大小上限的 RSS XML，不阻塞面板事件循环。只有显式保存账号才写凭据文件，先校验两个账号输入，再合并为一次原子替换；不逐步自动重启。RSS 检测对 Bilibili HTTP 503 按 UP 主与标签／关键词来源给出针对性排查提示。
+- 需要请求体的向导写/检测接口要求对象 JSON；无效 JSON 或数组、`null` 等非对象请求统一返回 400，且不会触发进度、凭据、授权、来源检测、应用或收件确认事务。
 - `panel/onboarding.py` 负责白名单字段、RSS URL、来源复用、群归属和路由合并校验。Bilibili 来源在向导中直接用 UID、标签名或关键词作为名称，不提供自定义备注。apply 基于最新 settings 快照和 revision 保存；不从自动发现记录创建权限。已有来源保留筛选项，相同来源与目标集合复用现有路由，重复应用同一 flow_id 幂等。
+- YouTube 和 Steam 使用现有频道与商店地址解析器检查格式，不请求远端；新来源沿用各自默认翻译和 Steam 事件设置，按归一化来源复用已有条目及筛选。五条自动链路的向导均可选择已启用的个人 QQ，按账号工作区读取和保存来源、接收群与转发组；不将无归属的旧群分配给个人 QQ。Discord 个人 QQ 分支可单独写入 Discord Token，保留原有 QQ 凭据，并在启动或重启后检查连接。
 - `data/onboarding.json` 只保存非密钥草稿、flow_id、应用时间、旧投递记录标识和用户收件确认；不是运行时权限来源，也不纳入配置备份。步骤切换和“稍后配置”时保存，强制退出可能丢失当前未保存输入。存在真实账号或登记实体时不自动弹出欢迎页；从设置始终可重新进入。
 - 向导状态文件缺失时按首次空状态处理；现存文件读取失败或顶层、状态字段类型无效时，读取及依赖状态的写接口返回明确错误并保留原文件。凭据保存会先校验该状态，避免状态损坏时只写入账号文件却返回失败。
 - QQ 向导使用已有授权私聊流程，启用用户意味着授予现有白名单管理命令权限。群聊互转实现不在本次接入范围；不写 qq_forwarding_groups，不新增自动 QQ 同步。QQ 私聊仍可选择全局已启用群，向导选择不构成单用户权限隔离。
 - `plugins/startup_config.py` 提供凭据就绪与 Discord 用途判断。bot 首次检查要求 QQ 凭据；存在已启用 Discord 频道才强制要求 Discord Token。无有效 Discord Token 且无启用频道时，仅在进程环境中以空 DISCORD_BOTS 屏蔽模板占位。已配置的真实 Discord 账号仍沿用原连接机制；面板看护在未配置 Discord 时跳过其断线重启判断。
-- 结果页按来源、保存时间、旧记录排除和所选全部目标群匹配成功投递；配置保存、服务连接和用户手动收件确认分开表达。没有新增自动发送测试消息的接口。
+- 结果页按来源、保存时间、旧记录排除和所选全部目标群匹配成功投递；Steam 追踪按群分别生成且使用散列标识，提示用户在消息追踪和目标群核对。配置保存、服务连接和用户手动收件确认分开表达。没有新增自动发送测试消息的接口。
 
-相关验证：`.venv/Scripts/python.exe -X utf8 scripts/test_onboarding.py`（已加入统一回归入口）。测试使用临时目录和模拟服务，覆盖用途分支、启动必填项、授权边界、凭据原子写入、配置冲突、来源检测和重复保存。
+相关验证：`.venv/Scripts/python.exe -X utf8 scripts/test_onboarding.py`（已加入统一回归入口）、`python scripts/test_onboarding_youtube_steam.py` 和 `python scripts/test_onboarding_personal_routes.py`。测试使用临时目录或模拟数据，覆盖用途分支、启动必填项、授权边界、凭据原子写入、配置冲突、来源检测和重复保存。
 
 界面隔离预览：`.venv/Scripts/python.exe -X utf8 scripts/preview_onboarding.py`，访问 `http://127.0.0.1:18109/?desktop=1`；示例 AppID 为 1001，密钥可填任意示例文字。机器人与 RSS 请求均由模拟响应提供，注册申请在模拟启动后出现，数据仅写临时目录，Ctrl+C 退出。
 

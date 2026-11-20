@@ -25,13 +25,13 @@ DISCORD_JS = (WEB / "discord-page.js").read_text(encoding="utf-8")
 STYLE_CSS = (WEB / "style.css").read_text(encoding="utf-8")
 
 CARD_MODALS = [
-    "scheduledMessageContentModal", "relayChannelsModal", "translationChainsModal",
+    "scheduledMessageContentModal", "relayChannelsModal", "translationConfigModal",
     "backupRestoreModal", "runtimeLogModal",
 ]
 PILL_BUTTONS = [
     "btnTranslationDiscord", "btnTranslationX", "btnTranslationBilibili", "btnTranslationManual",
     "btnAutoBackupToggle", "btnLogAutoScroll", "btnBackfillToggle",
-    "btnScheduledMessageToggle", "btnBilibiliAutoResolveToggle",
+    "btnScheduledMessageToggle",
 ]
 
 failures = []
@@ -131,12 +131,13 @@ check("功能页小卡片标题行统一高度与垂直对齐",
       bool(small_card_heading)
       and all(rule in small_card_heading.group(1) for rule in
               ("display: flex", "align-items: center", "min-height: var(--control-height)", "margin: 0")))
-translation_card_section = re.search(
-    r'#pageQQ \.func-cards > #autoTranslationCard \.auto-translation-section \{([^}]*)\}',
-    STYLE_CSS,
-)
-check("共享自动翻译卡内部不绘制分隔线",
-      bool(translation_card_section) and "border-top: 0" in translation_card_section.group(1))
+check("翻译方式与钥匙入口位于设置窗口，原卡片已移除",
+      'id="autoTranslationCard"' not in HTML
+      and 'id="translationConfigModal"' in HTML
+      and 'id="btnTranslationCredentials"' in HTML
+      and 'translationCredentialsModal: {size: "large"' in UI_JS
+      and 'footer: "translationSettingsClose"' in UI_JS
+      and 'class="translation-settings-actions"' in HTML)
 backfill_actions = re.search(
     r'<div class="row backfill-actions">(.*?)</div>', HTML, re.S
 )
@@ -159,15 +160,18 @@ check("设置页开关焦点框缩到轨道",
 check("设置页开关悬停不再绘制外围底",
       "#pageSettings .settings-switch:not(:disabled):is(:hover, :focus-visible)" not in UI_CSS)
 check("app.js 提供 pillSwitchMarkup", "function pillSwitchMarkup(" in APP_JS)
-for fn in ["renderTranslationToggleFor", "renderBilibiliAutoResolveToggle",
+for fn in ["renderTranslationToggleFor",
            "renderScheduledMessageToggle", "renderBackfillToggle"]:
     body = re.search(r"function " + fn + r"\([^)]*\) \{(.*?)\n\}", APP_JS, re.S)
     check(fn + " 改用胶囊标记", bool(body) and "pillSwitchMarkup(" in body.group(1)
           and "<svg" not in body.group(1))
-translation_entry = re.search(r'<button[^>]*id="btnTranslationChains"[^>]*>', HTML)
-check("自动翻译卡的翻译链路入口保持普通按钮",
-      bool(translation_entry) and "pill-switch" not in translation_entry.group(0)
-      and 'role="switch"' not in translation_entry.group(0))
+translation_config = HTML.split('<div id="translationConfigModal"', 1)[1].split('<div id="translationCredentialsModal"', 1)[0]
+check("翻译链路开关直接位于翻译服务配置窗口",
+      'id="btnTranslationChains"' not in HTML
+      and 'id="translationChainsModal"' not in HTML
+      and all('id="' + button + '"' in translation_config for button in
+              ["btnTranslationDiscord", "btnTranslationX", "btnTranslationBilibili",
+               "btnTranslationYoutube", "btnTranslationSteam", "btnTranslationManual"]))
 for button in PILL_BUTTONS:
     tag = re.search(r"<button[^>]*id=\"" + button + r"\"[^>]*>", HTML)
     check(button + " 带 pill-switch 与 role=switch",

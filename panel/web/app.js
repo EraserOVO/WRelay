@@ -10,21 +10,11 @@ const SVG_SCHEDULE_CLOCK = '<svg class="scheduled-date-picker-icon" viewBox="0 0
 const SVG_PEN = mcIcon("edit-2", 12);
 const SVG_PAUSE = mcIcon("pause", 13);
 const SVG_PLAY = mcIcon("play", 13);
-// 更新检查偏好：启动后是否自动检查一次（仅提示，不自动安装）
+// 普通网页保留旧偏好；桌面端启动时始终检查更新。
 const AUTO_UPDATE_CHECK_KEY = "wrelay_auto_update_check";
 function isAutoUpdateCheckEnabled() {
   try { return localStorage.getItem(AUTO_UPDATE_CHECK_KEY) !== "0"; } catch (e) { return true; }
 }
-function applyAutoUpdateCheckPreference(enabled) {
-  const button = document.getElementById("btnAutoUpdateCheck");
-  if (button) {
-    button.dataset.on = enabled ? "1" : "0";
-    button.setAttribute("aria-checked", String(enabled));
-  }
-}
-(function initUpdatePreferences() {
-  applyAutoUpdateCheckPreference(isAutoUpdateCheckEnabled());
-})();
 
 let settings = null;
 // 主题偏好：夜间/日间模式，持久化到 localStorage，首次使用默认夜间。
@@ -234,6 +224,7 @@ function localizeUserError(message, fallback) {
 // 三个页面共用同一份 settings 对象（整体保存、整体拉取），切换只改可见性，
 // 不会丢失任何已保存/未保存的修改。
 const IS_DESKTOP_HOST = window.location.protocol === "file:" || new URLSearchParams(window.location.search).get("desktop") === "1";
+function shouldAutoCheckForUpdates() { return IS_DESKTOP_HOST || isAutoUpdateCheckEnabled(); }
 if (IS_DESKTOP_HOST) document.body.classList.add("desktop-host");
 const PAGE_STORAGE_KEY = IS_DESKTOP_HOST ? "wrelay_desktop_active_page" : "wrelay_active_page";
 let activePage = IS_DESKTOP_HOST ? "overview" : "discord";
@@ -283,7 +274,9 @@ function setActivePage(page) {
   const steamCard = document.getElementById("steamStatusCard");
   if (steamCard) steamCard.style.display = showInlineChainDetails && activePage === "steam" ? "" : "none";
   const scheduledCard = document.getElementById("scheduledMessageCard");
-  if (scheduledCard) scheduledCard.style.display = activePage === "qq" ? "" : "none";
+  if (scheduledCard) scheduledCard.style.display = !IS_DESKTOP_HOST && activePage === "qq" ? "" : "none";
+  const scheduledShortcut = document.getElementById("scheduledMessageShortcut");
+  if (scheduledShortcut) scheduledShortcut.hidden = !IS_DESKTOP_HOST || activePage !== "qq";
   document.querySelectorAll('#pageTabs [data-kind="pageTab"]').forEach(function (btn) {
     btn.classList.toggle("active", btn.dataset.page === activePage);
     if (btn.dataset.page === activePage) btn.setAttribute("aria-current", "page");
@@ -294,6 +287,7 @@ function setActivePage(page) {
   renderChainStatusShortcut();
   renderPageCredentialShortcut();
   renderFailureNotificationShortcut();
+  renderBilibiliAutoResolveToggle(!!(settings && settings.bilibili_auto_resolve && settings.bilibili_auto_resolve.enabled));
   if (activePage === "steam" && window.renderSteamPage) window.renderSteamPage();
   if (settings) {
     if (activePage === "overview") void refreshWatchedChainStatuses();
@@ -397,6 +391,7 @@ function renderChainStatusShortcut() {
 let chainDetailPlaceholder = null;
 let chainDetailCard = null;
 let chainDetailDisplay = "";
+let chainDetailHeadingPlaceholder = null;
 
 function openChainDetailModal(cardId) {
   const card = document.getElementById(cardId);
@@ -408,6 +403,17 @@ function openChainDetailModal(cardId) {
   renderChainStatusShortcut();
   const heading = card.querySelector(":scope > h2");
   title.textContent = heading ? heading.textContent.trim() : "链路详情";
+  overlay.classList.toggle("scheduled-message-detail", cardId === "scheduledMessageCard");
+  if (cardId === "scheduledMessageCard") {
+    const scheduledHeading = card.querySelector(".scheduled-message-workspace-heading");
+    if (scheduledHeading) {
+      chainDetailHeadingPlaceholder = document.createComment("Scheduled message heading position");
+      scheduledHeading.before(chainDetailHeadingPlaceholder);
+      title.hidden = true;
+      title.parentElement.append(scheduledHeading);
+      overlay.querySelector(".chain-detail-modal").setAttribute("aria-labelledby", "scheduledMessageHeading");
+    }
+  }
   chainDetailPlaceholder = document.createComment("Chain detail card position");
   card.before(chainDetailPlaceholder);
   chainDetailCard = card;
@@ -430,6 +436,14 @@ function closeChainDetailModal() {
   const body = document.getElementById("chainDetailBody");
   if (!overlay) return;
   overlay.style.display = "none";
+  const title = document.getElementById("chainDetailTitle");
+  const scheduledHeading = overlay.querySelector(".scheduled-message-workspace-heading");
+  if (scheduledHeading && chainDetailHeadingPlaceholder?.parentNode) {
+    chainDetailHeadingPlaceholder.replaceWith(scheduledHeading);
+  }
+  chainDetailHeadingPlaceholder = null;
+  if (title) title.hidden = false;
+  overlay.querySelector(".chain-detail-modal")?.setAttribute("aria-labelledby", "chainDetailTitle");
   if (chainDetailCard && chainDetailPlaceholder?.parentNode) {
     chainDetailPlaceholder.replaceWith(chainDetailCard);
     chainDetailCard.style.display = chainDetailDisplay;
@@ -448,16 +462,25 @@ if (chainStatusShortcut) {
     if (target) openChainDetailModal(target);
   });
 }
+document.getElementById("scheduledMessageShortcut")?.addEventListener("click", function () {
+  openChainDetailModal("scheduledMessageCard");
+});
 
+let youtubeKeyDraft = [], youtubeKeyRevision = "";
+function collectCredentialRows(container, valueName) {
+  return [...container.querySelectorAll('.credential-entry')].map(row => ({id: row.dataset.id,
+    enabled: row.querySelector('input[type="checkbox"]').checked, [valueName]: row.querySelector('input[type="password"], input[type="text"]').value}));
+}
+function renderCredentialRows(container, items, valueName, label) {
+  container.innerHTML = items.map((item, index) => '<div class="credential-card credential-entry" data-id="' + escapeHtml(item.id || "") + '">' +
+    '<input type="checkbox" aria-label="启用此配置"' + (item.enabled !== false ? ' checked' : '') + '>' +
+    '<label class="form-field">' + label + (item.id ? '（留空保留原密钥）' : '') + '<input type="password" autocomplete="new-password" value="' + escapeHtml(item[valueName] || "") + '"></label>' +
+    '<button type="button" class="danger rowicon" data-credential-remove="' + index + '" aria-label="删除此配置" title="删除此配置">' + mcIcon("delete-2", 16) + '</button></div>').join("");
+}
 function openYoutubeApiKeyModal() {
   const modal = document.getElementById("youtubeApiKeyModal");
-  const input = document.getElementById("youtubeApiKeyInput");
   if (!modal) return;
-  if (input) {
-    input.value = "";
-    input.type = "password";
-  }
-  setYoutubeApiKeyVisible(false);
+  youtubeKeyDraft = [];
   modal.style.display = "flex";
   refreshYoutubeApiKeyState();
   modal.querySelector(".modal-x")?.focus();
@@ -465,10 +488,8 @@ function openYoutubeApiKeyModal() {
 
 function closeYoutubeApiKeyModal() {
   const modal = document.getElementById("youtubeApiKeyModal");
-  const input = document.getElementById("youtubeApiKeyInput");
   if (modal) modal.style.display = "none";
-  if (input) input.value = "";
-  setYoutubeApiKeyVisible(false);
+  youtubeKeyDraft = []; document.getElementById("youtubeApiKeyEntries").replaceChildren();
 }
 
 async function refreshYoutubeApiKeyState() {
@@ -477,27 +498,18 @@ async function refreshYoutubeApiKeyState() {
   status.textContent = "检查配置中…";
   try {
     const result = await jget("/api/youtube/api-key");
-    status.textContent = result.ok
-      ? (result.configured ? "已配置；密钥不会显示" : "尚未配置")
-      : "无法读取配置状态";
+    if (!result.ok) throw new Error(result.msg || "无法读取配置状态");
+    youtubeKeyRevision = result.revision; youtubeKeyDraft = (result.entries || []).map(item => ({...item, key: ""}));
+    if (!youtubeKeyDraft.length) youtubeKeyDraft.push({id: "", enabled: true, key: ""});
+    renderCredentialRows(document.getElementById("youtubeApiKeyEntries"), youtubeKeyDraft, "key", "API Key");
+    status.textContent = "";
   } catch (_error) {
     status.textContent = "无法读取配置状态";
   }
 }
 
-function setYoutubeApiKeyVisible(visible) {
-  const input = document.getElementById("youtubeApiKeyInput");
-  const toggle = input && input.closest(".secret-input-wrap")?.querySelector(".secret-input-toggle");
-  if (!input || !toggle) return;
-  input.type = visible ? "text" : "password";
-  toggle.setAttribute("aria-pressed", String(visible));
-  toggle.setAttribute("aria-label", visible ? "隐藏 API Key" : "显示 API Key");
-  toggle.title = visible ? "隐藏 API Key" : "显示 API Key";
-  toggle.innerHTML = mcIcon(visible ? "eye-close" : "eye", 18);
-}
-
 function secretToggleLabel(input, visible) {
-  const name = input.id === "youtubeApiKeyInput" ? "API Key" : "密钥";
+  const name = input.closest("#youtubeApiKeyEntries") ? "API Key" : "密钥";
   return (visible ? "隐藏" : "显示") + " " + name;
 }
 
@@ -509,10 +521,7 @@ function enhanceSecretInput(input) {
   parent.insertBefore(wrap, input);
   wrap.appendChild(input);
 
-  const existingToggle = input.id === "youtubeApiKeyInput"
-    ? document.getElementById("youtubeApiKeyToggle") : null;
-  const toggle = existingToggle && existingToggle.parentNode === parent
-    ? existingToggle : document.createElement("button");
+  const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className = "secret-input-toggle";
   toggle.setAttribute("aria-label", secretToggleLabel(input, false));
@@ -545,30 +554,24 @@ new MutationObserver(records => records.forEach(record => record.addedNodes.forE
 }))).observe(document.body, {childList: true, subtree: true});
 
 document.getElementById("youtubeApiKeySave")?.addEventListener("click", async function () {
-  const input = document.getElementById("youtubeApiKeyInput");
   const status = document.getElementById("youtubeApiKeyStatus");
   const button = this;
-  const apiKey = input ? input.value.trim() : "";
-  if (!apiKey) {
-    if (status) status.textContent = "请输入新 Key；留空会保留当前密钥";
-    input?.focus();
-    return;
-  }
+  youtubeKeyDraft = collectCredentialRows(document.getElementById("youtubeApiKeyEntries"), "key");
   button.disabled = true;
   if (status) status.textContent = "正在保存…";
   try {
-    const saved = await jpost("/api/youtube/api-key", {api_key: apiKey});
+    const saved = await jpost("/api/youtube/api-key", {entries: youtubeKeyDraft, revision: youtubeKeyRevision});
     if (!saved.ok) {
       if (status) status.textContent = saved.msg || "保存失败，请重试";
       return;
     }
     if (latestYoutubeStatus) latestYoutubeStatus = {...latestYoutubeStatus, data_api_healthy: false};
     renderPageCredentialShortcut();
-    if (input) input.value = "";
-    setYoutubeApiKeyVisible(false);
+    youtubeKeyDraft = []; document.getElementById("youtubeApiKeyEntries").replaceChildren();
     if (status) status.textContent = "已保存，正在重启机器人…";
     let restarted;
     try { restarted = await postBotLifecycle("/api/bot/restart"); } catch (_error) { restarted = {ok: false}; }
+    await refreshYoutubeApiKeyState();
     if (!restarted?.ok && status) status.textContent = "Key 已保存；机器人重启失败，请从总览手动重启。";
     else if (status) status.textContent = "Key 已保存，机器人正在重启。";
   } catch (_error) {
@@ -577,6 +580,26 @@ document.getElementById("youtubeApiKeySave")?.addEventListener("click", async fu
     button.disabled = false;
   }
 });
+function editCredentialList(containerId, valueName, label, addId) {
+  const container = document.getElementById(containerId);
+  document.getElementById(addId).addEventListener("click", () => {
+    const entries = collectCredentialRows(container, valueName);
+    entries.push({id: "", enabled: true, [valueName]: ""});
+    renderCredentialRows(container, entries, valueName, label);
+  });
+  container.addEventListener("click", event => {
+    const target = event.target.closest("[data-credential-remove]");
+    if (!target) return;
+    const index = Number(target.dataset.credentialRemove);
+    showConfirmDlg("删除配置", "删除这条配置？保存后生效。", () => {
+      const entries = collectCredentialRows(container, valueName);
+      entries.splice(index, 1);
+      renderCredentialRows(container, entries, valueName, label);
+    }, "删除");
+  });
+}
+editCredentialList("youtubeApiKeyEntries", "key", "API Key", "youtubeApiKeyAdd");
+editCredentialList("discordConfigEntries", "token", "Token", "discordConfigAdd");
 
 function enabledTotal(field) {
   const items = settings && Array.isArray(settings[field]) ? settings[field] : [];
@@ -1331,6 +1354,49 @@ function renderFailureNotificationToggle(on) {
   }
   renderFailureNotificationShortcut();
 }
+
+function renderImageCardSettings() {
+  const enabled = settings?.image_card_enabled !== false;
+  const light = settings?.image_card_theme === "light";
+  const cardButton = document.getElementById("btnImageCardToggle");
+  const lightButton = document.getElementById("btnImageCardLightToggle");
+  [[cardButton, enabled], [lightButton, light]].forEach(function ([button, on]) {
+    if (!button) return;
+    button.checked = on;
+  });
+  if (lightButton) {
+    lightButton.disabled = !enabled;
+    lightButton.closest("label")?.classList.toggle("disabled", !enabled);
+  }
+}
+
+function closeImageCardModal() {
+  document.getElementById("imageCardModal").style.display = "none";
+}
+
+document.getElementById("imageCardModal").addEventListener("click", function (event) {
+  if (event.target === this) closeImageCardModal();
+});
+
+async function saveImageCardOption(input) {
+  if (!settings) { renderImageCardSettings(); return; }
+  const changes = input.id === "btnImageCardToggle"
+    ? {image_card_enabled: input.checked}
+    : {image_card_theme: input.checked ? "light" : "dark"};
+  const inputs = [document.getElementById("btnImageCardToggle"), document.getElementById("btnImageCardLightToggle")];
+  inputs.forEach(control => { control.disabled = true; });
+  try {
+    await saveAndReloadWithImageCard(changes);
+  } catch (error) {
+    showAlert("保存失败", "无法连接管理服务，请稍后重试。");
+  } finally {
+    inputs.forEach(control => { control.disabled = false; });
+    renderImageCardSettings();
+  }
+}
+
+document.getElementById("btnImageCardToggle").addEventListener("change", function () { void saveImageCardOption(this); });
+document.getElementById("btnImageCardLightToggle").addEventListener("change", function () { void saveImageCardOption(this); });
 
 function renderFailureNotificationShortcut() {
   const btn = document.getElementById("failureNotificationShortcut");
@@ -2149,7 +2215,7 @@ function scheduledOptionMarkup(message, index) {
   return '<div class="scheduled-message-entry" data-index="' + index + '">' +
     '<div class="scheduled-message-entry-body">' +
     '<label class="scheduled-message-entry-label">消息正文' +
-    '<textarea class="scheduled-message-entry-content" data-field="content" maxlength="20000" placeholder="输入消息正文"></textarea></label>' +
+    '<textarea class="scheduled-message-entry-content" data-field="content" maxlength="20000"></textarea></label>' +
     '<div class="scheduled-message-image-row">' +
     '<input type="file" data-field="media_file_input" accept=".png,.jpg,.jpeg,.gif,.webp,.mp4,.webm,.mp3,.wav,.ogg,.m4a,image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm,audio/mpeg,audio/wav,audio/ogg,audio/mp4" hidden>' +
     '<button type="button" class="sec rowicon scheduled-message-image-pick" title="上传附件" aria-label="上传附件">' + mcIcon("upload", 16) + '</button>' +
@@ -2914,7 +2980,7 @@ function renderScheduledMessage(config) {
 }
 
 function preserveScheduledMessageAttachments(statusConfig, currentConfig) {
-  if (statusConfig && Array.isArray(statusConfig.message_groups)) {
+  if (statusConfig && Array.isArray(statusConfig.message_groups) && statusConfig.message_groups.length) {
     const currentGroups = Array.isArray(currentConfig && currentConfig.message_groups) ? currentConfig.message_groups : [];
     const oldGroups = new Map(currentGroups.map(function (group, index) {
       return [String(group.id || "scheduled-group-" + (index + 1)), group];
@@ -3624,6 +3690,7 @@ function renderSettings() {
         '<td style="font-size:12px;">' + escapeHtml(uacc) + '</td>' +
       '<td>' + renderIdCell(u.openid) + '</td>' +
       '<td><div class="table-actions">' +
+        '<button class="sec rowicon manual-relay-filter" title="内容筛选" aria-label="内容筛选" data-kind="manualRelayFilter">' + SVG_FUNNEL + '</button>' +
         '<button class="sec rowicon" title="编辑用户资料" aria-label="编辑用户资料" data-kind="userEdit">' + SVG_PEN + '</button>' +
         '<button class="danger rowicon" title="删除用户" aria-label="删除用户" data-kind="userDel">' + SVG_TRASH + '</button>' +
         '</div></td>';
@@ -3631,6 +3698,7 @@ function renderSettings() {
     });
   }
   renderFailureNotificationToggle(!!(settings.failure_notification && settings.failure_notification.enabled));
+  renderImageCardSettings();
   renderStatusSheenToggle(isStatusSheenEnabled());
   renderScheduledMessage(settings.scheduled_message);
   renderUnifiedRelayFilter();
@@ -4024,9 +4092,12 @@ function renderBilibiliPage() {
 function renderBilibiliAutoResolveToggle(on) {
   const btn = document.getElementById("btnBilibiliAutoResolveToggle");
   if (!btn) return;
+  btn.hidden = activePage !== "bilibili";
   btn.dataset.on = on ? "1" : "0";
+  btn.dataset.state = on ? "on" : "neutral";
   btn.setAttribute("aria-checked", on ? "true" : "false");
-  btn.innerHTML = pillSwitchMarkup("启用自动解析", on);
+  btn.setAttribute("aria-label", "Bilibili 自动解析：" + (on ? "已开启" : "已关闭"));
+  btn.title = "Bilibili 自动解析：" + (on ? "已开启" : "已关闭") + " · 群内视频链接发回本群；需在机器人资料页开启接收所有消息，拿不到视频时不回复 · 点击切换";
 }
 
 // ---------------- YouTube → QQ 页面 ----------------
@@ -4883,9 +4954,9 @@ function openBilibiliSourceRegister() {
   form.appendChild(valueWrap);
   function updateValuePrompt() {
     const prompts = {
-      up: ["UP 主 UID", "输入数字 UID"],
-      tag: ["标签名称", "输入 Bilibili 标签名称"],
-      keyword: ["搜索关键词", "输入搜索关键词"],
+      up: ["UP 主 UID", "12345678"],
+      tag: ["标签名称", ""],
+      keyword: ["搜索关键词", ""],
     };
     const prompt = prompts[kind.value] || prompts.up;
     valueLabel.textContent = prompt[0];
@@ -4944,7 +5015,7 @@ function openYoutubeSourceRegister() {
   const valueInput = document.createElement("input");
   valueInput.type = "text";
   valueInput.autocomplete = "off";
-  valueInput.placeholder = "例如：频道链接或 @用户名";
+  valueInput.placeholder = "@example";
   valueWrap.appendChild(valueLabel);
   valueWrap.appendChild(valueInput);
   form.appendChild(valueWrap);
@@ -4953,11 +5024,10 @@ function openYoutubeSourceRegister() {
   nameWrap.className = "bilibili-source-field";
   const nameLabel = document.createElement("div");
   nameLabel.className = "bilibili-source-field-label";
-  nameLabel.textContent = "显示名称（可选）";
+  nameLabel.textContent = "显示名称（留空使用频道地址）";
   const nameInput = document.createElement("input");
   nameInput.type = "text";
   nameInput.autocomplete = "off";
-  nameInput.placeholder = "留空则使用频道地址";
   nameWrap.appendChild(nameLabel);
   nameWrap.appendChild(nameInput);
   form.appendChild(nameWrap);
@@ -5963,7 +6033,6 @@ function renderRegistrationReview(data) {
     codeFilter = document.createElement("input");
     codeFilter.type = "search";
     codeFilter.setAttribute("aria-label", "按申请识别码筛选");
-    codeFilter.placeholder = "粘贴申请识别码";
     codeFilter.style.cssText = "width:100%;box-sizing:border-box;margin:0 0 8px;";
     body.appendChild(codeFilter);
     noMatch = document.createElement("div");
@@ -6061,6 +6130,7 @@ const FILTER_SUPPORTED_MESSAGE_TYPES = {
   youtubeSource: ["文字", "图片", "链接"],
   xrelay: ["文字", "图片", "视频"],
   birelay: ["文字", "图片", "链接", "视频"],
+  steamrelay: ["文字", "图片", "链接"],
 };
 
 // 旧配置里 X/Bilibili 的「文件」= 现在的「视频」，加载时迁移，避免打开弹窗
@@ -6089,6 +6159,7 @@ function migrateFilterMessageType(type) {
 }
 
 let filterSourceTarget = null;
+let filterManualTarget = null;
 let filterEditScope = "channel";
 let filterUsernames = [];
 let filterKeywords = [];
@@ -6281,27 +6352,29 @@ const MANUAL_RELAY_FILTER_SUPPORTED = {
   qq_c2c_relay_filter: FILTER_SUPPORTED_MESSAGE_TYPES.relay,
   x_c2c_relay_filter: FILTER_SUPPORTED_MESSAGE_TYPES.xrelay,
   bilibili_c2c_relay_filter: FILTER_SUPPORTED_MESSAGE_TYPES.birelay,
+  steam_c2c_relay_filter: FILTER_SUPPORTED_MESSAGE_TYPES.steamrelay,
 };
 
 const MANUAL_RELAY_FILTER_SCOPE = {
   qq_c2c_relay_filter: "relay",
   x_c2c_relay_filter: "xrelay",
   bilibili_c2c_relay_filter: "birelay",
+  steam_c2c_relay_filter: "steamrelay",
 };
 
 function renderUnifiedRelayFilter() {
-  const btn = document.getElementById("btnUnifiedRelayFilter");
-  if (!btn) return;
-  const active = Object.keys(MANUAL_RELAY_FILTER_SUPPORTED).some(function (key) {
+  document.querySelectorAll("#userBody .manual-relay-filter").forEach(function (btn) {
+    const user = (settings.qq_user_openids || []).find(item => String(item.openid) === btn.closest("tr").dataset.id);
+    const active = Object.keys(MANUAL_RELAY_FILTER_SUPPORTED).some(function (key) {
     return filterConfigActive(
-      settings && settings[key],
+      user && Object.hasOwn(user, key) ? user[key] : settings[key],
       false,
       MANUAL_RELAY_FILTER_SUPPORTED[key],
       MANUAL_RELAY_FILTER_SCOPE[key]
     );
+    });
+    btn.classList.toggle("filter-active", active);
   });
-  btn.innerHTML = SVG_FUNNEL;
-  btn.classList.toggle("filter-active", active);
 }
 
 let relayChannelsEditScope = "discord";
@@ -6313,6 +6386,8 @@ const MULTI_LINK_SCOPE_META = Object.freeze({
   xrelay: {page: "x", label: "X"},
   bilibili: {page: "bilibili", label: "Bilibili"},
   birelay: {page: "bilibili", label: "Bilibili"},
+  "youtube-unavailable": {page: "youtube", label: "YouTube（暂不支持手动转发）"},
+  steamrelay: {page: "steam", label: "Steam"},
 });
 
 function renderMultiLinkScopeSwitch(tabs, scopeAttribute, activeScope) {
@@ -6435,7 +6510,6 @@ function renderRelayChannelsList() {
         const input = document.createElement("input");
         input.type = "text";
         input.value = channel.name || "";
-        input.placeholder = isX ? "账号中文备注" : "频道中文备注";
         input.dataset.index = String(index);
         input.setAttribute("aria-label", isX ? "账号中文备注" : "频道中文备注");
         row.appendChild(input);
@@ -6459,15 +6533,6 @@ function switchRelayChannelsTab(scope) {
 
 function closeRelayChannelsModal() {
   document.getElementById("relayChannelsModal").style.display = "none";
-}
-
-function openTranslationChainsModal() {
-  renderAIControls();
-  document.getElementById("translationChainsModal").style.display = "flex";
-}
-
-function closeTranslationChainsModal() {
-  document.getElementById("translationChainsModal").style.display = "none";
 }
 
 const FORWARDING_PANE_PAIRS = [
@@ -6604,10 +6669,10 @@ function openSourceContentEditor(scope, sourceId) {
   const addressValue = scope === "channel" ? source.id
     : scope === "xsource" ? source.source
       : source.value;
-  const addressPlaceholder = scope === "channel" ? "频道 ID 或 Discord 频道链接"
-    : scope === "xsource" ? "账号名、@账号或 RSS 地址"
-      : scope === "bsource" ? (source.kind === "up" ? "数字 UID" : "来源值")
-        : "UC...、@handle 或频道主页链接";
+  const addressPlaceholder = scope === "channel" ? "123456789012345678"
+    : scope === "xsource" ? "@example"
+      : scope === "bsource" ? (source.kind === "up" ? "12345678" : "")
+        : "@example";
   field(addressLabel, addressInput, addressValue, addressPlaceholder);
   body.appendChild(form);
   document.getElementById("confirmTitle").textContent = "编辑来源内容";
@@ -6700,32 +6765,12 @@ function syncFilterTranslationInputs() {
   datetime.closest(".content-filter-check")?.classList.toggle("disabled", datetime.disabled);
 }
 
-function mountImageCardOptions(container) {
-  container.replaceChildren(document.getElementById("imageCardOptionsTemplate").content.cloneNode(true));
-  const enabled = container.querySelector('[data-image-card="enabled"]');
-  const light = container.querySelector('[data-image-card="light"]');
-  const initialEnabled = settings?.image_card_enabled !== false;
-  const initialLight = settings?.image_card_theme === "light";
-  enabled.checked = initialEnabled;
-  light.checked = initialLight;
-  const sync = () => {
-    light.closest("label").style.display = enabled.checked ? "" : "none";
-    light.disabled = !enabled.checked;
-  };
-  enabled.addEventListener("change", sync);
-  sync();
-  return () => {
-    const changes = {};
-    if (enabled.checked !== initialEnabled) changes.image_card_enabled = enabled.checked;
-    if (light.checked !== initialLight) changes.image_card_theme = light.checked ? "light" : "dark";
-    return changes;
-  };
-}
-
-let readFilterImageCardOptions = () => ({});
-
 function prepareFilterModal(config, label) {
   const c = config || {};
+  document.getElementById("filterModal").classList.toggle("manual-relay-filter-modal", !!MANUAL_RELAY_SCOPE_META[filterEditScope]);
+  document.getElementById("filterTypeHint").textContent = MANUAL_RELAY_SCOPE_META[filterEditScope]
+    ? "（只对当前授权用户生效；未选择时不转发任何类型）"
+    : "（未选择时转发全部类型；与推文/投稿类型同时启用时需同时符合）";
   document.getElementById("filterChanName").textContent = label;
   // 受众筛选（用户名/关键词）只在 Discord 频道与 X/Bilibili/YouTube 来源弹窗出现。
   const showAudienceFields = ["channel", "xsource", "bsource", "youtubeSource"].includes(filterEditScope);
@@ -6738,7 +6783,7 @@ function prepareFilterModal(config, label) {
   const keywordTitle = document.getElementById("filterKeywordTitle");
   if (keywordTitle) keywordTitle.firstChild.textContent = filterEditScope === "xsource" ? "关键词/话题 " : "关键词筛选 ";
   const keywordInput = document.getElementById("filterKeywordInput");
-  if (keywordInput) keywordInput.placeholder = filterEditScope === "xsource" ? "关键词或 #话题" : "关键词";
+  if (keywordInput) keywordInput.setAttribute("aria-label", filterEditScope === "xsource" ? "关键词或话题" : "关键词");
   // 消息类型筛选对所有 scope 都可用：Discord 频道与手动转发用六类型集合，
   // X 用文字/图片/视频，Bilibili 用文字/图片/链接/视频。
   // 曾误写成只允许 channel/xsource/bsource，导致手动转发（relay/xrelay/birelay）
@@ -6760,7 +6805,6 @@ function prepareFilterModal(config, label) {
   document.getElementById("filterTranslationEnabled").checked = c.translation_enabled === true;
   document.getElementById("filterTranslationAppendOriginal").checked = c.translation_append_original !== false;
   document.getElementById("filterTranslationShowDatetime").checked = c.translation_show_datetime === true;
-  readFilterImageCardOptions = mountImageCardOptions(document.getElementById("filterImageCardFields"));
   syncFilterTranslationInputs();
   filterBilibiliSourceKind = String(c.kind || "up");
   // 手动转发统一弹窗：用 Tab 分屏编辑 Discord / X / Bilibili 三套筛选。
@@ -6859,6 +6903,7 @@ const MANUAL_RELAY_SCOPE_META = {
   relay:   { key: "qq_c2c_relay_filter",       label: "Discord 手动转发", tab: "Discord" },
   xrelay:  { key: "x_c2c_relay_filter",        label: "X 手动转发",       tab: "X" },
   birelay: { key: "bilibili_c2c_relay_filter", label: "Bilibili 手动转发", tab: "Bilibili" },
+  steamrelay: { key: "steam_c2c_relay_filter", label: "Steam 手动转发", tab: "Steam" },
 };
 
 // 统一「内容筛选」二级窗口：三个链路 Tab（Discord / X / Bilibili），
@@ -6872,22 +6917,25 @@ function renderFilterScopeTabs() {
   renderMultiLinkScopeSwitch(tabs, "scope", filterEditScope);
 }
 
-function openUnifiedRelayFilterModal() {
+function openUnifiedRelayFilterModal(userId) {
+  filterManualTarget = {id: String(userId), epoch: workspaceEpoch};
   switchRelayFilterTab("relay");
 }
 
 function switchRelayFilterTab(scope) {
   const meta = MANUAL_RELAY_SCOPE_META[scope];
-  if (!meta) return;
+  const user = filterManualTarget && (settings.qq_user_openids || []).find(item => String(item.openid) === filterManualTarget.id);
+  if (!meta || !user || filterManualTarget.epoch !== workspaceEpoch) return;
   filterEditScope = scope;
   filterSourceTarget = null;
-  prepareFilterModal(settings[meta.key] || {}, meta.label);
+  prepareFilterModal((Object.hasOwn(user, meta.key) ? user[meta.key] : settings[meta.key]) || {}, meta.label);
   renderFilterScopeTabs();
 }
 
 function closeFilterModal() {
   document.getElementById("filterModal").style.display = "none";
   filterSourceTarget = null;
+  filterManualTarget = null;
   filterEditScope = "channel";
 }
 
@@ -6902,17 +6950,23 @@ document.getElementById("filterKeywordInput").addEventListener("keydown", functi
 });
 
 document.getElementById("filterSave").addEventListener("click", async function () {
-  if (filterEditScope === "relay" || filterEditScope === "xrelay" || filterEditScope === "birelay") {
-    const key = filterEditScope === "xrelay"
-      ? "x_c2c_relay_filter"
-      : filterEditScope === "birelay"
-        ? "bilibili_c2c_relay_filter"
-        : "qq_c2c_relay_filter";
+  let manualUndo = null;
+  const originalSettings = settings;
+  if (MANUAL_RELAY_SCOPE_META[filterEditScope]) {
+    const user = filterManualTarget && (settings.qq_user_openids || []).find(item => String(item.openid) === filterManualTarget.id);
+    if (!user || filterManualTarget.epoch !== workspaceEpoch) {
+      showAlert("保存失败", "用户或账号已变化，请重新打开内容筛选。");
+      return;
+    }
+    const key = MANUAL_RELAY_SCOPE_META[filterEditScope].key;
+    const existed = Object.hasOwn(user, key);
+    const previous = user[key];
+    manualUndo = () => { if (existed) user[key] = previous; else delete user[key]; };
     // 只保存该链路支持的类型。全选（= 不过滤）时同样落盘为完整支持集，
     // 而不是删除字段：X/Bilibili 的支持集与 Discord 六类型不同，删除字段
     // 会被读成"全部六类启用"，与面板显示不一致。
     const supported = filterSupportedTypes();
-    settings[key] = {
+    user[key] = {
       filter_message_types: filterMessageTypes.filter(function (t) {
         return supported.indexOf(t) >= 0;
       }),
@@ -6958,9 +7012,9 @@ document.getElementById("filterSave").addEventListener("click", async function (
       }
     }
   }
-  const imageCardChanges = readFilterImageCardOptions();
   closeFilterModal();
-  await saveAndReloadWithImageCard(imageCardChanges);
+  const saved = await saveAndReload();
+  if (!saved && manualUndo && settings === originalSettings) manualUndo();
 });
 
 async function saveAndReloadWithImageCard(changes) {
@@ -7015,18 +7069,28 @@ let qqBotDraft = [];
 function closeQQConfigModal() {
   document.getElementById("qqConfigModal").style.display = "none";
 }
+function collectQQBotRows() {
+  qqBotDraft = qqBotDraft.map(function (bot, index) {
+    return {name: document.querySelector('.qq-bot-name[data-i="' + index + '"]').value,
+      appid: document.querySelector('.qq-bot-appid[data-i="' + index + '"]').value,
+      secret: document.querySelector('.qq-bot-secret[data-i="' + index + '"]').value,
+      enabled: document.querySelector('.qq-bot-enabled[data-i="' + index + '"]').checked};
+  });
+}
 function renderQQBotRows() {
   const body = document.getElementById("qqConfigBots");
   body.innerHTML = qqBotDraft.map(function (bot, index) {
     return '<div class="qq-bot-form-row">' +
+      '<label class="credential-enabled"><input type="checkbox" class="qq-bot-enabled" data-i="' + index + '"' + (bot.enabled !== false ? ' checked' : '') + ' aria-label="启用此 QQ Bot"></label>' +
       '<label style="font-size:13px;color:var(--muted);">账号名称<input class="qq-bot-name" data-i="' + index + '" maxlength="80" value="' + escapeHtml(bot.name || "") + '" autocomplete="off" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;"></label>' +
       '<label style="font-size:13px;color:var(--muted);">AppID<input class="qq-bot-appid" data-i="' + index + '" value="' + escapeHtml(bot.appid || "") + '" autocomplete="off" spellcheck="false" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;"></label>' +
-      '<label style="font-size:13px;color:var(--muted);">AppSecret<input class="qq-bot-secret" data-i="' + index + '" type="password" autocomplete="new-password" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;"></label>' +
-      '<button type="button" class="danger qq-bot-remove" data-i="' + index + '" ' + (qqBotDraft.length === 1 && !personalQQConnections.some(item => item.enabled) ? 'disabled title="至少保留一个 Bot"' : 'title="删除此 Bot"') + '>删除</button></div>';
+      '<label style="font-size:13px;color:var(--muted);">AppSecret<input class="qq-bot-secret" data-i="' + index + '" type="password" value="' + escapeHtml(bot.secret || "") + '" autocomplete="new-password" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;"></label>' +
+      '<button type="button" class="danger rowicon qq-bot-remove" data-i="' + index + '" aria-label="删除此 Bot" ' + (qqBotDraft.length === 1 && !personalQQConnections.some(item => item.enabled) ? 'disabled title="至少保留一个 Bot"' : 'title="删除此 Bot"') + '>' + mcIcon("delete-2", 16) + '</button></div>';
   }).join("");
   body.querySelectorAll(".qq-bot-remove").forEach(function (button) {
     button.addEventListener("click", function () {
       showConfirmDlg("删除 Bot 配置", "从当前编辑列表删除这个 Bot？保存后生效。", function () {
+        collectQQBotRows();
         qqBotDraft.splice(Number(button.dataset.i), 1);
         renderQQBotRows();
       }, "删除");
@@ -7034,7 +7098,8 @@ function renderQQBotRows() {
   });
 }
 document.getElementById("qqConfigAddBot").addEventListener("click", function () {
-  qqBotDraft.push({appid: "", name: ""});
+  collectQQBotRows();
+  qqBotDraft.push({appid: "", name: "", enabled: true});
   renderQQBotRows();
 });
 async function openQQConfigModal() {
@@ -7045,8 +7110,8 @@ async function openQQConfigModal() {
     r = await jget("/api/bot/qq-config");
   } catch (e) { r = null; }
   if (r && r.ok) {
-    qqBotAccounts = (r.bots || []).map(function (bot) { return {appid: bot.appid || "", name: bot.name || ""}; });
-    qqBotDraft = qqBotAccounts.map(function (bot) { return {appid: bot.appid, name: bot.name}; });
+    qqBotAccounts = (r.bots || []).map(function (bot) { return {appid: bot.appid || "", name: bot.name || "", enabled: bot.enabled !== false}; });
+    qqBotDraft = qqBotAccounts.map(function (bot) { return {...bot}; });
     if (!qqBotDraft.length && !personalQQConnections.some(item => item.enabled)) qqBotDraft = [{appid: ""}];
     renderQQBotRows();
   } else {
@@ -7058,7 +7123,8 @@ async function saveQQConfig() {
     const name = document.querySelector('.qq-bot-name[data-i="' + index + '"]').value.trim();
     const appid = document.querySelector('.qq-bot-appid[data-i="' + index + '"]').value.trim();
     const secret = document.querySelector('.qq-bot-secret[data-i="' + index + '"]').value;
-    return {appid: appid, name: name, secret: secret};
+    const enabled = document.querySelector('.qq-bot-enabled[data-i="' + index + '"]').checked;
+    return {appid: appid, name: name, secret: secret, enabled: enabled};
   });
   if (bots.some(function (bot) { return !bot.appid; })) { showAlert("QQ Bot 配置", "AppID 不能为空"); return; }
   const saveBtn = document.getElementById("qqConfigSave");
@@ -7098,7 +7164,14 @@ async function saveQQConfig() {
 // ---------- 翻译服务配置弹窗 ----------
 function closeTranslationConfigModal() {
   document.getElementById("translationConfigModal").style.display = "none";
+}
+function closeTranslationCredentialsModal() {
+  document.getElementById("translationCredentialsModal").style.display = "none";
   aiProfileDraft = null;
+  document.getElementById("translationConfigModal").style.display = "flex";
+  requestAnimationFrame(() => {
+    if (document.getElementById("translationConfigModal").style.display === "flex") document.getElementById("btnTranslationCredentials").focus();
+  });
 }
 let aiProfileDraft = null;
 
@@ -7488,13 +7561,18 @@ async function testAllAiApis() {
   if (currentButton) currentButton.disabled = false;
 }
 
-async function openTranslationConfigModal() {
+function openTranslationConfigModal() {
+  renderAIControls();
+  document.getElementById("translationConfigModal").style.display = "flex";
+}
+async function openTranslationCredentialsModal() {
   aiProfileDraft = cloneAiProfileDraft();
   renderAiProfileEditor();
   document.getElementById("tencentSecretId").value = "";
   document.getElementById("tencentSecretKey").value = "";
   document.getElementById("tencentConfigStatus").textContent = "TMT 配置状态读取中……";
-  document.getElementById("translationConfigModal").style.display = "flex";
+  document.getElementById("translationConfigModal").style.display = "none";
+  document.getElementById("translationCredentialsModal").style.display = "flex";
   let r;
   try { r = await jget("/api/translation/env"); } catch (e) { r = null; }
   const configured = r && r.ok ? (r.configured || {}) : {};
@@ -7586,19 +7664,20 @@ async function saveTranslationConfig() {
     showAlert("配置已保存", "翻译配置已保存，但机器人重启失败，请稍后手动重启");
     return;
   }
-  closeTranslationConfigModal();
+  closeTranslationCredentialsModal();
   await refreshStatus();
 }
 
 // ---------- Discord Bot 配置弹窗 ----------
 // 绝不在 localStorage / console 保存或输出 Token；打开时输入框留空，
 // Token 留空提交表示保持当前 Token 不变（后端处理）。
+let discordBotDraft = [], discordBotRevision = "";
 function closeDiscordConfigModal() {
   document.getElementById("discordConfigModal").style.display = "none";
+  discordBotDraft = []; document.getElementById("discordConfigEntries").replaceChildren();
 }
 async function openDiscordConfigModal() {
-  document.getElementById("discordConfigToken").value = "";
-  document.getElementById("discordConfigToken").type = "password";
+  discordBotDraft = [];
   document.getElementById("discordConfigModal").style.display = "flex";
   let r;
   try {
@@ -7606,15 +7685,19 @@ async function openDiscordConfigModal() {
   } catch (e) { r = null; }
   if (!r || !r.ok) {
     showAlert("读取配置失败", (r && r.msg) || "无法读取当前 Discord Bot 配置");
+  } else {
+    discordBotRevision = r.revision; discordBotDraft = (r.entries || []).map(item => ({...item, token: ""}));
+    if (!discordBotDraft.length) discordBotDraft.push({id: "", enabled: true, token: ""});
+    renderCredentialRows(document.getElementById("discordConfigEntries"), discordBotDraft, "token", "Token");
   }
 }
 async function saveDiscordConfig() {
-  const token = document.getElementById("discordConfigToken").value;
+  discordBotDraft = collectCredentialRows(document.getElementById("discordConfigEntries"), "token");
   const saveBtn = document.getElementById("discordConfigSave");
   saveBtn.disabled = true;
   let r;
   try {
-    r = await jpost("/api/bot/discord-config", { token: token });
+    r = await jpost("/api/bot/discord-config", {entries: discordBotDraft, revision: discordBotRevision});
   } catch (e) { r = { ok: false, msg: "保存失败，请重试" }; }
   if (!r || !r.ok) {
     saveBtn.disabled = false;
@@ -7866,9 +7949,10 @@ document.addEventListener("click", async function (e) {
       youtubeSourceModal: closeYoutubeSourceModal,
       filterModal: closeFilterModal,
       relayChannelsModal: closeRelayChannelsModal,
-      translationChainsModal: closeTranslationChainsModal,
+      imageCardModal: closeImageCardModal,
       qqWhitelistModal: closeQQWhitelistModal,
       translationConfigModal: closeTranslationConfigModal,
+      translationCredentialsModal: closeTranslationCredentialsModal,
       qqConfigModal: closeQQConfigModal,
       personalQQModal: function () { window.WRelayPersonalQQ.close(); },
       discordConfigModal: closeDiscordConfigModal,
@@ -8008,16 +8092,13 @@ document.addEventListener("click", async function (e) {
     await saveAndReload();
     return;
   }
+  if (btn.id === "btnImageCardConfig") {
+    renderImageCardSettings();
+    document.getElementById("imageCardModal").style.display = "flex";
+    return;
+  }
   if (btn.id === "btnUnifiedRelaySources") {
     openUnifiedRelaySourcesModal();
-    return;
-  }
-  if (btn.id === "btnUnifiedRelayFilter") {
-    openUnifiedRelayFilterModal();
-    return;
-  }
-  if (btn.id === "btnTranslationChains") {
-    openTranslationChainsModal();
     return;
   }
   if (btn.dataset.rscope) {
@@ -8122,8 +8203,12 @@ document.addEventListener("click", async function (e) {
     openTranslationConfigModal();
     return;
   }
+  if (btn.id === "btnTranslationCredentials") {
+    await openTranslationCredentialsModal();
+    return;
+  }
   if (btn.id === "translationConfigCancel") {
-    closeTranslationConfigModal();
+    closeTranslationCredentialsModal();
     return;
   }
   if (btn.id === "translationConfigSave") {
@@ -8289,6 +8374,9 @@ document.addEventListener("click", async function (e) {
     const group = (settings.qq_group_openids || []).find(function (item) { return String(item.openid) === btn.dataset.id; });
     if (group) editGroupDetails(group);
     return;
+  } else if (k === "manualRelayFilter") {
+    openUnifiedRelayFilterModal(rowId);
+    return;
   } else if (k === "userEdit") {
     const u = (settings.qq_user_openids || []).find(item => String(item.openid) === rowId);
     if (u) editUserDetails(u);
@@ -8328,6 +8416,12 @@ document.addEventListener("click", async function (e) {
 
   } else if (btn.id === "btnDiscordDev") {
     openExternal("https://discord.com/developers/home");
+  } else if (btn.id === "personalQQNapCat") {
+    openExternal("https://napneko.github.io/");
+  } else if (btn.id === "personalQQSnowLuma") {
+    openExternal("https://github.com/SnowLuma/SnowLuma");
+  } else if (btn.id === "btnYoutubeApiKeyCreate") {
+    openExternal("https://console.cloud.google.com/apis/credentials");
   } else if (btn.id === "btnOpenRuntimeLog") {
     document.getElementById("runtimeLogModal").style.display = "flex";
     if (logAutoScroll && logFollow) {
@@ -8420,11 +8514,6 @@ document.addEventListener("click", async function (e) {
     await saveAndReload();
   } else if (btn.id === "btnCheckUpdates") {
     await runUpdateAction();
-  } else if (btn.id === "btnAutoUpdateCheck") {
-    const enabled = btn.dataset.on !== "1";
-    applyAutoUpdateCheckPreference(enabled);
-    try { localStorage.setItem(AUTO_UPDATE_CHECK_KEY, enabled ? "1" : "0"); } catch (e) {}
-    if (enabled) await checkForUpdates();
   } else if (btn.id === "btnRestartPanel") {
     btn.disabled = true;
     try {
@@ -8450,9 +8539,10 @@ const keyboardModalClosers = {
   youtubeSourceModal: closeYoutubeSourceModal,
   filterModal: closeFilterModal,
   relayChannelsModal: closeRelayChannelsModal,
-  translationChainsModal: closeTranslationChainsModal,
+  imageCardModal: closeImageCardModal,
   qqWhitelistModal: closeQQWhitelistModal,
   translationConfigModal: closeTranslationConfigModal,
+  translationCredentialsModal: closeTranslationCredentialsModal,
   qqConfigModal: closeQQConfigModal,
   discordConfigModal: closeDiscordConfigModal,
   youtubeApiKeyModal: closeYoutubeApiKeyModal,
@@ -8462,6 +8552,7 @@ const keyboardModalClosers = {
   backupRestoreModal: closeBackupRestore,
   networkProxyModal: closeNetworkProxyModal,
   runtimeLogModal: function () { document.getElementById("runtimeLogModal").style.display = "none"; },
+  chainDetailModal: closeChainDetailModal,
 };
 const keyboardModalSaveButtons = {
   personalQQModal: "personalQQSave",
@@ -8469,7 +8560,7 @@ const keyboardModalSaveButtons = {
   youtubeSourceModal: "youtubeSourceSave",
   filterModal: "filterSave",
   relayChannelsModal: "relayChannelsSave",
-  translationConfigModal: "translationConfigSave",
+  translationCredentialsModal: "translationConfigSave",
   qqConfigModal: "qqConfigSave",
   discordConfigModal: "discordConfigSave",
   networkProxyModal: "networkProxySave",
@@ -8935,8 +9026,8 @@ async function init() {
   setInterval(refreshYoutubeStatus, 10000);
   setInterval(refreshSteamStatus, 10000);
   await loadAppInfo();
-  // 启动后自动检查一次（默认开启，可在设置页关闭）；只提示，不自动安装
-  if (isAutoUpdateCheckEnabled()) await checkForUpdates();
+  // 桌面端启动后自动检查一次；只提示，不自动安装。
+  if (shouldAutoCheckForUpdates()) await checkForUpdates();
   // 若上次的更新安装仍在进行（例如页面刚刷新），继续显示进度
   await resumeUpdateProgressIfRunning();
   await refreshChannelNames();

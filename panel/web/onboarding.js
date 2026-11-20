@@ -1,11 +1,12 @@
 /* 按用途分流的首次配置向导。密钥仅存在输入框和一次保存请求中。 */
 (function () {
   "use strict";
-  const labels = {discord: "Discord 频道消息", x: "X 账号动态", bilibili: "Bilibili 投稿", qq: "QQ 授权私聊转发"};
+  const labels = {discord: "Discord 频道消息", x: "X 账号动态", bilibili: "Bilibili 投稿", youtube: "YouTube 频道更新", steam: "Steam 游戏动态", qq: "QQ 授权私聊转发"};
   const stages = ["用途", "账号", "授权用户", "接收群", "内容来源", "确认启用", "验证结果"];
-  const descriptions = {discord: "把可读取的频道消息发送到 QQ 群", x: "通过 RSSHub 订阅账号动态", bilibili: "通过 RSSHub 订阅 UP 主、标签或关键词", qq: "由授权用户私聊机器人，手动选择群并发送文字"};
+  const descriptions = {discord: "把可读取的频道消息发送到 QQ 群", x: "通过 RSSHub 订阅账号动态", bilibili: "通过 RSSHub 订阅 UP 主、标签或关键词", youtube: "订阅频道发布的视频", steam: "订阅游戏或开发商动态", qq: "由授权用户私聊机器人，手动选择群并发送文字"};
   let saved = {}, credentials = {}, snapshot = {}, registrations = {}, health = {};
   let draft = fresh(), busy = false, trigger = null, scanned = [];
+  let personalMode = false, personalStep = 0, personalInfo = null, personalHandoff = false;
   const modal = document.createElement("div");
   modal.id = "onboardingModal";
   modal.className = "modal-overlay";
@@ -22,8 +23,10 @@
   function fresh() { return {purpose: "discord", step: "0", bot_id: "", source_id: "", source_kind: "up", source_value: "", rsshub: "", name: "", groups: [], users: []}; }
   function notice(text, error) { el("onboardingNotice").textContent = text || ""; el("onboardingNotice").dataset.error = String(!!error); }
   function checked(result) { if (!result || result.ok === false) throw new Error(result?.msg || "操作失败，请稍后重试"); return result; }
+  function personalAccount() { return draft.bot_id.startsWith("personal:") && draft.purpose !== "qq"; }
+  function availableBots() { return (credentials.bots || []).concat(draft.purpose !== "qq" ? credentials.personal_bots || [] : []); }
   function accountUrl(url) {
-    const owner = (credentials.bots || []).some(bot => bot.appid === draft.bot_id) ? draft.bot_id : "";
+    const owner = availableBots().some(bot => bot.appid === draft.bot_id) ? draft.bot_id : "";
     return owner ? url + (url.includes("?") ? "&" : "?") + "bot_id=" + encodeURIComponent(owner) : url;
   }
   async function post(url, body) { return checked(await jpost(accountUrl(url), body)); }
@@ -50,10 +53,10 @@
     form.disabled = busy;
     el("onboardingClose").disabled = busy;
     el("onboardingLater").disabled = busy;
-    el("onboardingRestart").disabled = busy;
-    el("onboardingBack").disabled = busy || Number(draft.step) === 0 || Number(draft.step) === 6;
+    el("onboardingRestart").disabled = busy || personalMode;
+    el("onboardingBack").disabled = busy || (!personalMode && (Number(draft.step) === 0 || Number(draft.step) === 6));
     el("onboardingNext").disabled = busy;
-    el("onboardingNext").textContent = busy ? "请稍候…" : Number(draft.step) === 5 ? "确认并启用" : Number(draft.step) === 6 ? "完成" : "下一步";
+    el("onboardingNext").textContent = busy ? "请稍候…" : personalMode ? (personalStep === 2 ? "完成" : "下一步") : Number(draft.step) === 5 ? "确认并启用" : Number(draft.step) === 6 ? "完成" : "下一步";
     el("onboardingLater").textContent = Number(draft.step) === 6 ? "稍后验证" : "稍后配置";
   }
   async function run(action) {
@@ -74,8 +77,51 @@
     const c = connections();
     return "当前 QQ 机器人：" + (c.qq ? "已连接" : "未连接") + (draft.purpose === "discord" ? "；Discord：" + (c.discord ? "已连接" : "未连接") : "");
   }
-  function relevantGroups() { return (snapshot.qq_group_openids || []).filter(item => String(item.bot_id || "") === draft.bot_id || (!item.bot_id && credentials.bots?.length === 1)); }
+  async function refreshPersonalInfo() {
+    try { personalInfo = checked(await jget("/api/personal-qq/config")); }
+    catch (error) { personalInfo = null; notice("无法读取个人 QQ 配置，请稍后重试。", true); }
+  }
+  function renderPersonalGuide() {
+    const titles = ["安装并登录", "配置连接", "验证并选择接收群"];
+    modal.querySelector(".onboarding-steps").innerHTML = titles.map((title, index) =>
+      '<li' + (index === personalStep ? ' aria-current="step"' : '') + '>' + (index + 1) + ' ' + title + '</li>').join("");
+    el("onboardingTitle").textContent = "配置向导 · 个人 QQ";
+    notice("");
+    if (personalStep === 0) {
+      form.innerHTML = '<h4>安装协议端并登录 QQ</h4><p>在本机安装并启动 NapCat 或 SnowLuma，按其指引登录要使用的个人 QQ。WRelay 不会安装协议端或代为登录。</p>' +
+        '<div class="onboarding-actions"><a class="external-link-button" href="https://napneko.github.io/" target="_blank" rel="noopener noreferrer">NapCat</a><a class="external-link-button" href="https://github.com/SnowLuma/SnowLuma" target="_blank" rel="noopener noreferrer">SnowLuma</a></div><p>完成登录后，保持协议端运行并点击下一步。</p>';
+    } else if (personalStep === 1) {
+      const address = personalInfo?.reverse_url || "";
+      form.innerHTML = '<h4>连接 WRelay</h4><ol><li>打开「个人 QQ 配置」，点击「添加连接」。填写账号名称、实际登录的 QQ 号，选择 NapCat 或 SnowLuma。自行设置一段 16–256 位、不含空格的访问令牌，启用连接并保存。</li><li>点击「启动机器人」。打开协议端的管理页面，在网络配置中添加 OneBot v11 反向 WebSocket：NapCat 选择「WebSocket 客户端」，SnowLuma 选择「反向 WebSocket」。填入下方地址和刚才设置的相同令牌，启用并保存。</li></ol>' +
+        '<div class="onboarding-summary"><code>' + esc(address || "地址暂不可用，请刷新") + '</code></div><div class="onboarding-actions">' + button("personalCopy", "复制地址") + button("personalConfig", "个人 QQ 配置") + button("personalStart", "启动机器人") + '</div><p>地址仅供同一台电脑使用；协议端和 WRelay 中填写的令牌必须一致。</p>';
+      form.querySelector('[data-setup="personalCopy"]').disabled = !address;
+    } else {
+      const accounts = personalInfo?.connections || [];
+      const statuses = personalInfo?.status || [];
+      form.innerHTML = '<h4>检查连接并添加接收群</h4><div class="onboarding-list">' + (accounts.map(item => {
+        const state = statuses.find(status => String(status.uin) === String(item.uin));
+        return '<div class="onboarding-entry"><span>' + esc(item.name || item.uin) + '<small>' + esc(item.uin) + ' · ' + esc(item.enabled === false ? '已停用' : state?.message || '未连接') + '</small></span></div>';
+      }).join("") || '<p>尚未添加个人 QQ 连接。</p>') + '</div><div class="onboarding-actions">' + button("personalRefresh", "刷新连接状态") + button("personalConfig", "个人 QQ 配置") + '</div><p>显示已连接后，在「个人 QQ 配置」中点击该账号的「接收群」，选择要接收消息的群；再到对应链路页面配置来源和转发组。</p>';
+    }
+    controls(); modal.querySelector(".modal-body").scrollTop = 0;
+    if (!personalInfo) notice("无法读取个人 QQ 配置，请检查连接后重试。", true);
+  }
+  async function openPersonalConfigFromGuide() {
+    personalHandoff = true; modal.style.display = "none";
+    await window.WRelayPersonalQQ.open();
+    if (document.getElementById("personalQQModal").style.display !== "flex") {
+      personalHandoff = false; modal.style.display = "flex";
+    }
+  }
+  new MutationObserver(() => {
+    if (personalHandoff && document.getElementById("personalQQModal").style.display === "none") {
+      personalHandoff = false; modal.style.display = "flex";
+      void (async () => { if (personalMode) { await refreshPersonalInfo(); renderPersonalGuide(); } else { await refresh(); render(); } })().catch(error => notice(error.message || "刷新配置失败", true));
+    }
+  }).observe(document.getElementById("personalQQModal"), {attributes: true, attributeFilter: ["style"]});
+  function relevantGroups() { return (snapshot.qq_group_openids || []).filter(item => String(item.bot_id || "") === draft.bot_id || (!personalAccount() && !item.bot_id && credentials.bots?.length === 1)); }
   function render() {
+    if (personalMode) { renderPersonalGuide(); return; }
     const step = Number(draft.step);
     modal.querySelector(".onboarding-steps").innerHTML = stages.map((title, index) =>
       '<li' + (index === step ? ' aria-current="step"' : '') + '>' + (index + 1) + ' ' + title + '</li>').join("");
@@ -83,23 +129,33 @@
     notice("");
     if (step === 0) {
       form.innerHTML = '<h4>你想把什么内容发送到 QQ？</h4><p class="help-text">先完成一种用途，之后可以随时从设置中再次打开向导。</p><div class="onboarding-options">' +
-        Object.keys(labels).map(key => '<label class="onboarding-option"><input type="radio" name="onboardingPurpose" value="' + key + '"' + (draft.purpose === key ? ' checked' : '') + '><span><strong>' + labels[key] + '</strong><small>' + descriptions[key] + '</small></span></label>').join("") + '</div>';
+        Object.keys(labels).map(key => '<label class="onboarding-option"><input type="radio" name="onboardingPurpose" value="' + key + '"' + (draft.purpose === key ? ' checked' : '') + '><span><strong>' + labels[key] + '</strong><small>' + descriptions[key] + '</small></span></label>').join("") + '<label class="onboarding-option"><input type="radio" name="onboardingPurpose" value="personal"><span><strong>连接个人 QQ</strong><small>通过 NapCat 或 SnowLuma 接收消息</small></span></label></div>';
     } else if (step === 1) {
-      const bots = credentials.bots || [];
+      const bots = availableBots();
+      if (personalAccount()) {
+        form.innerHTML = '<h4>选择接收账号</h4><label>已配置 QQ 账号<select id="onboardingBot">' + option("", "填写新的官方账号", "") + bots.map(bot => option(bot.appid, bot.name ? "个人 QQ · " + bot.name : bot.appid, draft.bot_id)).join("") + '</select></label><p class="help-text">请先通过个人 QQ 配置连接 NapCat 或 SnowLuma。</p>' +
+          (draft.purpose === "discord" ? '<label>Discord Token' + (credentials.discord_configured ? '（已配置，留空保留）' : '') + '<input id="onboardingToken" type="password" autocomplete="new-password"></label><p class="help-text">在 Discord 开发者平台创建 Bot，开启 Message Content Intent，邀请其进入来源服务器，并授予查看频道和读取历史消息权限。</p><a class="external-link-button" href="https://discord.com/developers/applications" target="_blank" rel="noopener noreferrer">Discord 开发者平台 ↗</a>' : '') +
+          '<div class="onboarding-actions">' + button("personalConfig", "个人 QQ 配置") + (draft.purpose === "discord" ? button("credentials", "保存 Discord 账号") + button("connect", "启动／重启并检查") : '') + button("refreshConnection", "刷新连接状态") + '</div>' + (draft.purpose === "discord" ? '<p class="help-text">保存新 Token 后需要启动或重启机器人；重启会短暂中断现有转发。</p>' : '') + '<p id="onboardingConnection">' + connectionText() + '</p>';
+      } else {
       form.innerHTML = '<h4>连接需要的机器人账号</h4><p class="help-text">在 QQ 开放平台创建官方机器人，取得 AppID 和 AppSecret，并按平台要求开通群聊／私聊能力。已有账号可直接选用。保存账号不会立即重启。</p>' +
         '<div class="onboarding-actions"><a class="external-link-button" href="https://q.qq.com/" target="_blank" rel="noopener noreferrer">QQ 开放平台 ↗</a></div>' +
-        '<div class="onboarding-fields"><label class="onboarding-wide">已配置 QQ 账号<select id="onboardingBot">' + option("", "填写新的账号", bots.some(bot => bot.appid === draft.bot_id) ? draft.bot_id : "") + bots.map(bot => option(bot.appid, bot.appid, draft.bot_id)).join("") + '</select></label>' +
-        field("bot_id", "QQ AppID", "从 QQ 开放平台复制") + '<label>QQ AppSecret<input id="onboardingSecret" type="password" autocomplete="new-password" placeholder="已有账号留空保留"></label>' +
-        (draft.purpose === "discord" ? '<label class="onboarding-wide">Discord Token<input id="onboardingToken" type="password" autocomplete="new-password" placeholder="' + (credentials.discord_configured ? '已配置，留空保留' : '从 Discord 开发者平台复制') + '"></label>' : '') + '</div>' +
+        '<div class="onboarding-fields"><label class="onboarding-wide">已配置 QQ 账号<select id="onboardingBot">' + option("", "填写新的账号", bots.some(bot => bot.appid === draft.bot_id) ? draft.bot_id : "") + bots.map(bot => option(bot.appid, bot.name ? "个人 QQ · " + bot.name : bot.appid, draft.bot_id)).join("") + '</select></label>' +
+        field("bot_id", "QQ AppID", "") + '<label>QQ AppSecret（已有账号留空保留）<input id="onboardingSecret" type="password" autocomplete="new-password"></label>' +
+        (draft.purpose === "discord" ? '<label class="onboarding-wide">Discord Token' + (credentials.discord_configured ? '（已配置，留空保留）' : '') + '<input id="onboardingToken" type="password" autocomplete="new-password"></label>' : '') + '</div>' +
         (draft.purpose === "discord" ? '<p class="help-text">在 Discord 开发者平台创建 Bot，开启 Message Content Intent，并邀请进入来源服务器，授予查看频道和读取历史消息的权限。本机须能访问 Discord；可在 .env.prod 设置 Discord 专用 DISCORD_PROXY，或使用可用的系统虚拟网卡（TUN）路由。</p><a class="external-link-button" href="https://discord.com/developers/applications" target="_blank" rel="noopener noreferrer">Discord 开发者平台 ↗</a>' : '') +
         '<div class="onboarding-actions">' + button("credentials", "保存账号") + button("connect", "启动／重启并检查") + button("refreshConnection", "刷新连接状态") + '</div><p class="help-text">启动或重启会作用于整个机器人进程，现有转发也会短暂重连。连接可能需要数秒；未连接时请核对凭据、平台权限和网络，再刷新。</p><p id="onboardingConnection">' + connectionText() + '</p>';
+      }
     } else if (step === 2) {
+      if (personalAccount()) {
+        form.innerHTML = '<h4>个人 QQ 接收账号</h4><p>自动投递无需授权操作用户，可继续选择接收群。</p>';
+      } else {
       form.innerHTML = '<h4>确认谁可以操作机器人</h4><p class="help-text">新增接收群需要一位已授权用户提交申请。让该用户先私聊机器人发送下方命令，将示例 QQ 号与昵称替换为本人信息，然后刷新列表。</p><code>register 123456789 我的昵称</code><p class="help-text">审核只登记身份；点击授权后，该用户可以使用私聊转发及现有管理命令（包括重启）。请只授权可信用户。已有接收群的自动转发可跳过本步。</p>' +
         button("refresh", "刷新用户列表") + userList() + pendingList("users");
+      }
     } else if (step === 3) {
-      form.innerHTML = '<h4>选择接收消息的 QQ 群</h4><p class="help-text">把当前机器人加入目标群，由上一步已授权用户在群内 @机器人，发送以下命令（替换群号和群名）。刷新后审核，再勾选接收群。</p><code>register-group 987654321 我的接收群</code><p class="help-text">群需要具备平台允许的消息接收权限。这里只列出当前机器人登记的群；审核不会自动启用，最后确认时才启用所选群。</p>' +
+      form.innerHTML = '<h4>选择接收消息的 QQ 群</h4>' + (personalAccount() ? '<p class="help-text">在个人 QQ 配置中点击该账号的「接收群」并添加目标群，然后刷新列表并勾选。</p>' + button("personalConfig", "个人 QQ 配置") : '<p class="help-text">把当前机器人加入目标群，由上一步已授权用户在群内 @机器人，发送以下命令（替换群号和群名）。刷新后审核，再勾选接收群。</p><code>register-group 987654321 我的接收群</code><p class="help-text">群需要具备平台允许的消息接收权限。这里只列出当前机器人登记的群；审核不会自动启用，最后确认时才启用所选群。</p>') +
         button("refresh", "刷新群列表") + '<div class="onboarding-list">' + relevantGroups().map(item => '<label><input type="checkbox" data-group="' + esc(item.openid) + '"' + (draft.groups.includes(item.openid) ? ' checked' : '') + '><span>' + esc(name(item)) + '<small>' + esc(item.qq_id || shortId(item.openid)) + (item.enabled ? ' · 已启用' : ' · 待启用') + '</small></span></label>').join("") + '</div>' +
-        (!relevantGroups().length ? '<p class="help-text">还没有已审核的接收群。请完成群注册后刷新。</p>' : '') + pendingList("groups");
+        (!relevantGroups().length ? '<p class="help-text">还没有接收群，请先添加后刷新。</p>' : '') + (personalAccount() ? '' : pendingList("groups"));
     } else if (step === 4) {
       renderSource();
     } else if (step === 5) {
@@ -127,8 +183,10 @@
     return '<div class="onboarding-list">' + items.map(item => '<div class="onboarding-entry"><span>' + esc(item.nickname || item.group_name || shortId(item.openid)) + '<small>待审核 · 识别码 ' + esc(item.application_code || "需重新提交") + '</small></span><button type="button" class="sec" data-review="' + esc(item.openid) + '" data-review-kind="' + kind + '">审核通过</button></div>').join("") + '</div>';
   }
   function sourceItems() {
-    const items = snapshot[{discord: "discord_channels", x: "x_rss_sources", bilibili: "bilibili_sources"}[draft.purpose]] || [];
-    return draft.purpose === "bilibili" ? items.map(item => ({...item, id: item.id || (item.kind || "up") + ":" + (item.value || item.uid || "")})) : items;
+    const items = snapshot[{discord: "discord_channels", x: "x_rss_sources", bilibili: "bilibili_sources", youtube: "youtube_sources", steam: "steam_sources"}[draft.purpose]] || [];
+    if (draft.purpose === "bilibili") return items.map(item => ({...item, id: item.id || (item.kind || "up") + ":" + (item.value || item.uid || "")}));
+    if (draft.purpose === "youtube") return items.map(item => ({...item, id: item.id || youtubeSourceId(item.value || item.channel)}));
+    return items;
   }
   function sourceLabel() {
     const item = sourceItems().find(item => String(draft.purpose === "x" ? item.source : item.id) === draft.source_id);
@@ -141,12 +199,19 @@
       return;
     }
     const existing = sourceItems();
+    if (["youtube", "steam"].includes(draft.purpose)) {
+      const youtube = draft.purpose === "youtube";
+      const kind = ["game", "creator"].includes(draft.source_kind) ? draft.source_kind : "game";
+      form.innerHTML = '<h4>选择要转发的内容</h4><div class="onboarding-fields"><label class="onboarding-wide">已登记的来源<select data-draft="source_id" id="onboardingSource">' + option("", "添加新的来源", draft.source_id) + existing.map(item => option(String(item.id), item.name || item.value || item.id, draft.source_id)).join("") + '</select></label>' +
+        (youtube ? field("source_value", "频道 ID、@用户名或频道主页地址", "@example") : '<label>来源类型<select data-draft="source_kind" id="onboardingSteamKind">' + option("game", "游戏", kind) + option("creator", "开发商 / 发行商", kind) + '</select></label>' + field("source_value", kind === "game" ? "游戏 AppID 或商店地址" : "开发商或发行商主页地址", kind === "game" ? "620" : "https://store.steampowered.com/developer/example")) + field("name", "显示名称（可选）", "") + '</div><p class="help-text">' + (youtube ? '仅支持频道来源；YouTube Data API Key 可选。' : '游戏默认监控公告、新闻和折扣；开发商／发行商默认监控折扣及发行状态。') + '向导检查地址格式，保存后可在链路页面查看实际连接状态。</p>';
+      return;
+    }
     form.innerHTML = '<h4>选择要转发的内容</h4><div class="onboarding-fields"><label class="onboarding-wide">已登记的来源<select data-draft="source_id" id="onboardingSource">' + option("", "添加新的来源", draft.source_id) + existing.map(item => { const id = String(draft.purpose === "x" ? item.source : item.id); const label = draft.purpose === "bilibili" ? item.value || id : item.name || item.value || id; return option(id, label, draft.source_id); }).join("") + '</select></label>' +
       (draft.purpose === "discord" ? '<label class="onboarding-wide">可读取的频道<select id="onboardingChannel">' + option("", "先点击扫描频道", draft.source_value) + scanned.map(item => option(String(item.id), (item.guild || "") + " / " + item.name, draft.source_value)).join("") + '</select></label>' :
         field("rsshub", "RSSHub 服务地址", "http://127.0.0.1:1200") +
         (draft.purpose === "bilibili" ? '<label>来源类型<select data-draft="source_kind">' + [["up", "UP 主投稿"], ["tag", "标签"], ["keyword", "关键词"]].map(item => option(item[0], item[1], draft.source_kind)).join("") + '</select></label>' : '') +
-        field("source_value", draft.purpose === "x" ? "X 用户名" : "UID、标签或关键词", draft.purpose === "x" ? "例如 example，无需 @" : "UP 主 UID 可从个人空间网址中获取")) +
-      (draft.purpose === "bilibili" ? "" : field("name", "显示名称（可选）", "方便自己辨认")) + '</div>' +
+        field("source_value", draft.purpose === "x" ? "X 用户名" : "UID、标签或关键词", draft.purpose === "x" ? "example" : "")) +
+      (draft.purpose === "bilibili" ? "" : field("name", "显示名称（可选）", "")) + '</div>' +
       (draft.purpose === "discord" ? button("scan", "扫描可读取频道") + '<p class="help-text">没有找到频道时，确认机器人已加入服务器，具有查看频道、读取历史消息权限，并已开启 Message Content Intent。</p>' :
         '<p class="help-text">需要一个已运行且可从本机访问的 RSSHub 服务。只填写地址不会安装服务；没有服务时可稍后继续。Bilibili 标签／关键词可能需要 RSSHub 配置 Cookie 或浏览器支持。</p><div class="onboarding-actions"><a class="external-link-button" href="https://docs.rsshub.app/" target="_blank" rel="noopener noreferrer">RSSHub 使用说明 ↗</a>' + button("probe", "检测来源") + '</div>');
   }
@@ -161,28 +226,57 @@
   }
   async function close() {
     if (busy) return;
+    if (personalMode) {
+      personalMode = false; personalStep = 0;
+      modal.style.display = "none"; form.innerHTML = ""; trigger?.focus();
+      return;
+    }
     await run(async () => { capture(); await persist(); modal.style.display = "none"; form.innerHTML = ""; trigger?.focus(); await reloadMain(); });
   }
   async function reloadMain() {
     settings = await jget("/api/settings");
-    qqBotIds = (credentials.bots || []).map(bot => bot.appid).concat(personalQQConnections.map(item => "personal:" + item.uin));
+    qqBotIds = [...new Set((credentials.bots || []).map(bot => bot.appid).concat(
+      (credentials.personal_bots || []).map(bot => bot.appid), personalQQConnections.map(item => "personal:" + item.uin)))];
     renderSettings(); await refreshStatus();
   }
+  async function selectGuideWorkspace() {
+    if (activeQQBotId !== draft.bot_id) { activeQQBotId = draft.bot_id; workspaceEpoch += 1; }
+    qqBotIds = (credentials.bots || []).map(bot => bot.appid).concat((credentials.personal_bots || []).map(bot => bot.appid));
+    settings = checked(await jget(accountUrl("/api/settings")));
+    try { localStorage.setItem(QQ_BOT_WORKSPACE_KEY, activeQQBotId); } catch (_) {}
+    renderSettings();
+  }
   async function next() {
+    if (personalMode) {
+      try {
+        if (personalStep === 2) {
+          await refreshPersonalInfo();
+          if (!personalInfo?.status?.some(item => item.connected === true && personalInfo.connections?.some(account => account.enabled !== false && String(account.uin) === String(item.uin)))) { notice("尚未检测到已连接的个人 QQ，请检查账号、令牌和反向连接后刷新。", true); return; }
+          await persist();
+          personalMode = false; personalStep = 0; modal.style.display = "none"; form.innerHTML = "";
+          settings = await jget("/api/settings"); renderSettings(); await refreshStatus(); trigger?.focus(); return;
+        }
+        personalStep++; await refreshPersonalInfo(); renderPersonalGuide();
+      } catch (error) { notice(error.message || "连接检查失败，请稍后重试。", true); }
+      return;
+    }
+    if (Number(draft.step) === 0 && form.querySelector('[name="onboardingPurpose"]:checked')?.value === "personal") {
+      personalMode = true; personalStep = 0; await refreshPersonalInfo(); renderPersonalGuide(); return;
+    }
     await run(async () => {
       const step = Number(draft.step);
-      if (step === 6) { await persist(); modal.style.display = "none"; form.innerHTML = ""; setActivePage(draft.purpose === "qq" ? "overview" : draft.purpose); trigger?.focus(); await reloadMain(); return; }
+      if (step === 6) { await persist(); if (draft.purpose !== "qq") await selectGuideWorkspace(); modal.style.display = "none"; form.innerHTML = ""; setActivePage(draft.purpose === "qq" ? "overview" : draft.purpose); trigger?.focus(); await reloadMain(); return; }
       if (step === 0) {
         if (saved.draft && saved.draft.purpose !== draft.purpose) draft = {...fresh(), purpose: draft.purpose};
-        if (!draft.bot_id && credentials.bots?.length) draft.bot_id = credentials.bots[0].appid;
+        if (!draft.bot_id && availableBots().length) draft.bot_id = availableBots()[0].appid;
         if (!draft.rsshub) draft.rsshub = snapshot[draft.purpose + "_rsshub_base"] || "http://127.0.0.1:1200";
       }
       if (step === 1) {
         if (el("onboardingSecret")?.value || el("onboardingToken")?.value) throw new Error("请先点击“保存账号”，再启动／重启并检查连接");
         await refresh();
-        if (!credentials.bots.some(bot => bot.appid === draft.bot_id)) throw new Error("请先保存当前 QQ 账号");
+        if (!availableBots().some(bot => bot.appid === draft.bot_id)) throw new Error("请先保存当前 QQ 账号");
         if (draft.purpose === "discord" && !credentials.discord_configured) throw new Error("请先保存 Discord Token");
-        if (credentials.restart_needed) throw new Error("账号已修改，请先点击“启动／重启并检查”，使新配置生效");
+        if ((!personalAccount() || draft.purpose === "discord") && credentials.restart_needed) throw new Error("账号已修改，请先点击“启动／重启并检查”，使新配置生效");
         const c = connections();
         if (!c.qq || (draft.purpose === "discord" && !c.discord)) throw new Error(connectionText() + "。请检查凭据、平台权限和网络，启动／重启后刷新连接状态。");
       }
@@ -191,6 +285,7 @@
       if (step === 4) {
         if (draft.purpose === "discord" && !draft.source_id && !draft.source_value) throw new Error("请扫描并选择一个频道");
         if (["x", "bilibili"].includes(draft.purpose)) { notice("正在检测来源，请稍候…"); checked(await jpost(accountUrl("/api/onboarding/probe"), draft)); }
+        if (["youtube", "steam"].includes(draft.purpose)) checked(await jpost(accountUrl("/api/onboarding/source-check"), draft));
       }
       if (step === 5) {
         const result = await post("/api/onboarding/apply", {draft, flow_id: saved.flow_id, revision: snapshot._revision}); saved = result.state; draft = {...saved.draft};
@@ -203,12 +298,12 @@
     refresh: async () => { await persist(); await refresh(); render(); },
     refreshConnection: async () => { await refresh(); el("onboardingConnection").textContent = connectionText(); },
     credentials: async () => {
-      const result = await post("/api/onboarding/credentials", {draft, secret: el("onboardingSecret").value, token: el("onboardingToken")?.value || ""});
+      const result = await post("/api/onboarding/credentials", {draft, secret: el("onboardingSecret")?.value || "", token: el("onboardingToken")?.value || ""});
       credentials = result.credentials; await persist(); render(); notice("账号已保存。请点击“启动／重启并检查”使配置生效。");
     },
     connect: async () => {
       if (el("onboardingSecret")?.value || el("onboardingToken")?.value) throw new Error("请先保存输入的账号");
-      if (!credentials.bots.some(bot => bot.appid === draft.bot_id)) throw new Error("请先保存当前 QQ 账号");
+      if (!availableBots().some(bot => bot.appid === draft.bot_id)) throw new Error("请先保存当前 QQ 账号");
       await persist(); await refresh();
       await post("/api/onboarding/start");
       await refresh(); render(); notice("已提交启动请求，请稍等数秒，再点击“刷新连接状态”。");
@@ -217,8 +312,9 @@
     probe: async () => { const r = await post("/api/onboarding/probe", draft); notice(r.msg); },
     verify: async () => {
       await refresh();
+      if (draft.purpose === "steam") { notice(connectionText() + "。Steam 投递记录按接收群分别生成，请在消息追踪中查看，并到目标群确认。"); return; }
       const r = checked(await jget(accountUrl("/api/message-trace?limit=200")));
-      const kind = {discord: "discord", x: "x_rss", bilibili: "bilibili"}[draft.purpose];
+      const kind = {discord: "discord", x: "x_rss", bilibili: "bilibili", youtube: "youtube"}[draft.purpose];
       let id = draft.source_id || draft.source_value;
       if (draft.purpose === "bilibili" && !draft.source_id) id = draft.source_kind + ":" + draft.source_value;
       if (draft.purpose === "x") id = xSourceKey(id);
@@ -230,6 +326,7 @@
   };
   modal.addEventListener("change", event => {
     if (event.target.id === "onboardingBot") { draft.bot_id = event.target.value; draft.groups = []; render(); }
+    else if (event.target.id === "onboardingSteamKind") { capture(); render(); }
     else if (event.target.id === "onboardingChannel") { draft.source_value = event.target.value; draft.source_id = ""; const ch = scanned.find(item => String(item.id) === draft.source_value); draft.name = ch?.name || ""; render(); }
     else if (event.target.id === "onboardingSource") { capture(); if (draft.source_id) draft.source_value = ""; render(); }
   });
@@ -240,6 +337,27 @@
     overlayPress = false;
     const target = event.target.closest("button");
     if (!target || busy) return;
+    if (target.dataset.setup === "personalConfig" && !personalMode && personalAccount()) {
+      if (el("onboardingToken")?.value) { notice("请先保存输入的 Discord Token，再打开个人 QQ 配置。", true); return; }
+      void (async () => {
+        await selectGuideWorkspace();
+        await openPersonalConfigFromGuide();
+      })().catch(error => notice(error.message || "无法打开个人 QQ 配置", true));
+      return;
+    }
+    if (personalMode && target.dataset.setup?.startsWith("personal")) {
+      const action = target.dataset.setup;
+      if (action === "personalConfig") void openPersonalConfigFromGuide();
+      else if (action === "personalRefresh") void refreshPersonalInfo().then(() => renderPersonalGuide());
+      else if (action === "personalCopy") void copyTextToClipboard(personalInfo?.reverse_url || "").then(() => notice("地址已复制。")).catch(() => notice("复制失败，请手动选择地址复制。", true));
+      else if (action === "personalStart") void (async () => {
+        target.disabled = true;
+        try { const result = checked(await jpost("/api/onboarding/personal-start", {})); notice(result.already_running ? "机器人已在运行。" : "已提交启动请求，请等待机器人启动。"); }
+        catch (error) { notice(error.message || "无法启动机器人，请在总览页检查状态后重试。", true); }
+        finally { target.disabled = false; }
+      })();
+      return;
+    }
     if (target.dataset.setup) run(actions[target.dataset.setup]);
     if (target.dataset.review) run(async () => { await post("/api/registrations/review", {kind: target.dataset.reviewKind, openid: target.dataset.review, action: "approve"}); await refresh(); render(); notice("审核通过。用户仍需单独授权，群仍需勾选并在最后确认启用。"); });
     if (target.dataset.authorize) {
@@ -248,7 +366,10 @@
       showConfirmDlg("授权操作用户", "确认授权“" + name(item) + "”使用私聊转发和现有管理命令（包括重启机器人）？", () => run(async () => { await post("/api/onboarding/authorize", {openid: id, confirm: true}); draft.users.push(id); await refresh(); render(); }), "授权");
     }
   });
-  el("onboardingBack").onclick = () => run(async () => { draft.step = String(Math.max(0, Number(draft.step) - 1)); await persist(); await refresh(); render(); });
+  el("onboardingBack").onclick = () => {
+    if (personalMode) { if (personalStep) personalStep--; else personalMode = false; render(); return; }
+    return run(async () => { draft.step = String(Math.max(0, Number(draft.step) - 1)); await persist(); await refresh(); render(); });
+  };
   el("onboardingNext").onclick = next;
   el("onboardingClose").onclick = close;
   el("onboardingLater").onclick = close;

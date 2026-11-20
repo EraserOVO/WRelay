@@ -4,6 +4,7 @@
 import os
 import sys
 import json
+import hashlib
 import shutil
 import time
 import asyncio
@@ -1121,7 +1122,7 @@ def _watchdog_loop():
                 _qq_unavailable_since = None
 
             discord_config = _read_discord_bots()
-            if discord_config is None or not any(discord_ready(bot) for bot in discord_config[0]):
+            if discord_config is None or not any(isinstance(bot, dict) and bot.get("enabled", True) and discord_ready(bot) for bot in discord_config[0]):
                 _discord_unavailable_since = None
                 continue
             discord_connected = health.get("discord") if isinstance(health, dict) else None
@@ -2158,9 +2159,16 @@ def _identity_items(kind, name_key, data=None):
     for openid, entry in store.items():
         if not isinstance(entry, dict):
             entry = {}
+        scopes = entry.get("by_bot")
+        # 没有归属信息的旧资料继续显示；多个 Bot 的同名 OpenID 不做猜测。
+        if isinstance(scopes, dict) and scopes:
+            values = [v for v in scopes.values() if isinstance(v, dict)]
+            name = (values[0].get(name_key) or entry.get(name_key)) if len(scopes) == 1 and len(values) == 1 else ""
+        else:
+            name = entry.get(name_key)
         items.append({
             "openid": str(openid),
-            "name": str(entry.get(name_key) or ""),
+            "name": str(name or ""),
             "admin_remark": str(entry.get("admin_remark") or ""),
         })
     return items
@@ -2598,6 +2606,7 @@ def _public_qq_bots(bots, names=None):
         {
             "appid": str(bot.get("id") or bot.get("token") or "").strip(),
             "name": names.get(str(bot.get("id") or bot.get("token") or "").strip(), ""),
+            "enabled": bot.get("enabled", True),
         }
         for bot in bots
         if isinstance(bot, dict) and str(bot.get("id") or bot.get("token") or "").strip() not in ("", "你的AppID")
@@ -2641,7 +2650,15 @@ def _prepare_qq_bots(payload, existing_bots):
             bot["token"] = appid
             if secret:
                 bot["secret"] = secret
+        enabled = item.get("enabled", bot.get("enabled", True))
+        if not isinstance(enabled, bool):
+            raise ValueError("QQ Bot 启用状态无效")
+        bot["enabled"] = enabled
         result.append(bot)
+    if not any(bot.get("enabled", True) for bot in result):
+        from plugins.personal_qq_config import enabled_connections
+        if not enabled_connections():
+            raise ValueError("请至少启用一个 QQ Bot 或个人 QQ 连接")
     return result
 
 
@@ -3295,7 +3312,48 @@ async def api_translation_ai_env_save(request: Request):
 @app.get("/api/youtube/api-key")
 def api_youtube_api_key_status():
     """Return only whether a YouTube Data API Key is configured."""
-    return {"ok": True, "configured": bool(_read_env_secret("YOUTUBE_DATA_API_KEY"))}
+    from plugins.credential_entries import parse_youtube_keys
+    try:
+        entries = parse_youtube_keys(_read_env_secret("YOUTUBE_DATA_API_KEYS"), _read_env_secret("YOUTUBE_DATA_API_KEY"))
+        revision = hashlib.sha256(json.dumps(entries, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        return {"ok": True, "configured": any(item.get("enabled", True) and item["key"] for item in entries),
+                "entries": [{"id": str(i), "enabled": item.get("enabled", True)} for i, item in enumerate(entries)], "revision": revision}
+    except (ValueError, OSError):
+        return {"ok": False, "msg": "YouTube 密钥列表读取失败"}
+
+
+def _save_youtube_api_keys(data):
+    from plugins.credential_entries import parse_youtube_keys
+    with _ENV_WRITE_LOCK:
+        try:
+            old = parse_youtube_keys(_read_env_secret("YOUTUBE_DATA_API_KEYS"), _read_env_secret("YOUTUBE_DATA_API_KEY"))
+            revision = hashlib.sha256(json.dumps(old, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+            if data.get("revision") != revision:
+                return JSONResponse({"ok": False, "msg": "配置已变化，请重新打开窗口"}, status_code=409)
+            entries = data.get("entries")
+            if not isinstance(entries, list) or len(entries) > 20:
+                raise ValueError("YouTube 密钥列表无效")
+            prepared, seen = [], set()
+            for entry in entries:
+                if not isinstance(entry, dict) or not isinstance(entry.get("key"), str) or not isinstance(entry.get("enabled"), bool):
+                    raise ValueError("YouTube 密钥格式无效")
+                ident, key = entry.get("id", ""), entry["key"].strip()
+                if not isinstance(ident, str) or (ident and (not ident.isdigit() or int(ident) >= len(old) or ident in seen)):
+                    raise ValueError("YouTube 密钥标识无效")
+                if ident: seen.add(ident)
+                key = key or (old[int(ident)]["key"] if ident else "")
+                if not key or len(key) > 512 or "\n" in key or "\r" in key:
+                    raise ValueError("请填写有效的 YouTube API Key")
+                prepared.append({"key": key, "enabled": entry["enabled"]})
+            if len({item["key"] for item in prepared}) != len(prepared):
+                raise ValueError("YouTube API Key 不能重复")
+            import base64
+            value = "base64:" + base64.b64encode(json.dumps(prepared, ensure_ascii=False).encode("utf-8")).decode("ascii")
+            _write_ai_env("YOUTUBE_DATA_API_KEYS", value)
+            os.environ["YOUTUBE_DATA_API_KEYS"] = value
+            return {"ok": True, "restart_required": True}
+        except (OSError, ValueError, RuntimeError) as exc:
+            return JSONResponse({"ok": False, "msg": str(exc) or "保存 YouTube 密钥失败"}, status_code=400)
 
 
 def _save_youtube_api_key(api_key):
@@ -3304,6 +3362,18 @@ def _save_youtube_api_key(api_key):
         return JSONResponse({"ok": False, "msg": "请输入 YouTube Data API Key"}, status_code=400)
     if len(value) > 512:
         return JSONResponse({"ok": False, "msg": "YouTube Data API Key 长度无效"}, status_code=400)
+    if _read_env_secret("YOUTUBE_DATA_API_KEYS"):
+        from plugins.credential_entries import parse_youtube_keys
+        try:
+            old = parse_youtube_keys(_read_env_secret("YOUTUBE_DATA_API_KEYS"))
+            revision = hashlib.sha256(json.dumps(old, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+            entries = [{"id": str(i), "key": "", "enabled": item.get("enabled", True)} for i, item in enumerate(old)]
+            index = next((i for i, item in enumerate(entries) if item["enabled"]), None)
+            if index is None: entries.append({"id": "", "key": value, "enabled": True})
+            else: entries[index]["key"] = value
+            return _save_youtube_api_keys({"entries": entries, "revision": revision})
+        except ValueError:
+            return JSONResponse({"ok": False, "msg": "YouTube 密钥列表格式无效"}, status_code=400)
     try:
         _write_ai_env("YOUTUBE_DATA_API_KEY", value)
     except ValueError as exc:
@@ -3325,6 +3395,8 @@ async def api_youtube_api_key_save(request: Request):
         data = await request.json()
     except Exception:
         return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
+    if isinstance(data, dict) and "entries" in data:
+        return await run_in_thread_to_completion(_save_youtube_api_keys, data)
     if not isinstance(data, dict) or not isinstance(data.get("api_key"), str):
         return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
     return await run_in_thread_to_completion(_save_youtube_api_key, data["api_key"])
@@ -3399,11 +3471,11 @@ def _save_qq_bot_config(data):
     if still_bound:
         return JSONResponse({"ok": False, "msg": "仍有 QQ 群绑定以下 Bot，请先改绑：" + "、".join(still_bound)}, status_code=400)
     old_credentials = [
-        (str(bot.get("id") or bot.get("token") or "").strip(), str(bot.get("secret") or ""))
+        (str(bot.get("id") or bot.get("token") or "").strip(), str(bot.get("secret") or ""), bot.get("enabled", True))
         for bot in bots if isinstance(bot, dict)
     ]
     new_credentials = [
-        (str(bot.get("id") or bot.get("token") or "").strip(), str(bot.get("secret") or ""))
+        (str(bot.get("id") or bot.get("token") or "").strip(), str(bot.get("secret") or ""), bot.get("enabled", True))
         for bot in new_bots if isinstance(bot, dict)
     ]
     restart_required = old_credentials != new_credentials
@@ -3463,12 +3535,47 @@ def api_bot_discord_config():
     if parsed is None:
         return {"ok": False, "msg": "无法读取 .env.prod 的 DISCORD_BOTS 配置"}
     bots, _line_idx, _lines, _end = parsed
-    bot0 = bots[0]
-    configured = discord_ready(bot0)
-    return {"ok": True, "configured": configured}
+    entries = [{"id": str(index), "configured": discord_ready(bot), "enabled": bot.get("enabled", True)}
+               for index, bot in enumerate(bots) if isinstance(bot, dict) and discord_ready(bot)]
+    revision = hashlib.sha256(json.dumps(bots, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    return {"ok": True, "configured": any(item["enabled"] for item in entries), "entries": entries, "revision": revision}
 
 
 def _save_discord_bot_config(data):
+    if "entries" in data:
+        with _ENV_WRITE_LOCK:
+            parsed = _read_discord_bots()
+            if parsed is None:
+                return JSONResponse({"ok": False, "msg": "无法读取 Discord Bot 配置"}, status_code=400)
+            bots, line_idx, lines, end_idx = parsed
+            revision = hashlib.sha256(json.dumps(bots, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+            if data.get("revision") != revision:
+                return JSONResponse({"ok": False, "msg": "配置已变化，请重新打开窗口"}, status_code=409)
+            entries = data["entries"]
+            if not isinstance(entries, list) or len(entries) > 20:
+                return JSONResponse({"ok": False, "msg": "Discord Bot 列表无效"}, status_code=400)
+            prepared, seen = [], set()
+            for entry in entries:
+                if not isinstance(entry, dict) or not isinstance(entry.get("enabled"), bool) or not isinstance(entry.get("token"), str):
+                    return JSONResponse({"ok": False, "msg": "Discord Bot 配置格式无效"}, status_code=400)
+                ident, token = entry.get("id", ""), entry["token"].strip()
+                if not isinstance(ident, str) or (ident and (not ident.isdigit() or int(ident) >= len(bots) or ident in seen)):
+                    return JSONResponse({"ok": False, "msg": "Discord Bot 标识无效"}, status_code=400)
+                if ident: seen.add(ident)
+                bot = dict(bots[int(ident)]) if ident else {}
+                if token: bot["token"] = token
+                if not discord_ready(bot) or len(str(bot["token"])) > 4096 or any(c in str(bot["token"]) for c in "\r\n'"):
+                    return JSONResponse({"ok": False, "msg": "请填写有效的 Discord Token"}, status_code=400)
+                bot["enabled"] = entry["enabled"]
+                prepared.append(bot)
+            tokens = [bot["token"] for bot in prepared]
+            if len(set(tokens)) != len(tokens):
+                return JSONResponse({"ok": False, "msg": "Discord Token 不能重复"}, status_code=400)
+            try:
+                _write_discord_bots(prepared, lines, line_idx, end_idx)
+            except Exception:
+                return JSONResponse({"ok": False, "msg": "保存 Discord Bot 配置失败"}, status_code=500)
+            return {"ok": True}
     new_token = str(data.get("token") or "").strip()
     parsed = _read_discord_bots()
     if parsed is None:

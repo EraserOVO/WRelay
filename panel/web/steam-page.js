@@ -99,7 +99,7 @@
     function updateKind() {
       const isGame = kind.value === "game";
       valueTitle.textContent = isGame ? "AppID 或 Steam 游戏地址" : "开发商或发行商主页地址";
-      valueInput.placeholder = isGame ? "例如 620 或 https://store.steampowered.com/app/620/" : "粘贴 Steam 开发商或发行商主页地址";
+      valueInput.placeholder = isGame ? "620" : "https://store.steampowered.com/developer/example";
     }
     kind.addEventListener("change", updateKind); updateKind();
     valueLabel.append(valueTitle, valueInput); form.append(valueLabel);
@@ -220,9 +220,6 @@
     translationOption("启用翻译", "translation_enabled", false);
     translationOption("保留原文", "translation_append_original", true);
     body.append(translationTitle, translationOptions);
-    const cardFields = node("div");
-    const readImageCardOptions = mountImageCardOptions(cardFields);
-    body.append(cardFields);
     let feedsInput = null;
     if (source.kind === "game") {
       const field = node("label", null, "steam-field");
@@ -240,7 +237,7 @@
       if (feedsInput) current.news_feeds = feedsInput.value.split(/[,，]/).map(item => item.trim()).filter(Boolean);
       Object.assign(current, optionChanges);
       markDraftDirty(null); renderSources(); renderGroups();
-      await saveDraftNow(false, readImageCardOptions());
+      await saveDraftNow();
     };
     $("confirmModal").style.display = "flex";
   }
@@ -616,7 +613,7 @@
     retry.disabled = draftSaveInFlight || !draftDirty;
     $("steamResetDraft").disabled = draftSaveInFlight;
   }
-  async function saveDraftNow(forceConflict = false, imageCardChanges = {}) {
+  async function saveDraftNow(forceConflict = false) {
     clearTimeout(draftSaveTimer);
     if (draftSavePromise) return draftSavePromise;
     if (!draft || !draftDirty) return true;
@@ -641,9 +638,7 @@
     draftSavePromise = (async () => {
       let saved = false;
       try {
-        saved = Object.keys(imageCardChanges).length
-          ? await saveAndReloadWithImageCard(imageCardChanges)
-          : await saveAndReload();
+        saved = await saveAndReload();
       }
       catch (error) { draftSaveError = "保存失败，草稿已保留。"; showAlert("保存失败", "无法连接管理服务，请稍后重试。"); }
       if (owner !== draftOwner || owner !== (settings._profile_bot || "")) return false;

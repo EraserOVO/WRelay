@@ -12,7 +12,7 @@
       uin: row.querySelector("[name=uin]").value.trim(),
       implementation: row.querySelector("[name=implementation]").value,
       token: row.querySelector("[name=token]").value,
-      enabled: row.querySelector("[name=enabled]").getAttribute("aria-checked") === "true",
+      enabled: row.querySelector("[name=enabled]").checked,
     }));
   }
   function render() {
@@ -20,14 +20,16 @@
       const state = statuses.find(status => status.uin === item.uin);
       const status = state ? state.message + (state.version ? " · " + state.version : "") : "未连接";
       return '<section class="personal-qq-row" data-index="' + index + '">' +
+        '<label class="credential-enabled personal-qq-enabled"><input name="enabled" type="checkbox" aria-label="启用此连接"' + (item.enabled !== false ? ' checked' : '') + '></label>' +
+        '<div class="personal-qq-fields">' +
         '<label class="form-field">账号名称<input name="name" maxlength="80" value="' + esc(item.name || "") + '"></label>' +
         '<label class="form-field">QQ 号<input name="uin" inputmode="numeric" value="' + esc(item.uin || "") + '"></label>' +
         '<label class="form-field">协议端<select name="implementation"><option value="napcat"' + (item.implementation === "napcat" ? " selected" : "") + '>NapCat</option><option value="snowluma"' + (item.implementation === "snowluma" ? " selected" : "") + '>SnowLuma</option></select></label>' +
-        '<label class="form-field">访问令牌<input name="token" type="password" autocomplete="new-password" placeholder="留空保留已保存令牌" value="' + esc(item.token || "") + '"></label>' +
-        '<div class="personal-qq-state">' + esc(status) + '</div>' +
-        '<div class="personal-qq-actions"><button name="enabled" type="button" class="pill-switch" role="switch" aria-checked="' + (item.enabled !== false) + '" data-on="' + (item.enabled !== false ? "1" : "0") + '">' + pillSwitchMarkup("启用连接", item.enabled !== false) + '</button>' +
-        '<button type="button" class="sec" data-personal-groups="' + index + '">接收群</button>' +
-        '<button type="button" class="danger" data-personal-remove="' + index + '">删除</button></div></section>';
+        '<label class="form-field">访问令牌（留空保留已保存令牌）<input name="token" type="password" autocomplete="new-password" value="' + esc(item.token || "") + '"></label>' +
+        '<div class="personal-qq-state">' + esc(status) + '</div></div>' +
+        '<div class="personal-qq-actions">' +
+        '<button type="button" class="sec rowicon" data-personal-groups="' + index + '" aria-label="接收群" title="接收群"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="9" cy="8" r="3"></circle><path d="M3.5 19v-1.5a5.5 5.5 0 0 1 11 0V19M16 5.5a3 3 0 0 1 0 5.8M17 13a4.5 4.5 0 0 1 3.5 4.4V19"></path></svg></button>' +
+        '<button type="button" class="danger rowicon" data-personal-remove="' + index + '" aria-label="删除此连接" title="删除此连接">' + mcIcon("delete-2", 16) + '</button></div></section>';
     }).join("");
   }
   async function refreshAccounts() {
@@ -108,10 +110,7 @@
   modal.addEventListener("click", event => {
     const button = event.target.closest("button");
     if (!button) return;
-    if (button.name === "enabled") {
-      const on = button.getAttribute("aria-checked") !== "true";
-      button.setAttribute("aria-checked", String(on)); button.dataset.on = on ? "1" : "0";
-    } else if (button.dataset.personalRemove !== undefined) {
+    if (button.dataset.personalRemove !== undefined) {
       collect();
       const index = Number(button.dataset.personalRemove);
       showConfirmDlg("删除个人 QQ 连接", "从当前编辑列表删除这个连接？保存后生效。", () => {
@@ -128,5 +127,5 @@
       }, "确定");
     }
   });
-  window.WRelayPersonalQQ = {close, refreshAccounts};
+  window.WRelayPersonalQQ = {open, close, refreshAccounts};
 })();

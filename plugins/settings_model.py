@@ -757,7 +757,21 @@ def _validate_qq_c2c_filters(data):
     （config._c2c_relay_filter）会按链路支持集归一化，面板保存时也会写回
     规范值，因此老配置会在下一次保存时自然收敛。
     """
+    from plugins.filter import STEAM_MESSAGE_TYPES
     legacy_types = set(ALL_MESSAGE_TYPES)
+    for user in data.get("qq_user_openids", []):
+        if not isinstance(user, dict):
+            continue
+        for key, supported in (("qq_c2c_relay_filter", DISCORD_MESSAGE_TYPES),
+                               ("x_c2c_relay_filter", X_MESSAGE_TYPES),
+                               ("bilibili_c2c_relay_filter", BILIBILI_MESSAGE_TYPES),
+                               ("steam_c2c_relay_filter", STEAM_MESSAGE_TYPES)):
+            if key not in user:
+                continue
+            value = user[key]
+            types = value.get("filter_message_types") if isinstance(value, dict) else None
+            if not isinstance(types, list) or any(not isinstance(t, str) or t not in supported for t in types):
+                return "qq_user_openids.%s.filter_message_types 包含不支持的类型" % key
     for key, supported, label in (
         ("qq_c2c_relay_filter", DISCORD_MESSAGE_TYPES, "qq_c2c_relay_filter"),
         ("x_c2c_relay_filter", X_MESSAGE_TYPES, "x_c2c_relay_filter"),

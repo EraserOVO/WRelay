@@ -90,14 +90,6 @@
       group(status, "desktop-connection-group", [byId("badge"), status.querySelector(".qq-bot-workspace-field")]);
       group(status, "desktop-statistics-group", [...status.querySelectorAll(".robot-stat")]);
       const config = pages[active];
-      if (config && active === "qq") {
-        // 定时消息作为独立大卡片横跨转发组下方；其余工具卡继续共用两列网格。
-        const scheduledWorkspace = group(byId("pageQQ"), "scheduled-message-full-width", []);
-        move(byId("scheduledMessageCard"), scheduledWorkspace);
-        const lowerCards = group(byId("pageQQ"), "relay-translation-row func-cards", []);
-        move(byId("unifiedRelayCard"), lowerCards);
-        move(byId("autoTranslationCard"), lowerCards);
-      }
       // Align the primary and external actions in the two table footers.
       // 转发组底部已不再挂平台外链，没有可归类的控件时不生成空容器。
       if (config) {
@@ -144,7 +136,7 @@
     ".robot-stat", "#pidinfo", "#statsToday", "#statsTotal", "#statsFailed",
     ".overview-route-copy b", ".col-muted", ".foldbtn",
     ".fgtab-add", ".fg-toggle", ".fgctrl:not(.fg-delete)",
-    "#btnAutoUpdateCheck", "#btnStatusSheenToggle", "#closeBehavior",
+    "#btnStatusSheenToggle", "#closeBehavior",
     "#btnFailureNotificationToggle", "#btnSettingsAutostart",
   ].join(", ");
   const suppressedTooltipText = new Set([

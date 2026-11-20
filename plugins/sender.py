@@ -10,6 +10,8 @@ from nonebot import logger
 from nonebot.adapters.qq import Bot as QQBot
 from nonebot.adapters.qq import Message as QQMessage
 from nonebot.adapters.qq import MessageSegment as QQMessageSegment
+from nonebot.adapters.qq.exception import ActionFailed as QQActionFailed
+from nonebot.adapters.qq.exception import NetworkError as QQNetworkError
 
 from plugins.config import get_active_group_routing_snapshot, get_group_bot_ids
 from plugins.delivery_dedup import delivered_groups, record_delivered_groups
@@ -127,6 +129,35 @@ def _is_rate_limit(exc):
     )
 
 
+def _qq_failure_details(exc):
+    """Classify only explicit QQ API failures; unknown failures retain retries."""
+    if not isinstance(exc, QQActionFailed):
+        category = "限流" if _is_rate_limit(exc) else (
+            "服务或网络错误" if isinstance(exc, (QQNetworkError, TimeoutError, ConnectionError)) else "未知或临时错误"
+        )
+        return category, True, None, None, None
+    status = exc.status_code
+    body = exc.body if isinstance(exc.body, dict) else {}
+    code = body.get("code")
+    trace_id = exc.trace_id
+    message = str(body.get("message") or "").lower()
+    if status == 429:
+        category, retry = "限流", True
+    elif status in (401, 403):
+        category, retry = "认证或权限不足", False
+    elif status == 413:
+        category, retry = "文件过大", False
+    elif status == 400 and any(term in message for term in ("content violation", "content violation detected", "内容违规", "内容违法", "敏感词")):
+        category, retry = "内容违规", False
+    elif status == 400 and any(term in message for term in ("file too large", "file is too large", "文件过大", "文件大小超限")):
+        category, retry = "文件过大", False
+    elif status == 408 or 500 <= status <= 599:
+        category, retry = "服务或网络错误", True
+    else:
+        category, retry = "未知或临时错误", True
+    return category, retry, status, code, trace_id
+
+
 def _retry_after(exc, fallback):
     """优先取响应头 Retry-After，否则用 fallback"""
     try:
@@ -167,17 +198,16 @@ async def _send_with_retry(qq_bot, group_openid, message, channel_id="", message
             is_rate = _is_rate_limit(exc)
             rate_limited = rate_limited or is_rate
             last_error = exc
+            category, should_retry, status, code, trace_id = _qq_failure_details(exc)
 
             logger.warning(
-                "发送失败(第{}次) 频道{} 消息{} 群{}: {}",
-                attempt,
-                channel_id or "-",
-                message_id or "-",
-                group_openid,
-                exc
+                "发送失败(第{}次) 类型{} HTTP{} 错误码{} Trace ID{} 频道{} 消息{} 群{}: {}",
+                attempt, category, status if status is not None else "-",
+                code if code is not None else "-", trace_id or "-",
+                channel_id or "-", message_id or "-", group_openid, exc,
             )
 
-            if attempt == MAX_SEND_ATTEMPTS:
+            if attempt == MAX_SEND_ATTEMPTS or not should_retry:
                 break
 
             if is_rate:
@@ -197,8 +227,8 @@ async def _send_with_retry(qq_bot, group_openid, message, channel_id="", message
 
     # 全部尝试失败：error 级别汇总，面板日志中更醒目
     logger.error(
-        "发送失败已达上限({}次){} 频道{} 消息{} 群{}: {}",
-        MAX_SEND_ATTEMPTS,
+        "发送失败，已尝试{}次{} 频道{} 消息{} 群{}: {}",
+        attempt,
         "（限流）" if rate_limited else "（非限流）",
         channel_id or "-",
         message_id or "-",

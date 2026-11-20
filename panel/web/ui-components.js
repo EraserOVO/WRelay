@@ -29,8 +29,9 @@
     qqConfigModal: {size: "medium", footer: "qqConfigSave", grid: true, backdrop: true},
     personalQQModal: {size: "medium", footer: "personalQQSave", grid: true, backdrop: true},
     profileImportModal: {size: "medium", footer: "profileImportSave", grid: true, backdrop: true},
-    translationConfigModal: {size: "large", footer: "translationConfigSave", backdrop: true},
-    backupRestoreModal: {size: "medium", footer: "btnBackupRestoreConfirm", heading: ".backup-title", grid: true, backdrop: true},
+    translationConfigModal: {size: "medium", grid: true, footer: "translationSettingsClose", backdrop: true},
+    translationCredentialsModal: {size: "large", footer: "translationConfigSave", backdrop: true},
+    backupRestoreModal: {size: "large", noFooter: true, heading: ".backup-title", grid: true, backdrop: true},
     diagnosticModal: {size: "small", heading: ".diagnostic-toolbar", footerTools: ["btnDiagnosticRefresh"], backdrop: true},
     messageTraceModal: {size: "large", heading: ".message-trace-toolbar", tools: ["messageTraceSummary", "btnMessageTraceRefresh"], backdrop: true},
     confirmModal: {size: "small", footer: "confirmOk", backdrop: true},
@@ -38,7 +39,6 @@
     youtubeSourceModal: {size: "medium", footer: "youtubeSourceSave", heading: ".bilibili-source-heading", backdrop: true},
     filterModal: {size: "medium", footer: "filterSave", tools: ["filterScopeTabs"], backdrop: true},
     relayChannelsModal: {size: "medium", footer: "relayChannelsSave", grid: true, tools: ["relayScopeTabs"], backdrop: true},
-    translationChainsModal: {size: "small", grid: true, backdrop: true},
     scheduledMessageContentModal: {size: "large", footer: "scheduledMessageContentConfirm", grid: true, backdrop: true},
   };
   function closeButton(id, text) {
@@ -94,7 +94,8 @@
     const body = document.createElement("div");
     body.className = spec.grid ? "modal-body modal-grid" : "modal-body";
     body.append(...shell.childNodes);
-    shell.append(header, body, footer);
+    shell.append(header, body);
+    if (!spec.noFooter) shell.append(footer);
     body.querySelectorAll('p, .flt-col-hint').forEach(node => node.classList.add("help-text"));
     body.querySelectorAll('.backup-warning').forEach(node => node.classList.add("danger-text"));
     body.querySelectorAll('label').forEach(node => node.classList.add("form-field"));
