@@ -302,8 +302,8 @@ def _png_page(colors, header, rows, footer, index, avatar):
     try:
         with Image.open(PROJECT_ROOT / "panel" / "wrelay_panel.ico") as mark:
             icon = mark.convert("RGBA")
-            icon.thumbnail((33, 28), Image.Resampling.LANCZOS)
-            canvas.alpha_composite(icon, (WIDTH - PAD - 33, 28))
+            icon.thumbnail((44, 38), Image.Resampling.LANCZOS)
+            canvas.alpha_composite(icon, (WIDTH - PAD - 44, 28))
     except (OSError, ValueError):
         pass
 
