@@ -398,6 +398,7 @@ def normalize_api_message(msg):
         "author_username": author_username,
         "username": username,
         "channel_id": str(msg.get("channel_id") or ""),
+        "guild_id": _discord_id(msg.get("guild_id")),
         "channel_name": None,
         "created_at": msg.get("timestamp"),
         "content": content,
@@ -928,6 +929,7 @@ def normalize_event(event, channel_name):
     return {
         "username": username,
         "channel_id": str(event.channel_id),
+        "guild_id": _discord_id(getattr(event, "guild_id", None)),
         "channel_name": channel_name,
         "created_at": getattr(event, "timestamp", None),
         "content": getattr(event, "content", "") or "",
@@ -1009,6 +1011,20 @@ async def _resolve_channel_name(channel_id):
     """查 Discord 真实频道名，进程内缓存；失败返回 None（调用方回退 ID）"""
     metadata = await _resolve_channel_metadata(channel_id)
     return metadata.get("name") if metadata else None
+
+
+async def discord_message_link(message, channel_id, message_id):
+    """Use the message's guild when known; REST history may omit it."""
+    channel_id, message_id = _discord_id(channel_id), _discord_id(message_id)
+    if not all(value.isascii() and value.isdecimal() for value in (channel_id, message_id)):
+        return ""
+    guild_id = _discord_id(message.get("guild_id"))
+    if not guild_id:
+        metadata = await _resolve_channel_metadata(channel_id)
+        guild_id = _discord_id(metadata.get("guild_id")) if metadata else ""
+    if guild_id.isascii() and guild_id.isdecimal():
+        return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
+    return ""
 
 
 # =====================================================

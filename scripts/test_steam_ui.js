@@ -111,6 +111,7 @@ const ctx = {
   renderIdCell: value => String(value), mcIcon: () => '', URL,
   confirmAction: null,
   setConfirmButtons: () => {},
+  mountImageCardOptions: () => () => ({}),
   setInterval: () => 0,
   setTimeout: callback => { const id = ++timerSequence; timers.set(id, callback); return id; },
   clearTimeout: id => timers.delete(id),
@@ -175,6 +176,7 @@ function selectAll() {
 
   assert.equal(saved.steam_sources[0].value, '620');
   assert.equal(saved.steam_sources[0].name, 'Portal 2');
+  assert.equal(saved.steam_sources[0].translation_enabled, true);
   assert.deepEqual(saved.steam_forwarding_groups[0].sources, [saved.steam_sources[0].id]);
   assert.deepEqual(saved.steam_forwarding_groups[0].groups, ['G1']);
 

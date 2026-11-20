@@ -124,6 +124,15 @@ class MaintenanceService:
                             service._validate_sqlite_payload(service._sqlite_snapshot_bytes(path), name)
                             self._last_database_check[name] = time.monotonic()
                             error = ""
+                        elif name.startswith('scheduled_message_media/'):
+                            from plugins.scheduled_message_media import (
+                                SCHEDULED_ATTACHMENT_MAX_BYTES,
+                                validate_attachment_bytes,
+                            )
+                            with open(path, 'rb') as f:
+                                payload = f.read(SCHEDULED_ATTACHMENT_MAX_BYTES + 1)
+                            validate_attachment_bytes(payload, name.rsplit('/', 1)[-1])
+                            error = ""
                         else:
                             with open(path, "r", encoding="utf-8") as f:
                                 data = json.load(f)
@@ -172,7 +181,8 @@ class MaintenanceService:
                             continue
                         relative = key[len('file:'):].replace('\\', '/')
                         if (relative == 'bot_profiles/' + profile_name
-                                or relative.startswith('bot_profile_runtime/' + profile_stem + '/')):
+                                or relative.startswith('bot_profile_runtime/' + profile_stem + '/')
+                                or relative.startswith('scheduled_message_media/' + profile_stem + '/')):
                             alert_bot_ids[key] = [owner]
             except (ImportError, ValueError):
                 pass

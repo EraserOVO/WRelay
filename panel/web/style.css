@@ -593,7 +593,8 @@
     padding: 6px; border: 1px solid var(--modal-border); border-radius: 8px;
     background: var(--modal-bg); box-shadow: 0 12px 32px rgba(0, 0, 0, .38);
   }
-  .scheduled-message-image-preview img { display: block; max-width: min(320px, calc(100vw - 40px)); max-height: min(240px, calc(100vh - 40px)); object-fit: contain; border-radius: 4px; }
+  .scheduled-message-image-preview :is(img, video) { display: block; max-width: min(320px, calc(100vw - 40px)); max-height: min(240px, calc(100vh - 40px)); object-fit: contain; border-radius: 4px; }
+  .scheduled-message-image-preview :is(img, video)[hidden] { display: none; }
   .scheduled-date-picker-popover-content { display: grid; grid-template-columns: minmax(0, 1fr) 142px; align-items: start; gap: 12px; }
   .scheduled-date-picker-popover[data-picker-kind="time"] .scheduled-date-picker-popover-content { grid-template-columns: minmax(0, 1fr); }
   .scheduled-date-picker-month { display: grid; grid-template-columns: 30px minmax(0, 1fr) 30px; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -881,6 +882,20 @@
     background: var(--field-bg); border: 1px solid var(--field-border);
     border-radius: 8px;
   }
+  /* 新增选择和注册审核与已注册频道共用卡片行的视觉层级。 */
+  .registry-picker-row, .registration-review-row {
+    display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 58px;
+    padding: 10px 12px; margin-bottom: 8px; box-sizing: border-box;
+    background: var(--field-bg); border: 1px solid var(--field-border); border-radius: 8px;
+  }
+  .registry-picker-row { cursor: pointer; }
+  .registration-review-row[hidden] { display: none; }
+  .registry-picker-row > input[type="checkbox"] { flex: 0 0 18px; width: 18px !important; height: 18px !important; margin: 0; }
+  .registry-picker-info, .registration-review-info { flex: 1; min-width: 0; }
+  .registry-picker-name, .registry-picker-detail { display: block; overflow-wrap: anywhere; }
+  .registry-picker-name { color: var(--fg); font-size: 13px; line-height: 1.4; }
+  .registry-picker-detail { margin-top: 3px; color: var(--muted); font: 12px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace; }
+  .registry-picker-row > button, .registration-review-row > button { flex: none; }
   .relay-channel-row-info { flex: 0 0 42%; min-width: 0; }
   .relay-channel-row-name {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -2830,6 +2845,7 @@ body.desktop-host .discord-log-heading > button { flex-shrink: 0; }
 }
 
 .compact-empty-state { margin: 8px 0; padding: 8px 0; color: var(--muted); }
+.registration-empty-state { color: var(--muted); font-size: inherit; font-weight: normal; line-height: 1.6; }
 
 /* Final desktop density: constrain settings content, not route workspaces. */
 body.desktop-host :is(.discord-whitelist, #relayLinkCard, #xRelayLinkCard, #bilibiliRelayLinkCard, #autoTranslationCard, #xAutoTranslationCard) { max-width: 1200px; width: 100%; box-sizing: border-box; }
@@ -3358,37 +3374,26 @@ body:not(.desktop-host):not([data-active-page="overview"]) .robot-status-actions
 
 body #networkProxyModal > .network-proxy-modal { --modal-width: 900px; max-height: 88vh; }
 #networkProxyModal .network-proxy-body { display: grid; align-content: start; gap: 0; }
-#networkProxyModal .network-proxy-autodetect {
-  display: grid; grid-template-columns: minmax(220px, 1fr) auto minmax(180px, auto);
-  align-items: center; gap: 14px; min-width: 0; padding: 0 0 14px;
-  border-bottom: 1px solid var(--panel-border);
-}
-#networkProxyModal .network-proxy-autodetect .network-proxy-copy strong { color: var(--fg); font-size: 14px; }
-#networkProxyModal .network-proxy-autodetect > span { color: var(--muted); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
-#networkProxyModal .network-proxy-autodetect > span.success { color: var(--badge-on-fg); }
-#networkProxyModal .network-proxy-autodetect > span.failure { color: var(--badge-off-fg); }
+#networkProxyModal #networkProxySystemStatus { flex: 1 0 100%; min-width: 0; }
+#networkProxyModal #networkProxyDetectSystem { margin-right: auto; }
+#networkProxyModal #networkProxySave { margin-left: 0; }
 #networkProxyModal .network-proxy-row {
-  display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, .9fr) minmax(150px, auto);
-  align-items: center; gap: 14px; min-width: 0; padding: 13px 0;
+  display: grid; grid-template-columns: minmax(150px, .6fr) minmax(0, 1fr) auto;
+  align-items: start; gap: 14px; min-width: 0; padding: 13px 0;
   border-bottom: 1px solid var(--panel-border);
 }
-#networkProxyModal .network-proxy-copy { display: grid; gap: 4px; min-width: 0; }
-#networkProxyModal .network-proxy-copy label { color: var(--fg); font-size: 14px; font-weight: 600; }
-#networkProxyModal .network-proxy-copy small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+#networkProxyModal .network-proxy-row > label { display: flex; align-items: center; min-height: var(--control-height); color: var(--fg); font-size: 14px; font-weight: 600; }
 #networkProxyModal .network-proxy-row > .secret-input-wrap { width: 100%; min-width: 0; }
-#networkProxyModal .network-proxy-actions { display: flex; align-items: center; gap: 9px; min-width: 0; }
-#networkProxyModal .network-proxy-actions button { flex: 0 0 auto; }
-#networkProxyModal .network-proxy-actions span { min-width: 0; color: var(--muted); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
-#networkProxyModal .network-proxy-actions span.success { color: var(--badge-on-fg); }
-#networkProxyModal .network-proxy-actions span.failure { color: var(--badge-off-fg); }
-#networkProxyModal .network-proxy-spacer { min-width: 0; }
-#networkProxyModal .network-proxy-note { margin: 14px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+#networkProxyModal .network-proxy-row > .rowicon { align-self: center; }
+#networkProxyModal .network-proxy-test-status { grid-column: 2 / -1; }
+#networkProxyModal :is(.network-proxy-test-status, #networkProxySystemStatus) { color: var(--muted); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+#networkProxyModal :is(.network-proxy-test-status, #networkProxySystemStatus):empty { position: absolute; }
+#networkProxyModal :is(.network-proxy-test-status, #networkProxySystemStatus).success { color: var(--badge-on-fg); }
+#networkProxyModal :is(.network-proxy-test-status, #networkProxySystemStatus).failure { color: var(--badge-off-fg); }
 @media (max-width: 760px) {
-  #networkProxyModal .network-proxy-autodetect { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-  #networkProxyModal .network-proxy-autodetect button { justify-self: start; }
-  #networkProxyModal .network-proxy-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-  #networkProxyModal .network-proxy-actions { flex-wrap: wrap; }
-  #networkProxyModal .network-proxy-spacer { display: none; }
+  #networkProxyModal .network-proxy-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+  #networkProxyModal .network-proxy-row > label { grid-column: 1 / -1; min-height: 0; }
+  #networkProxyModal .network-proxy-test-status { grid-column: 1 / -1; }
 }
 
 /* Desktop forwarding pages: status first, forwarding groups next, then uniform row-major cards. */
@@ -4112,8 +4117,11 @@ body.desktop-host[data-active-page="qq"] .scheduled-message-group-layout > .fgse
 }
 .scheduled-message-group-layout .pane-main-actions { display: flex; align-items: center; gap: 8px; min-width: 0; box-sizing: border-box; }
 .scheduled-message-group-layout #btnScheduledMessageEdit { width: auto; height: var(--control-height); min-width: 0; padding: 0 16px; margin: 0; }
-.scheduled-group-message-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.scheduled-group-message-copy strong { overflow: hidden; color: var(--fg); font-size: 13px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.scheduled-group-message-copy { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.scheduled-group-message-copy strong { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--fg); font-size: 13px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.scheduled-group-message-copy small { flex: none; white-space: nowrap; }
+.scheduled-group-message-copy small:empty { display: none; }
+.fgsection .scheduled-message-schedule .middle-value[data-copy-value] { cursor: default; }
 #scheduledGroupTargetTable tbody tr:not(.fgempty-row) td:nth-child(3),
 #scheduledGroupTargetTable tbody tr:not(.fgempty-row) td:nth-child(4) { font-size: 12px; }
 .scheduled-group-message-copy small, .scheduled-group-target-mode { color: var(--muted); font-size: 11px; }

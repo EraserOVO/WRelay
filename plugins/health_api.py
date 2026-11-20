@@ -66,7 +66,8 @@ def _maintenance_alert_bot_ids(alert_id, profile_owners):
                for chain in ("X", "Bilibili", "YouTube")):
             return [owner]
         if (alert_id == "file:bot_profiles/" + profile_name
-                or alert_id.startswith("file:bot_profile_runtime/" + stem + "/")):
+                or alert_id.startswith("file:bot_profile_runtime/" + stem + "/")
+                or alert_id.startswith("file:scheduled_message_media/" + stem + "/")):
             return [owner]
     # These ID families are account-scoped. If the owning profile is missing
     # from the current index, fail closed instead of sending to every Bot.
@@ -74,8 +75,10 @@ def _maintenance_alert_bot_ids(alert_id, profile_owners):
         prefix
         for chain in ("X", "Bilibili", "YouTube")
         for prefix in ("rss:{}:".format(chain), "config:{}:".format(chain), "protection:{}:".format(chain))
-    ) + ("file:bot_profiles/", "file:bot_profile_runtime/")
+    ) + ("file:bot_profiles/", "file:bot_profile_runtime/", "file:scheduled_message_media/")
     if alert_id.startswith(account_scoped_prefixes):
+        if not profile_owners and alert_id.startswith("file:scheduled_message_media/legacy/"):
+            return None
         # Before profile migration, RSS configuration was genuinely shared by
         # all Bots. Keep that legacy behavior only when no account profiles exist.
         if (not profile_owners and alert_id.startswith(("rss:X:", "rss:Bilibili:", "rss:YouTube:"))):

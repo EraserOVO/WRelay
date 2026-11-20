@@ -23,7 +23,10 @@ from plugins.config import (
 )
 from plugins.media import make_text
 from plugins.sender import send_relay_message
-from plugins.scheduled_message_media import decode_scheduled_image_data
+from plugins.scheduled_message_media import (
+    decode_scheduled_image_data,
+    read_scheduled_attachment,
+)
 
 
 _loop_task = None
@@ -177,7 +180,11 @@ async def _scheduled_owner_loop():
                 tuple(sorted(
                     (str(key), repr(value))
                     for key, value in message.items()
-                    if key not in ("image_data", "image_name")
+                    if key not in (
+                        "image_data", "image_name", "attachment_id",
+                        "attachment_type", "attachment_mime", "attachment_name",
+                        "attachment_size",
+                    )
                 ))
                 for message in messages
             )
@@ -239,7 +246,38 @@ async def _scheduled_owner_loop():
                                 if message.get("content") else []
                             )
                             media_items = []
-                            if message.get("image_data"):
+                            if message.get("attachment_id"):
+                                attachment_data, attachment_type, mime_type = read_scheduled_attachment(
+                                    message["attachment_id"],
+                                    message.get("attachment_type"),
+                                    message.get("attachment_mime"),
+                                    message.get("attachment_size"),
+                                )
+                                segment_builder = {
+                                    "image": QQMessageSegment.file_image,
+                                    "video": QQMessageSegment.file_video,
+                                    "audio": QQMessageSegment.file_audio,
+                                }[attachment_type]
+                                media_items.append({
+                                    "kind": "定时图片" if attachment_type == "image" else "定时视频" if attachment_type == "video" else "定时音频",
+                                    "url": "",
+                                    "segment": segment_builder(
+                                        attachment_data,
+                                        message.get("attachment_name") or ("scheduled-message" + {
+                                            "image/png": ".png",
+                                            "image/jpeg": ".jpg",
+                                            "image/gif": ".gif",
+                                            "image/webp": ".webp",
+                                            "video/mp4": ".mp4",
+                                            "video/webm": ".webm",
+                                            "audio/mpeg": ".mp3",
+                                            "audio/wav": ".wav",
+                                            "audio/ogg": ".ogg",
+                                            "audio/mp4": ".m4a",
+                                        }[mime_type]),
+                                    ),
+                                })
+                            elif message.get("image_data"):
                                 image_data, mime_type = decode_scheduled_image_data(
                                     message["image_data"]
                                 )

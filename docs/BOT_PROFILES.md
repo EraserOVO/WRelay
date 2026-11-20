@@ -8,7 +8,7 @@
 - 个人 QQ：`data/bot_profiles/personal_<QQ号>.json`，接口账号标识为 `personal:<QQ号>`。
 - 文件格式为 `wrelay-bot-profile`、版本 `1`，包含账号标识和 `config`。
 - 每个文件包含 Discord/X/Bilibili/YouTube/Steam 来源、各链路的转发组，以及各自的授权用户、手动转发筛选、定时计划、翻译路由、轮询地址、间隔、投递保护、Discord 补发与 Bilibili 自动解析设置。Steam 的地区、来源、转发组和投递保护也按账号隔离。
-- `data/settings.json` 保存账号文件索引 `bot_profile_ids`、群注册及绑定、翻译服务凭据和其他全局设置。官方及 Discord 凭据仍在原来的凭据配置中；个人连接令牌仍在 `data/personal_qq.json`。
+- `data/settings.json` 保存账号文件索引 `bot_profile_ids`、群注册及绑定、翻译服务凭据、全局图片化开关与主题等设置。图片化设置由所有账号共享，不随单账号配置导入导出。官方及 Discord 凭据仍在原来的凭据配置中；个人连接令牌仍在 `data/personal_qq.json`。
 
 接收群的注册和账号归属继续集中管理，自动路由只接受当前账号拥有的群。授权手动 QQ → QQ 仍支持原有明确配置的跨账号目标，不扩展为自动同步。定时计划按账号执行：指定群、全部群和转发组目标最终只发送到当前账号绑定且启用的群。迁移时复制旧计划到现有账号，并按群绑定保留指定目标；旧转发组的目标也在发送时按账号限制。
 

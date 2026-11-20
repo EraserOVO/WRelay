@@ -52,12 +52,13 @@ from plugins.history import (
 from plugins.json_io import atomic_write_json, run_in_thread_to_completion
 from plugins.media import fetch_bytes_many, make_media_link, make_text
 from plugins.paths import data_path
-from plugins.proxy_guard import loopback_http_proxy, system_loopback_http_proxy
+from plugins.proxy_guard import loopback_http_proxy, port_is_open, system_loopback_http_proxy
 from plugins.network_proxy import get_proxy as get_network_proxy
 from plugins.retry import send_and_record
 from plugins.rss_polling import read_rss_poll_interval, run_rss_poll_loop
 from plugins.stats import record
 from plugins.translation import translate_text_parts
+from plugins.message_card import CardSource, render_configured_card, source_header_count
 from plugins.youtube_parser import (
     CHANNEL_ID_RE,
     channel_feed_url,
@@ -137,11 +138,12 @@ _runtime_status = {
     "last_new_count": 0,
     "last_sent_count": 0,
     "last_failed_count": 0,
+    "poll_progress": None,
 }
 
 
 def runtime_status():
-    return dict(_runtime_status)
+    return copy.deepcopy(_runtime_status)
 
 
 class YoutubeProtectionError(RuntimeError):
@@ -258,6 +260,14 @@ def _same_proxy_endpoint(left, right):
     return left_endpoint is not None and left_endpoint == right_endpoint
 
 
+def _available_system_proxy(primary_proxy):
+    system_proxy = system_loopback_http_proxy()
+    endpoint = loopback_http_proxy(system_proxy)
+    if endpoint is None or _same_proxy_endpoint(system_proxy, primary_proxy):
+        return None
+    return system_proxy if port_is_open(*endpoint) else None
+
+
 async def _youtube_get(*args, **kwargs):
     """Track YouTube requests so shutdown can reap one-shot calls."""
     global _feed_proxy_override, _feed_proxy_override_source
@@ -272,12 +282,12 @@ async def _youtube_get(*args, **kwargs):
         client = _get_feed_client(proxy=primary_proxy, explicit_proxy=True)
         try:
             return await client.get(*args, **kwargs)
-        except (httpx.ConnectError, httpx.ProxyError) as primary_error:
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ProxyError):
             # 只对本机/未显式指定的代理配置回退，避免覆盖用户指定的远程代理。
             if configured_proxy and loopback_http_proxy(configured_proxy) is None:
                 raise
-            system_proxy = system_loopback_http_proxy()
-            if not system_proxy or _same_proxy_endpoint(system_proxy, primary_proxy):
+            system_proxy = await asyncio.to_thread(_available_system_proxy, primary_proxy)
+            if not system_proxy:
                 raise
             try:
                 response = await _get_feed_client(
@@ -815,11 +825,21 @@ async def _dispatch_one_locked():
                 await _save_protection_state_async(state)
                 continue
             text_parts, media_items = rendered
+            original = text_parts
             text_parts = await translate_text_parts(
                 text_parts,
                 ("youtube", source_id, item["post"]["id"]),
                 skip_leading_parts=1,
                 config=delivery_config["translation"],
+            )
+            post = item["post"]
+            card_source = CardSource(
+                "YouTube", post.get("author") or source["name"], "视频",
+                post.get("link", "") if enabled_types is None or "链接" in enabled_types else "",
+            )
+            text_parts, media_items = await render_configured_card(
+                card_source, delivery_config, original, text_parts, media_items, delivery_config["translation"],
+                header_parts=source_header_count(original, "YouTube"),
             )
             ok_map = await send_and_record(
                 channel_key,
@@ -1610,52 +1630,52 @@ async def _poll_all_profile():
         _runtime_status["source_health"] = []
         return
     sem = asyncio.Semaphore(YOUTUBE_POLL_CONCURRENCY)
+    status = _runtime_status
+    previous = {item["id"]: item for item in status.get("source_health", [])}
+    progress = {"total": len(sources), "completed": []}
+    status["poll_progress"] = progress
 
     async def poll_one(source):
         async with sem:
             try:
-                return await _poll_source(source)
+                result = await _poll_source(source)
             except YoutubeProtectionError as exc:
-                return {"result": "protection_failed", "error": _short_error(exc), "new": 0, "sent": 0, "failed": 0}
+                result = {"result": "protection_failed", "error": _short_error(exc), "new": 0, "sent": 0, "failed": 0}
             except Exception as exc:
                 logger.exception("YouTube 来源轮询异常: {} ({})", source["name"], source["id"])
-                return {"result": "fetch_failed", "error": _short_error(exc), "new": 0, "sent": 0, "failed": 0}
+                result = {"result": "fetch_failed", "error": _short_error(exc), "new": 0, "sent": 0, "failed": 0}
+            identity = str(source["id"])
+            outcome = result.get("result")
+            health = {
+                "id": identity,
+                "name": source["name"],
+                "result": outcome,
+                "error": result.get("error") or "",
+                "consecutive_failures": (
+                    0 if outcome == "ok" else previous.get(identity, {}).get("consecutive_failures", 0) + 1
+                ),
+                "provider": result.get("provider", "rss"),
+            }
+            progress["completed"].append(health)
+            return result, health
 
-    results = await asyncio.gather(*(poll_one(source) for source in sources))
-    previous = {item["id"]: item for item in _runtime_status.get("source_health", [])}
-    health = []
-    for source, result in zip(sources, results):
-        identity = str(source["id"])
-        status = result.get("result")
-        count = 0 if status == "ok" else (
-            previous.get(identity, {}).get("consecutive_failures", 0) + 1
-        )
-        health.append({
-            "id": identity,
-            "name": source["name"],
-            "consecutive_failures": count,
-            "provider": result.get("provider", "rss"),
+    try:
+        async with asyncio.TaskGroup() as tasks:
+            checks = [tasks.create_task(poll_one(source)) for source in sources]
+        checked = [check.result() for check in checks]
+        results, health = zip(*checked)
+        bad = next((result for result in results if result.get("result") not in (None, "ok")), {})
+        status.update({
+            "source_health": list(health),
+            "last_poll_ts": int(time.time()),
+            "last_new_count": sum(result.get("new", 0) for result in results),
+            "last_sent_count": sum(result.get("sent", 0) for result in results),
+            "last_failed_count": sum(result.get("failed", 0) for result in results),
+            "last_result": bad.get("result", "ok"),
+            "last_error": bad.get("error") or "",
         })
-    _runtime_status["source_health"] = health
-    new_total = sent_total = failed_total = 0
-    bad_result = ""
-    bad_error = ""
-    for result in results:
-        new_total += result.get("new", 0)
-        sent_total += result.get("sent", 0)
-        failed_total += result.get("failed", 0)
-        status = result.get("result")
-        if not bad_result and status not in (None, "ok"):
-            bad_result = status
-            bad_error = result.get("error") or ""
-    _runtime_status.update({
-        "last_poll_ts": int(time.time()),
-        "last_new_count": new_total,
-        "last_sent_count": sent_total,
-        "last_failed_count": failed_total,
-        "last_result": bad_result or "ok",
-        "last_error": bad_error,
-    })
+    finally:
+        status["poll_progress"] = None
 
 
 async def _poll_loop():

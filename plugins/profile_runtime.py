@@ -170,13 +170,21 @@ class RSSProfiles:
         result["qq_connected"] = any(value.get("qq_connected") for _, value in values)
         failures = []
         config_errors = []
+
+        def tagged_source(owner, item):
+            return dict(item, key=owner + ":" + str(item.get("key", "")),
+                        id=owner + ":" + str(item.get("id", item.get("key", ""))),
+                        name=owner + " / " + str(item.get("name", "")))
+
         for owner, value in values:
             if value.get("config_error"):
                 config_errors.append(owner + "：" + value["config_error"])
-            for item in value.get("source_health", []):
-                result["source_health"].append(dict(item, key=owner + ":" + str(item.get("key", "")),
-                    id=owner + ":" + str(item.get("id", item.get("key", ""))),
-                    name=owner + " / " + str(item.get("name", ""))))
+            result["source_health"].extend(tagged_source(owner, item) for item in value.get("source_health", []))
+            progress = value.get("poll_progress")
+            if progress is not None:
+                combined = result.setdefault("poll_progress", {"total": 0, "completed": []})
+                combined["total"] += progress["total"]
+                combined["completed"].extend(tagged_source(owner, item) for item in progress["completed"])
             if value.get("last_error") or value.get("protection_error"):
                 failures.append(owner + "：" + str(value.get("last_error") or value.get("protection_error")))
         failure_result = next((value.get("last_result") or "protection_failed" for _, value in values

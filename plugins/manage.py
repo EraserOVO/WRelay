@@ -855,7 +855,7 @@ async def _cmd_timer(args):
                 messages.extend(item for item in group.get("messages") or [] if isinstance(item, dict))
         if not messages:
             messages = [item for item in config.get("messages") or [] if isinstance(item, dict)]
-        messages = [item for item in messages if str(item.get("content") or "").strip() or item.get("image_data")]
+        messages = [item for item in messages if str(item.get("content") or "").strip() or item.get("image_data") or item.get("attachment_id")]
         content = str(messages[0].get("content") or "").strip() if messages else str(config.get("content") or "").strip()
         enabled_count = sum(item.get("enabled") is not False for item in messages)
         if messages:

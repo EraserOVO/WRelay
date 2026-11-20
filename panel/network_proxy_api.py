@@ -24,6 +24,11 @@ TEST_TARGETS = {
         "https://syndication.twitter.com/srv/timeline-profile/screen-name/snekflat",
         "X 时间线",
     ),
+    "rsshub": ("https://rsshub.app/", "RSSHub 公共实例"),
+    "bilibili": ("https://api.bilibili.com/x/web-interface/nav", "Bilibili API"),
+    "youtube": ("https://www.youtube.com/", "YouTube"),
+    "steam": ("https://store.steampowered.com/api/appdetails?appids=620", "Steam 商店 API"),
+    "translation": ("https://tmt.tencentcloudapi.com/", "腾讯云机器翻译 API"),
 }
 
 
@@ -75,7 +80,7 @@ def register_routes(app, panel):
                 raise ValueError("请求内容必须是对象")
             service = str(body.get("service") or "").strip()
             if service not in TEST_TARGETS:
-                raise ValueError("当前只支持检测 Discord 和 X 代理")
+                raise ValueError("不支持该代理检测项")
             proxy = validate_proxy_url(body.get("proxy", ""), field_name=service)
             if not proxy:
                 raise ValueError("请先填写该链路的代理地址")
@@ -97,16 +102,18 @@ def register_routes(app, panel):
                 async with client.stream("GET", target, headers=headers) as response:
                     status = response.status_code
             elapsed_ms = round((time.perf_counter() - started) * 1000)
-            reachable = status < 500
+            reachable = status < 500 and status != 407
+            if status == 407:
+                message = "代理要求认证（HTTP 407），请检查用户名和密码"
+            elif reachable:
+                message = "%s 已收到 HTTP %s 响应（%s ms）" % (label, status, elapsed_ms)
+            else:
+                message = "%s 返回 HTTP %s（%s ms）" % (label, status, elapsed_ms)
             return {
                 "ok": reachable,
                 "status_code": status,
                 "elapsed_ms": elapsed_ms,
-                "msg": (
-                    "%s 已收到 HTTP %s 响应（%s ms）" % (label, status, elapsed_ms)
-                    if reachable
-                    else "%s 返回 HTTP %s" % (label, status)
-                ),
+                "msg": message,
             }
         except (httpx.ConnectError, httpx.ConnectTimeout):
             if loopback_http_proxy(proxy):

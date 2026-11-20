@@ -1855,6 +1855,35 @@ def _save_settings_payload(data):
             {"ok": False, "msg": "配置校验失败: " + err}, status_code=400
         )
     try:
+        from plugins.scheduled_message_media import (
+            migrate_legacy_scheduled_attachments,
+            prune_unreferenced_attachments,
+            validate_attachment_descriptor,
+        )
+        scheduled = data.get("scheduled_message")
+        migrate_legacy_scheduled_attachments(scheduled)
+        err = _validate_settings(data)
+        if err:
+            return JSONResponse(
+                {"ok": False, "msg": "配置校验失败: " + err}, status_code=400
+            )
+        if isinstance(scheduled, dict):
+            groups = scheduled.get("message_groups")
+            if isinstance(groups, list) and groups:
+                media_messages = []
+                for group in groups:
+                    if isinstance(group, dict) and isinstance(group.get("messages"), list):
+                        media_messages.extend(group["messages"])
+            else:
+                media_messages = list(scheduled.get("messages") or []) if isinstance(scheduled.get("messages"), list) else []
+            for message in media_messages:
+                if isinstance(message, dict) and message.get("attachment_id"):
+                    validate_attachment_descriptor(message)
+    except (OSError, ValueError) as exc:
+        return JSONResponse(
+            {"ok": False, "msg": "定时消息附件校验失败: " + str(exc)}, status_code=400
+        )
+    try:
         save_settings(data, expected_revision=expected_revision)
     except ConcurrentWriteError:
         return JSONResponse(
@@ -1868,6 +1897,10 @@ def _save_settings_payload(data):
         )
     except ValueError as exc:
         return JSONResponse({"ok": False, "msg": str(exc)}, status_code=400)
+    try:
+        prune_unreferenced_attachments(data.get("scheduled_message"))
+    except OSError as exc:
+        _log("清理未引用的定时消息附件失败: %s" % exc)
     return {"ok": True, "settings": _settings_payload()}
 
 
@@ -1968,12 +2001,34 @@ def _update_scheduled_message(body):
             {"ok": False, "msg": "配置校验失败: " + err}, status_code=400
         )
     try:
+        from plugins.scheduled_message_media import validate_attachment_descriptor
+        groups = scheduled.get("message_groups")
+        if isinstance(groups, list) and groups:
+            media_messages = []
+            for group in groups:
+                if isinstance(group, dict) and isinstance(group.get("messages"), list):
+                    media_messages.extend(group["messages"])
+        else:
+            media_messages = list(scheduled.get("messages") or []) if isinstance(scheduled.get("messages"), list) else []
+        for message in media_messages:
+            if isinstance(message, dict) and message.get("attachment_id"):
+                validate_attachment_descriptor(message)
+    except (OSError, ValueError) as exc:
+        return JSONResponse(
+            {"ok": False, "msg": "定时消息附件校验失败: " + str(exc)}, status_code=400
+        )
+    try:
         save_settings(data, expected_revision=revision)
     except ConcurrentWriteError:
         return JSONResponse(
             {"ok": False, "conflict": True, "msg": "配置已被其他进程修改，请刷新后重试"},
             status_code=409,
         )
+    try:
+        from plugins.scheduled_message_media import prune_unreferenced_attachments
+        prune_unreferenced_attachments(scheduled)
+    except OSError as exc:
+        _log("清理未引用的定时消息附件失败: %s" % exc)
     return {"ok": True, "scheduled_message": scheduled}
 
 
@@ -3281,6 +3336,8 @@ from panel.profile_api import register_routes as register_profile_routes
 register_profile_routes(app, globals())
 from panel.network_proxy_api import register_routes as register_network_proxy_routes
 register_network_proxy_routes(app, globals())
+from panel.scheduled_message_media_api import register_routes as register_scheduled_message_media_routes
+register_scheduled_message_media_routes(app)
 
 
 @app.get("/api/bot/qq-config")

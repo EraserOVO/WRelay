@@ -13,6 +13,7 @@ from collections import OrderedDict
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -238,6 +239,114 @@ class SteamStateTests(unittest.TestCase):
             runtime.write_text(json.dumps(steam_state.empty_state()), encoding="utf-8")
             service.restore_backup_archive(archive, True, True)
             self.assertEqual(json.loads(runtime.read_text(encoding="utf-8")), original)
+
+
+class SteamStartupTests(unittest.IsolatedAsyncioTestCase):
+    STORE = "https://store.steampowered.test/apps"
+    COMMUNITY = "https://steamcommunity.test/news"
+    STEAM_PROXY = "http://steam-proxy.test:8080"
+    DISCORD_PROXY = "http://discord-proxy.test:8080"
+
+    async def asyncSetUp(self):
+        self.now = 1000.0
+        self.steam_proxy = None
+        self.discord_proxy = self.DISCORD_PROXY
+        self.replies = []
+        self.requests = []
+        patches = [
+            mock.patch.multiple(steam, _client=None, _proxy_client=None, _proxy_address=None,
+                                _last_request=0.0, _host_cooldowns={}, _request_lock=asyncio.Lock()),
+            mock.patch.object(steam, "get_network_proxy", side_effect=lambda service: self.steam_proxy),
+            mock.patch.object(steam, "get_driver", side_effect=lambda: SimpleNamespace(
+                config=SimpleNamespace(discord_proxy=self.discord_proxy))),
+            mock.patch.object(steam, "asyncio", SimpleNamespace(
+                to_thread=asyncio.to_thread, sleep=self.sleep, CancelledError=asyncio.CancelledError)),
+            mock.patch.object(steam, "time", SimpleNamespace(monotonic=lambda: self.now, time=lambda: self.now)),
+            mock.patch.object(steam.httpx, "AsyncClient", side_effect=self.client),
+        ]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    async def sleep(self, seconds):
+        if seconds > 1:
+            self.assertFalse(steam._request_lock.locked(), "retry wait must not block other hosts")
+        self.now += seconds
+
+    def client(self, proxy=None, **kwargs):
+        async def get(url, params=None):
+            self.requests.append((url, proxy, self.now))
+            reply = self.replies.pop(0)
+            if isinstance(reply, Exception):
+                raise reply
+            return httpx.Response(reply[0], headers=reply[1], request=httpx.Request("GET", url))
+
+        return SimpleNamespace(get=get, aclose=mock.AsyncMock())
+
+    async def test_explicit_steam_proxy_is_used_on_first_request_and_retry(self):
+        self.steam_proxy = self.STEAM_PROXY
+        self.discord_proxy = None
+        self.replies = [httpx.ConnectTimeout("proxy connection"), (200, {})]
+
+        await steam._get(self.STORE)
+
+        self.assertEqual([proxy for _, proxy, _ in self.requests], [self.STEAM_PROXY, self.STEAM_PROXY])
+
+    async def test_server_disconnect_uses_discord_fallback_after_direct_request(self):
+        self.replies = [httpx.RemoteProtocolError("remote disconnected"), (200, {})]
+
+        await steam._get(self.STORE)
+
+        self.assertEqual([proxy for _, proxy, _ in self.requests], [None, self.DISCORD_PROXY])
+
+    async def test_rate_limit_waits_on_same_route_for_seconds_and_http_date(self):
+        self.replies = [
+            (429, {"Retry-After": "5"}),
+            (429, {"Retry-After": "Thu, 01 Jan 1970 00:17:00 GMT"}),
+            (200, {}),
+        ]
+
+        await steam._get(self.STORE)
+
+        self.assertEqual([proxy for _, proxy, _ in self.requests], [None, None, None])
+        self.assertEqual([timestamp for _, _, timestamp in self.requests], [1000, 1005, 1020])
+
+    async def test_long_rate_limit_defers_same_host_but_allows_other_hosts(self):
+        self.replies = [(429, {"Retry-After": "300"}), (200, {}), (200, {})]
+
+        with self.assertRaisesRegex(httpx.HTTPError, "HTTP 429"):
+            await steam._get(self.STORE)
+        with self.assertRaisesRegex(httpx.HTTPError, "HTTP 429"):
+            await steam._get("https://store.steampowered.test/catalog")
+        await steam._get(self.COMMUNITY)
+        self.now += 300
+        await steam._get(self.STORE)
+
+        self.assertEqual([url for url, _, _ in self.requests], [self.STORE, self.COMMUNITY, self.STORE])
+        self.assertGreaterEqual(self.requests[-1][2] - self.requests[0][2], 300)
+
+    async def test_source_is_visible_during_startup_and_blank_error_is_reported(self):
+        owner = "steam-startup-test"
+        initial = {"last_completed_poll_ts": 950}
+        settings = {"sources": [CREATOR], "routes": {"s2": ["group"]}, "region": "CN",
+                    "sources_total": 1, "sources_enabled": 1, "protection": {}}
+
+        async def poll_source(*args):
+            self.assertTrue(steam._status[owner]["scanning"])
+            self.assertEqual(steam._status[owner]["current_source"], "Valve")
+            self.assertEqual(steam._status[owner]["last_completed_poll_ts"], 950)
+            raise httpx.ConnectTimeout("")
+
+        with mock.patch.object(steam, "_status", {owner: initial}), \
+                mock.patch.object(steam, "_snapshot", return_value={"sequence": 0, "queue": []}), \
+                mock.patch.object(steam, "_change"), \
+                mock.patch.object(steam, "_poll_source", side_effect=poll_source):
+            await steam._poll_owner(owner, settings)
+            result = steam._status[owner]
+
+        self.assertFalse(result["scanning"])
+        self.assertEqual(result["last_completed_poll_ts"], 1000)
+        self.assertEqual(result["source_health"][0]["error"], "ConnectTimeout")
 
 
 class SteamRuntimeTests(unittest.IsolatedAsyncioTestCase):

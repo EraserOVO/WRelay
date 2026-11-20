@@ -12,6 +12,7 @@ import tempfile
 import time
 import uuid
 import zipfile
+from pathlib import Path
 from contextlib import ExitStack
 from datetime import datetime, timezone
 
@@ -108,6 +109,24 @@ class BackupRestoreService:
             for runtime in ("x_rss.json", "bilibili.json", "youtube.json", "steam.json", "x_protection.json", "bilibili_protection.json", "youtube_protection.json"):
                 name = "bot_profile_runtime/" + bot_profiles.filename(owner)[:-5] + "/" + runtime
                 targets[name] = self.profile_target(name)
+        media_root = os.path.join(os.path.dirname(self.settings_file), "scheduled_message_media")
+        if os.path.isdir(media_root):
+            valid_media_owners = {Path(bot_profiles.filename(owner)).stem for owner in bot_profiles.ids(self.settings_file)}
+            valid_media_owners.add("legacy")
+            for directory, dirs, files in os.walk(media_root, followlinks=False):
+                dirs[:] = [name for name in dirs if not os.path.islink(os.path.join(directory, name))]
+                for filename in files:
+                    path = os.path.join(directory, filename)
+                    if os.path.islink(path):
+                        continue
+                    relative = os.path.relpath(path, os.path.dirname(self.settings_file)).replace(os.sep, "/")
+                    if relative.split("/", 2)[1] not in valid_media_owners:
+                        continue
+                    try:
+                        self.profile_target(relative)
+                    except ValueError:
+                        continue
+                    targets[relative] = path
         return targets
 
     def validate_settings_document(self, data):
@@ -137,7 +156,8 @@ class BackupRestoreService:
         """Resolve only known profile paths, including accounts absent on this machine."""
         profile = r"(?:official_[1-9][0-9]{0,19}|personal_[1-9][0-9]{4,19}|unassigned)"
         runtime = r"(?:x_rss|bilibili|youtube|steam|x_protection|bilibili_protection|youtube_protection)\.json"
-        if re.fullmatch(r"bot_profiles/" + profile + r"\.json", name) or re.fullmatch(r"bot_profile_runtime/" + profile + "/" + runtime, name):
+        from plugins.scheduled_message_media import is_safe_archive_name
+        if re.fullmatch(r"bot_profiles/" + profile + r"\.json", name) or re.fullmatch(r"bot_profile_runtime/" + profile + "/" + runtime, name) or is_safe_archive_name(name):
             return os.path.join(os.path.dirname(self.settings_file), *name.split("/"))
         raise ValueError("备份内含不允许的配置路径")
 
@@ -299,6 +319,7 @@ class BackupRestoreService:
         requested_names = [BACKUP_SETTINGS_NAME]
         requested_names.extend(BACKUP_CONFIG_NAMES)
         requested_names.extend(name for name in targets if name.startswith("bot_profiles/"))
+        requested_names.extend(name for name in targets if name.startswith("scheduled_message_media/"))
         if include_runtime_state:
             requested_names.extend(BACKUP_RUNTIME_NAMES)
             requested_names.extend(name for name in targets if name.startswith("bot_profile_runtime/"))
@@ -381,7 +402,7 @@ class BackupRestoreService:
                 ):
                     raise ValueError("备份缺少清单或 settings.json")
                 if any(
-                    ("/" in name and not name.startswith(("bot_profiles/", "bot_profile_runtime/"))) or "\\" in name or name.startswith(".")
+                    ("/" in name and not name.startswith(("bot_profiles/", "bot_profile_runtime/", "scheduled_message_media/"))) or "\\" in name or name.startswith(".")
                     for name in names
                 ):
                     raise ValueError("备份文件名不安全")
@@ -430,6 +451,9 @@ class BackupRestoreService:
                         self._validate_sqlite_payload(content, name)
                         data[name] = content
                         continue
+                    if name.startswith("scheduled_message_media/"):
+                        data[name] = archive.read(name)
+                        continue
                     try:
                         data[name] = json.loads(
                             archive.read(name).decode("utf-8")
@@ -458,8 +482,66 @@ class BackupRestoreService:
                 validate_runtime(name.rsplit("/", 1)[1], value)
                 continue
             if name not in (BACKUP_SETTINGS_NAME, *BACKUP_SQLITE_NAMES):
-                validate_runtime(name, value)
+                if not name.startswith("scheduled_message_media/"):
+                    validate_runtime(name, value)
+        self.validate_scheduled_media_assets(data)
         return data
+
+    @staticmethod
+    def _scheduled_messages(scheduled):
+        if not isinstance(scheduled, dict):
+            return []
+        groups = scheduled.get("message_groups")
+        if isinstance(groups, list) and groups:
+            messages = []
+            for group in groups:
+                if isinstance(group, dict) and isinstance(group.get("messages"), list):
+                    messages.extend(group["messages"])
+        else:
+            messages = list(scheduled.get("messages") or []) if isinstance(scheduled.get("messages"), list) else []
+        return messages
+
+    def validate_scheduled_media_assets(self, data):
+        """Ensure each persisted attachment descriptor has its matching archive file."""
+        from plugins import bot_profiles
+        from plugins.scheduled_message_media import validate_attachment_bytes
+
+        settings = data.get(BACKUP_SETTINGS_NAME) or {}
+        owners = settings.get(bot_profiles.INDEX, []) if isinstance(settings, dict) else []
+        expected_owner_dirs = {Path(bot_profiles.filename(owner)).stem for owner in owners}
+        scheduled_documents = []
+        if isinstance(settings, dict) and isinstance(settings.get("scheduled_message"), dict):
+            scheduled_documents.append(("legacy", settings["scheduled_message"]))
+        for owner in owners:
+            profile_name = "bot_profiles/" + bot_profiles.filename(owner)
+            profile = data.get(profile_name) or {}
+            config = profile.get("config") if isinstance(profile, dict) else {}
+            scheduled_documents.append((Path(bot_profiles.filename(owner)).stem, (config or {}).get("scheduled_message")))
+
+        for owner_dir, scheduled in scheduled_documents:
+            for message in self._scheduled_messages(scheduled):
+                if not isinstance(message, dict) or not message.get("attachment_id"):
+                    continue
+                attachment_id = message["attachment_id"]
+                asset_name = "scheduled_message_media/%s/%s" % (owner_dir, attachment_id)
+                payload = data.get(asset_name)
+                if not isinstance(payload, bytes):
+                    raise ValueError("备份缺少定时消息附件：" + attachment_id)
+                attachment_type, mime_type, _extension = validate_attachment_bytes(payload, attachment_id)
+                if (
+                    attachment_type != message.get("attachment_type")
+                    or mime_type != message.get("attachment_mime")
+                    or len(payload) != message.get("attachment_size")
+                ):
+                    raise ValueError("定时消息附件与配置不匹配：" + attachment_id)
+
+        for name in data:
+            if not name.startswith("scheduled_message_media/"):
+                continue
+            owner_dir = name.split("/", 2)[1]
+            if owner_dir != "legacy" and owner_dir not in expected_owner_dirs:
+                raise ValueError("定时消息附件账号不在配置索引中")
+            validate_attachment_bytes(data[name], name.rsplit("/", 1)[-1])
 
     def save_restore_rollback(self, names):
         """先完整备份当前待覆盖文件；失败时绝不开始写入恢复数据。"""
@@ -592,7 +674,7 @@ class BackupRestoreService:
         save_rollback = save_rollback or self.save_restore_rollback
 
         data = read_archive(payload)
-        names = [name for name in data if name.startswith("bot_profiles/")]
+        names = [name for name in data if name.startswith(("bot_profiles/", "scheduled_message_media/"))]
         if include_runtime_state:
             if not confirmed_runtime_state:
                 raise ValueError("恢复运行状态需要明确确认风险")
@@ -613,7 +695,7 @@ class BackupRestoreService:
             written_names = []
             try:
                 for name in names:
-                    if name in BACKUP_SQLITE_NAMES:
+                    if name in BACKUP_SQLITE_NAMES or name.startswith("scheduled_message_media/"):
                         self._atomic_write_bytes(targets[name], data[name])
                     else:
                         self.atomic_write_json_unlocked(

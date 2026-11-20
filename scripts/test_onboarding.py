@@ -45,6 +45,9 @@ def test_pure():
         assert first["unrelated"] == original["unrelated"]
         assert apply_draft(first, d, "a", ["1001"]) == first
         assert apply_draft(first, d, "b", ["1001"]) == first
+        if purpose != "qq":
+            key = {"discord": "discord_channels", "x": "x_rss_sources", "bilibili": "bilibili_sources"}[purpose]
+            assert first[key][0]["translation_enabled"] is (purpose != "bilibili")
         if purpose == "qq":
             assert first["qq_forwarding_groups"] == original["qq_forwarding_groups"]
             assert first["discord_channels"] == []
@@ -68,15 +71,19 @@ def test_pure():
         assert feed_url({**draft("bilibili"), "source_kind": kind}, original).endswith("/bilibili/vsearch/123/pubdate/0")
     assert "secret" not in clean_draft({**draft(), "secret": "do-not-store"})
     reuse = fixture()
-    reuse["x_rss_sources"] = [{"source": "Example", "name": "existing", "enabled": False, "filter_keywords": ["keep"]}]
+    reuse["x_rss_sources"] = [{"source": "Example", "name": "existing", "enabled": False, "filter_keywords": ["keep"], "translation_enabled": False}]
     reused = apply_draft(reuse, draft(), "a", ["1001"])
     assert len(reused["x_rss_sources"]) == 1 and reused["x_rss_sources"][0]["filter_keywords"] == ["keep"]
+    assert reused["x_rss_sources"][0]["translation_enabled"] is False
+    reuse["discord_channels"] = [{"id": "123", "translation_enabled": False}]
+    assert apply_draft(reuse, draft("discord"), "a", ["1001"])["discord_channels"][0]["translation_enabled"] is False
     legacy = fixture()
     legacy["qq_group_openids"][0]["bot_id"] = ""
     assert apply_draft(legacy, draft(), "a", ["1001"])["qq_group_openids"][0]["enabled"]
-    legacy["bilibili_sources"] = [{"kind": "up", "uid": "123", "enabled": False}]
+    legacy["bilibili_sources"] = [{"kind": "up", "uid": "123", "enabled": False, "translation_enabled": True}]
     reused = apply_draft(legacy, draft("bilibili"), "a", ["1001"])
     assert len(reused["bilibili_sources"]) == 1
+    assert reused["bilibili_sources"][0]["translation_enabled"] is True
     print("PASS - 四种用途、重复保存、既有配置保护、显式权限与 RSS 路由")
 
 

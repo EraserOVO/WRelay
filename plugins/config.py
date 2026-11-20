@@ -213,6 +213,18 @@ def get_x_source_filter(source_key):
     return _x_source_filter(_load_settings(), source_key)
 
 
+def _image_card_options(data):
+    return {
+        "image_card_enabled": data.get("image_card_enabled", True),
+        "image_card_theme": data.get("image_card_theme", "dark"),
+    }
+
+
+def get_image_card_options():
+    """Settings shared across accounts and forwarding chains."""
+    return _image_card_options(_load_settings())
+
+
 def _x_source_filter(data, source_key):
     for item in data.get("x_rss_sources") or []:
         if not isinstance(item, dict):
@@ -282,6 +294,7 @@ def get_x_source_delivery_config(source_key):
     """用同一 settings 快照生成 X 来源筛选与翻译配置。"""
     data = _load_settings()
     return {
+        **_image_card_options(data),
         "filter": _x_source_filter(data, source_key),
         "translation": _translation_config_for_item_data(
             data, "translation", "x_rss_sources", source_key
@@ -293,6 +306,7 @@ def get_bilibili_source_delivery_config(source_id):
     """用同一 settings 快照生成 Bilibili 来源筛选与翻译配置。"""
     data = _load_settings()
     return {
+        **_image_card_options(data),
         "filter": _bilibili_source_filter(data, source_id),
         "translation": _translation_config_for_item_data(
             data, "translation", "bilibili_sources", source_id
@@ -588,10 +602,10 @@ def get_active_group_routing_snapshot():
 # （游标结构/生命周期由 plugins/dedup.py + plugins/history.py
 # 管理，本模块不参与）。
 #
-# 实际发送必须同时满足（两级开关）：
+# 实际发送必须同时满足：
 #   - 频道全局 enabled（discord_channels 条目的 enabled）
 #   - 群全局 enabled（qq_group_openids 条目的 enabled）
-#   - 频道与群同属于至少一个转发组
+#   - 当前转发组未停用该群，且频道与群同属于该组
 # =====================================================
 
 
@@ -617,6 +631,20 @@ def _enabled_group_openids(data):
             if item.get("enabled") and item.get("openid")
         ]
     return [str(o) for o in QQ_GROUP_OPENIDS]
+
+
+def _disabled_group_members(item, members):
+    """返回当前路由组内停用的群成员（与 QQ 群全局状态分离）。"""
+    raw = item.get("disabled_groups")
+    if not isinstance(raw, list):
+        raw = []
+    member_set = {str(value) for value in members}
+    return list(dict.fromkeys(str(value) for value in raw if str(value) in member_set))
+
+
+def _active_group_members(group):
+    disabled = set(group.get("disabled_groups") or [])
+    return [str(value) for value in group.get("groups") or [] if str(value) not in disabled]
 
 
 def _ensure_forwarding_groups(data):
@@ -660,6 +688,7 @@ def _ensure_forwarding_groups(data):
             "enabled": item.get("enabled", True) is not False,
             "channels": [str(c) for c in channels if c],
             "groups": [str(o) for o in group_openids if o],
+            "disabled_groups": _disabled_group_members(item, group_openids),
         })
 
     if not normalized and not data.get("bot_profile_ids"):
@@ -669,6 +698,7 @@ def _ensure_forwarding_groups(data):
             "enabled": True,
             "channels": _enabled_channel_ids(data),
             "groups": _enabled_group_openids(data),
+            "disabled_groups": [],
         }]
 
     data["forwarding_groups"] = normalized
@@ -712,6 +742,7 @@ def _ensure_qq_forwarding_groups(data):
             "name": str(item.get("name") or "").strip() or group_id,
             "enabled": item.get("enabled", True) is not False,
             "groups": members,
+            "disabled_groups": _disabled_group_members(item, members),
         })
     if not normalized and not data.get("bot_profile_ids"):
         normalized = [{
@@ -723,6 +754,7 @@ def _ensure_qq_forwarding_groups(data):
                 for item in data.get("qq_group_openids", [])
                 if isinstance(item, dict) and item.get("openid") and item.get("enabled")
             ],
+            "disabled_groups": [],
         }]
     data["qq_forwarding_groups"] = normalized
     return normalized
@@ -761,9 +793,9 @@ def _groups_for_channel_from(data, channel_id):
             continue
         if channel_id not in fg["channels"]:
             continue
-        targets.update(fg["groups"])
+        targets.update(_active_group_members(fg))
 
-    # 群必须全局 enabled；按启用顺序返回即天然去重
+    # 群全局 enabled 且当前组内启用；按启用顺序返回即天然去重
     return [
         group
         for group in enabled_groups
@@ -972,7 +1004,7 @@ def _related_group_openids_from(data, group_openid):
     for fg in _ensure_qq_forwarding_groups(data):
         if fg.get("enabled", True) is False:
             continue
-        members = [str(o) for o in fg["groups"]]
+        members = _active_group_members(fg)
         if gid in members:
             result.update(members)
     result.discard(gid)
@@ -1137,11 +1169,13 @@ def _channel_filter_from(data, channel_id):
                         if k
                     ],
                     "filter_message_types": item.get("filter_message_types"),
+                    **_image_card_options(data),
                 }
     return {
         "filter_usernames": [],
         "filter_keywords": [],
         "filter_message_types": None,
+        **_image_card_options(data),
     }
 
 
@@ -1273,7 +1307,7 @@ def get_scheduled_message_config():
     message_groups = value.get("message_groups")
     if isinstance(message_groups, list) and message_groups:
         for group_index, group in enumerate(message_groups, start=1):
-            if not isinstance(group, dict):
+            if not isinstance(group, dict) or group.get("enabled") is False:
                 continue
             mode = str(group.get("target_mode") or SCHEDULED_TARGET_GROUP)
             for child_index, child in enumerate(group.get("messages") or [], start=1):
@@ -1284,6 +1318,7 @@ def get_scheduled_message_config():
                 raw_child["target_mode"] = mode
                 raw_child["target_groups"] = group.get("target_groups") or []
                 raw_child["forward_groups"] = group.get("forward_groups") or []
+                raw_child["disabled_target_groups"] = group.get("disabled_target_groups") or []
                 raw_messages.append(raw_child)
     else:
         raw_messages = list(value.get("messages") or [])
@@ -1295,9 +1330,10 @@ def get_scheduled_message_config():
             continue
         content = str(raw.get("content") or "").strip()
         image_data = raw.get("image_data")
-        if not content and not isinstance(image_data, str):
+        attachment_id = raw.get("attachment_id")
+        if not content and not isinstance(image_data, str) and not isinstance(attachment_id, str):
             continue
-        if not content and not image_data:
+        if not content and not image_data and not attachment_id:
             continue
         item = {
             "id": str(raw.get("id") or "message-" + str(index + 1)),
@@ -1314,6 +1350,14 @@ def get_scheduled_message_config():
         if isinstance(image_data, str) and image_data:
             item["image_data"] = image_data
             item["image_name"] = str(raw.get("image_name") or "")
+        if isinstance(attachment_id, str) and attachment_id:
+            item.update({
+                "attachment_id": attachment_id,
+                "attachment_type": raw.get("attachment_type"),
+                "attachment_mime": raw.get("attachment_mime"),
+                "attachment_name": raw.get("attachment_name"),
+                "attachment_size": raw.get("attachment_size"),
+            })
         if item["schedule_type"] == "interval":
             def _int_value(key, default, maximum):
                 try:
@@ -1464,16 +1508,18 @@ def _scheduled_message_targets(raw, default_targets):
         "target_mode": mode,
         "target_groups": groups,
         "forward_groups": _scheduled_forward_group_list(raw.get("forward_groups")),
+        "disabled_target_groups": _scheduled_group_list(raw.get("disabled_target_groups")),
     }
 
 
 def resolve_scheduled_targets(message, qq_groups, qq_forwarding_groups, active_groups):
     """返回一条定时消息本次应发送的群 openid 列表。
 
-    - 所有模式最终都只保留「全局启用」的群；
+    - 所有模式最终都只保留「全局启用且当前消息组启用」的群；
     - 转发组模式取所选组中已启用组的成员并集，组被暂停或成员为空即无目标。
     """
     active = set(str(openid) for openid in (active_groups or []))
+    disabled = set(str(openid) for openid in (message or {}).get("disabled_target_groups") or [])
     mode = str((message or {}).get("target_mode") or SCHEDULED_TARGET_GROUP)
     if mode == SCHEDULED_TARGET_ALL:
         candidates = [str(item.get("openid") or "").strip() for item in (qq_groups or [])]
@@ -1487,13 +1533,13 @@ def resolve_scheduled_targets(message, qq_groups, qq_forwarding_groups, active_g
                 continue
             if str(group.get("id") or "") not in wanted:
                 continue
-            for openid in group.get("groups") or []:
+            for openid in _active_group_members(group):
                 candidates.append(str(openid))
     else:
         candidates = list((message or {}).get("target_groups") or [])
     result = []
     for openid in candidates:
-        if openid and openid in active and openid not in result:
+        if openid and openid in active and openid not in disabled and openid not in result:
             result.append(openid)
     return result
 
@@ -1633,6 +1679,7 @@ def _ensure_x_forwarding_groups(data):
             "enabled": item.get("enabled", True) is not False,
             "sources": sources,
             "groups": xgroups,
+            "disabled_groups": _disabled_group_members(item, xgroups),
         })
 
     if not normalized and not data.get("bot_profile_ids"):
@@ -1645,6 +1692,7 @@ def _ensure_x_forwarding_groups(data):
             "enabled": True,
             "sources": sorted(_x_source_keys(data, only_enabled=True)),
             "groups": target,
+            "disabled_groups": [],
         }]
 
     data["x_forwarding_groups"] = normalized
@@ -1670,7 +1718,7 @@ def _get_x_groups_by_source(data):
             continue
         for source_key in fg["sources"]:
             if source_key in targets_by_source:
-                targets_by_source[source_key].update(fg["groups"])
+                targets_by_source[source_key].update(_active_group_members(fg))
 
     # 群必须全局 enabled；按启用顺序返回即天然去重。
     return {
@@ -1691,7 +1739,7 @@ def get_x_groups_for_source(source_key):
     targets = set()
     for forwarding_group in _ensure_x_forwarding_groups(data):
         if forwarding_group.get("enabled", True) is not False and source_key in forwarding_group["sources"]:
-            targets.update(forwarding_group["groups"])
+            targets.update(_active_group_members(forwarding_group))
     return [group for group in enabled_groups if group in targets]
 
 
@@ -1857,6 +1905,7 @@ def _ensure_bilibili_forwarding_groups(data):
             "enabled": item.get("enabled", True) is not False,
             "sources": sources,
             "groups": target_groups,
+            "disabled_groups": _disabled_group_members(item, target_groups),
         })
 
     if not normalized and not data.get("bot_profile_ids"):
@@ -1866,6 +1915,7 @@ def _ensure_bilibili_forwarding_groups(data):
             "enabled": True,
             "sources": sorted(_bilibili_source_ids(data, only_enabled=True)),
             "groups": _enabled_group_openids(data),
+            "disabled_groups": [],
         }]
     data["bilibili_forwarding_groups"] = normalized
     return normalized
@@ -1886,7 +1936,7 @@ def _get_bilibili_groups_by_source(data):
             continue
         for source_id in forwarding_group["sources"]:
             if source_id in targets_by_source:
-                targets_by_source[source_id].update(forwarding_group["groups"])
+                targets_by_source[source_id].update(_active_group_members(forwarding_group))
     return {
         source_id: [group for group in enabled_groups if group in targets]
         for source_id, targets in targets_by_source.items()
@@ -1905,7 +1955,7 @@ def get_bilibili_groups_for_source(source_id):
     targets = set()
     for forwarding_group in _ensure_bilibili_forwarding_groups(data):
         if forwarding_group.get("enabled", True) is not False and source_id in forwarding_group["sources"]:
-            targets.update(forwarding_group["groups"])
+            targets.update(_active_group_members(forwarding_group))
     return [group for group in enabled_groups if group in targets]
 
 
@@ -2042,6 +2092,7 @@ def _ensure_youtube_forwarding_groups(data):
             "enabled": item.get("enabled", True) is not False,
             "sources": sources,
             "groups": target_groups,
+            "disabled_groups": _disabled_group_members(item, target_groups),
         })
 
     if not normalized and not data.get("bot_profile_ids"):
@@ -2051,6 +2102,7 @@ def _ensure_youtube_forwarding_groups(data):
             "enabled": True,
             "sources": sorted(_youtube_source_ids(data, only_enabled=True)),
             "groups": _enabled_group_openids(data),
+            "disabled_groups": [],
         }]
     data["youtube_forwarding_groups"] = normalized
     return normalized
@@ -2071,7 +2123,7 @@ def _get_youtube_groups_by_source(data):
             continue
         for source_id in forwarding_group["sources"]:
             if source_id in targets_by_source:
-                targets_by_source[source_id].update(forwarding_group["groups"])
+                targets_by_source[source_id].update(_active_group_members(forwarding_group))
     return {
         source_id: [group for group in enabled_groups if group in targets]
         for source_id, targets in targets_by_source.items()
@@ -2090,7 +2142,7 @@ def get_youtube_groups_for_source(source_id):
     targets = set()
     for forwarding_group in _ensure_youtube_forwarding_groups(data):
         if forwarding_group.get("enabled", True) is not False and source_id in forwarding_group["sources"]:
-            targets.update(forwarding_group["groups"])
+            targets.update(_active_group_members(forwarding_group))
     return [group for group in enabled_groups if group in targets]
 
 
@@ -2127,6 +2179,7 @@ def get_youtube_source_delivery_config(source_id):
     """用同一 settings 快照生成 YouTube 来源筛选与翻译配置。"""
     data = _load_settings()
     return {
+        **_image_card_options(data),
         "filter": _youtube_source_filter(data, source_id),
         "translation": _translation_config_for_item_data(
             data, "translation", "youtube_sources", source_id
@@ -2138,6 +2191,7 @@ def get_steam_source_delivery_config(source_id):
     """读取 Steam 来源的自动翻译路由与来源级选项。"""
     data = _load_settings()
     return {
+        **_image_card_options(data),
         "translation": _translation_config_for_item_data(
             data, "translation", "steam_sources", source_id
         ),
@@ -2183,7 +2237,7 @@ def get_steam_polling_snapshot():
     for group in data.get("steam_forwarding_groups", []):
         if not isinstance(group, dict) or group.get("enabled", True) is False:
             continue
-        targets = set(group.get("groups", [])) & set(enabled)
+        targets = set(_active_group_members(group)) & set(enabled)
         for source in group.get("sources", []):
             if source in routes:
                 routes[source].update(targets)

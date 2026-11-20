@@ -35,13 +35,16 @@ from nonebot.adapters.qq import MessageSegment as QQMessageSegment
 from nonebot.adapters.qq.event import GroupMessageCreateEvent
 
 from plugins.config import (
+    get_image_card_options,
     get_qq_fwd_routing_snapshot,
+    get_translation_config,
     is_group_registered,
     GROUP_NOT_REGISTERED_TEXT,
 )
 from plugins.media import make_text, make_media_link
 from plugins.sender import send_relay_message
 from plugins.translation import translate_text_parts
+from plugins.message_card import CardSource, render_configured_card
 from plugins.qq_keyboard import (
     escape_markdown,
     send_titled_reply,
@@ -465,7 +468,7 @@ async def send_forward_to_group(
         text_parts,
         media_items,
         groups=groups,
-        source_label=source_group_name,
+        source_label=None if media_items and media_items[0].get("card_part") else source_group_name,
     )
 
 
@@ -675,9 +678,17 @@ async def _forward_to_targets(bot, event, targets, message):
     try:
         text_parts, media_items = await build_forward_content(message)
         event_id = str(getattr(event, "id", "") or "")
+        original = text_parts
+        translation = await asyncio.to_thread(get_translation_config)
         text_parts = await translate_text_parts(
             text_parts,
             ("qq_group", event_id) if event_id else None,
+            config=translation,
+        )
+        options = await asyncio.to_thread(get_image_card_options)
+        text_parts, media_items = await render_configured_card(
+            CardSource("QQ", source_group_name, "手动转发"), options, original, text_parts,
+            media_items, translation, header_parts=0,
         )
     except Exception as exc:
         logger.exception("QQ转发内容处理异常: {}", exc)

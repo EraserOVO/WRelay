@@ -29,6 +29,8 @@ from plugins.config import (
     get_channel_translation_config,
     get_x_c2c_relay_filter,
     get_x_source_translation_config,
+    get_image_card_options,
+    get_translation_config,
     is_user_authorized,
     USER_NOT_AUTHORIZED_TEXT,
 )
@@ -38,6 +40,7 @@ from plugins.fetch import (
     build_parts,
 )
 from plugins.sender import send_relay_message
+from plugins.message_card import CardSource, card_time, render_configured_card
 from plugins.translation import translate_text_parts
 from plugins.user_errors import localize_user_error
 from plugins.filter import (
@@ -612,6 +615,7 @@ class _ManualRelayContent:
     media_items: list
     translation_key: tuple | None
     translation_config: dict | None = None
+    card_source: CardSource | None = None
 
 
 class _ManualRelayContentError(Exception):
@@ -638,12 +642,11 @@ async def _prepare_discord_relay_content(message):
     translation_config = await asyncio.to_thread(
         get_channel_translation_config, msg["channel_id"], manual=True
     )
+    enabled_types = get_enabled_message_types(relay_filter, DISCORD_MESSAGE_TYPES)
     text_parts, media_items, has_content = await build_parts(
         msg,
         source_label="手动转发来自",
-        enabled_types=get_enabled_message_types(
-            relay_filter, DISCORD_MESSAGE_TYPES
-        ),
+        enabled_types=enabled_types,
         show_datetime=translation_config.get("show_datetime") is True,
     )
     if not has_content:
@@ -654,9 +657,10 @@ async def _prepare_discord_relay_content(message):
         str(msg.get("channel_id") or ""),
         str(msg.get("message_id") or ""),
     )
-    return _ManualRelayContent(
-        text_parts, media_items, translation_key, translation_config
-    )
+    detail = " · ".join(value for value in ("#" + str(msg["channel_name"] or msg["channel_id"]), card_time(text_parts)) if value)
+    source = CardSource("Discord", msg.get("username") or "Discord", detail,
+                        message if enabled_types is None or "链接" in enabled_types else "")
+    return _ManualRelayContent(text_parts, media_items, translation_key, translation_config, source)
 
 
 async def _prepare_x_relay_content(message):
@@ -686,9 +690,10 @@ async def _prepare_x_relay_content(message):
 
     text_parts, media_items = rendered
     translation_key = ("x_manual", str(post.get("id") or ""))
-    return _ManualRelayContent(
-        text_parts, media_items, translation_key, translation_config
-    )
+    attribution = f"转发 {post['rt_author']}" if post.get("is_retweet") and post.get("rt_author") else ""
+    detail = " · ".join(value for value in (card_time(text_parts), attribution) if value)
+    source = CardSource("X", post.get("author") or source_name, detail, post.get("link") or message)
+    return _ManualRelayContent(text_parts, media_items, translation_key, translation_config, source)
 
 
 async def _prepare_bilibili_relay_content(message):
@@ -716,7 +721,9 @@ async def _prepare_bilibili_relay_content(message):
 
     text_parts, media_items = rendered
     translation_key = ("bilibili_manual", str(post.get("id") or ""))
-    return _ManualRelayContent(text_parts, media_items, translation_key)
+    source = CardSource("Bilibili", post.get("author") or source_name, post.get("post_type") or "投稿",
+                        post.get("link", "") if enabled_types is None or "链接" in enabled_types else "")
+    return _ManualRelayContent(text_parts, media_items, translation_key, card_source=source)
 
 
 async def _prepare_manual_relay_content(
@@ -747,6 +754,18 @@ async def _prepare_manual_relay_content(
     event_id = str(getattr(content_event, "id", "") or "")
     translation_key = ("qq_c2c", event_id) if event_id else None
     return _ManualRelayContent(text_parts, media_items, translation_key)
+
+
+async def format_manual_relay_content(content, *, header_parts=0, qq_author="手动转发"):
+    translation = content.translation_config
+    if translation is None:
+        translation = await asyncio.to_thread(get_translation_config)
+    translated = await translate_text_parts(content.text_parts, content.translation_key,
+                                            skip_leading_parts=header_parts, config=translation)
+    options = await asyncio.to_thread(get_image_card_options)
+    source = content.card_source or CardSource("QQ", qq_author)
+    return await render_configured_card(source, options, content.text_parts, translated,
+                                        content.media_items, translation, header_parts=header_parts)
 
 
 async def _consume_next(
@@ -798,20 +817,18 @@ async def _consume_next(
         return
 
     text = str((message or {}).get("content") or "").strip()
-    text_parts = await translate_text_parts(
-        content.text_parts,
-        content.translation_key,
-        skip_leading_parts=1 if (
+    text_parts, media_items = await format_manual_relay_content(
+        content,
+        header_parts=1 if (
             is_discord_url(text)
             or is_x_status_url(text)
             or parse_manual_post_url(text)
         ) else 0,
-        config=content.translation_config,
     )
 
     ok_map = await send_relay_message(
         text_parts,
-        content.media_items,
+        media_items,
         groups=groups,
     )
 

@@ -71,6 +71,7 @@ from plugins.dedup import (
 )
 from plugins.retry import send_and_record
 from plugins.translation import translate_text_parts
+from plugins.message_card import CardSource, card_time, part_text, render_forward_card
 from plugins.json_io import (
     atomic_write_json,
     load_json,
@@ -1100,12 +1101,23 @@ async def _dispatch_one_locked():
                     raise XProtectionError("X 积压队列保存失败")
                 continue
             text_parts, media_items = rendered
+            original = text_parts
             text_parts = await translate_text_parts(
                 text_parts,
                 ("x_rss", source_key, item["id"]),
                 skip_leading_parts=1,
                 config=delivery_config["translation"],
             )
+            if delivery_config.get("image_card_enabled", True):
+                post = item["post"]
+                attribution = next((part_text(part).strip().removeprefix("↻ ").rstrip("：")
+                                    for part in original[1:] if part_text(part).startswith("\n↻ 转发 ")), "")
+                detail = " · ".join(value for value in (card_time(original), attribution) if value)
+                card_source = CardSource("X", post.get("author") or source["name"], detail, post.get("link") or "")
+                text_parts, media_items = await render_forward_card(
+                    card_source, delivery_config.get("image_card_theme", "dark"),
+                    original, text_parts, media_items, delivery_config["translation"],
+                )
 
             # 投递前重新读取路由与游标，避免设置变化后仍投到已暂停的群。
             active_groups = await _load_source_groups(source_key)

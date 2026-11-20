@@ -295,6 +295,11 @@ function setActivePage(page) {
   renderPageCredentialShortcut();
   renderFailureNotificationShortcut();
   if (activePage === "steam" && window.renderSteamPage) window.renderSteamPage();
+  if (settings) {
+    if (activePage === "overview") void refreshWatchedChainStatuses();
+    else if (activePage === "youtube") void refreshYoutubeStatus();
+    else if (activePage === "steam") void refreshSteamStatus();
+  }
 }
 
 function renderPageCredentialShortcut() {
@@ -412,6 +417,8 @@ function openChainDetailModal(cardId) {
   overlay.style.display = "flex";
   renderPageCredentialShortcut();
   overlay.querySelector(".modal-x")?.focus();
+  if (cardId === "steamStatusCard") void refreshSteamStatus();
+  else if (cardId === "youtubeCard") void refreshYoutubeStatus();
 }
 
 document.getElementById("chainDetailModal")?.addEventListener("click", function (event) {
@@ -561,7 +568,7 @@ document.getElementById("youtubeApiKeySave")?.addEventListener("click", async fu
     setYoutubeApiKeyVisible(false);
     if (status) status.textContent = "已保存，正在重启机器人…";
     let restarted;
-    try { restarted = await jpost("/api/bot/restart"); } catch (_error) { restarted = {ok: false}; }
+    try { restarted = await postBotLifecycle("/api/bot/restart"); } catch (_error) { restarted = {ok: false}; }
     if (!restarted?.ok && status) status.textContent = "Key 已保存；机器人重启失败，请从总览手动重启。";
     else if (status) status.textContent = "Key 已保存，机器人正在重启。";
   } catch (_error) {
@@ -788,10 +795,15 @@ async function ensurePanelToken() {
   return panelToken;
 }
 
-async function jget(url) {
+function withActiveQQBot(url) {
   if (typeof activeQQBotId !== "undefined" && activeQQBotId && url.startsWith("/api/") && !/[?&]bot_id=/.test(url)) {
-    url += (url.includes("?") ? "&" : "?") + "bot_id=" + encodeURIComponent(activeQQBotId);
+    return url + (url.includes("?") ? "&" : "?") + "bot_id=" + encodeURIComponent(activeQQBotId);
   }
+  return url;
+}
+
+async function jget(url) {
+  url = withActiveQQBot(url);
   await ensurePanelToken();
   const r = await fetch(url, {
     headers: {"X-WRelay-Token": panelToken},
@@ -799,9 +811,7 @@ async function jget(url) {
   return r.json();
 }
 async function jpost(url, body) {
-  if (typeof activeQQBotId !== "undefined" && activeQQBotId && url.startsWith("/api/") && !/[?&]bot_id=/.test(url)) {
-    url += (url.includes("?") ? "&" : "?") + "bot_id=" + encodeURIComponent(activeQQBotId);
-  }
+  url = withActiveQQBot(url);
   await ensurePanelToken();
   const r = await fetch(url, {
     method: "POST",
@@ -813,9 +823,14 @@ async function jpost(url, body) {
   });
   return r.json();
 }
+async function postBotLifecycle(url) {
+  const result = await jpost(url);
+  if (result.ok) void refreshWatchedChainStatuses(true);
+  return result;
+}
 async function runBotAction(url, title, fallback) {
   try {
-    const r = await jpost(url);
+    const r = await postBotLifecycle(url);
     if (!r.ok) showAlert(title, r.msg || fallback);
   } catch (e) {
     showAlert(title, "桌面管理功能不可用，请重新打开 WRelay");
@@ -1348,16 +1363,38 @@ const SCHEDULED_TARGET_MODES = ["groups", "forward_group", "all"];
 const SCHEDULED_TARGET_LABELS = { groups: "指定群", forward_group: "转发组", all: "全部群" };
 
 let scheduledMessageDraft = null;
-let scheduledMessageEditorMode = "edit";
+let scheduledMessageEditorTarget = null;
+let scheduledMessageSavePending = false;
 let scheduledMessageId = 0;
 let scheduledMessageGroupsDraft = [];
 let activeScheduledMessageGroupId = null;
 let scheduledMessageTargetPickerOpen = false;
+let scheduledMessageGroupRenameActive = false;
 
 function activeScheduledMessageGroup() {
   return scheduledMessageGroupsDraft.find(function (group) {
     return String(group.id) === String(activeScheduledMessageGroupId);
   }) || scheduledMessageGroupsDraft[0] || null;
+}
+
+function resolveScheduledMessageTarget(target) {
+  if (!target || target.epoch !== workspaceEpoch) return null;
+  const groups = scheduledMessageGroupsDraft.filter(group => String(group.id) === target.groupId);
+  if (groups.length !== 1) return null;
+  const group = groups[0];
+  if (target.messageId === null) return {group, index: -1};
+  const messages = group.messages || [];
+  const matches = message => String(message.id) === target.messageId;
+  const index = messages.findIndex(matches);
+  return index >= 0 && index === messages.findLastIndex(matches) ? {group, index} : null;
+}
+
+function scheduledAttachmentBytesExcept(target) {
+  return scheduledMessageGroupsDraft.reduce(function (total, group) {
+    return (group.messages || []).reduce(function (sum, message, index) {
+      return group === target.group && index === target.index ? sum : sum + scheduledMessageAttachmentBytes(message);
+    }, total);
+  }, 0);
 }
 
 function scheduledMessageGroupTargetSelection(group, qqGroups) {
@@ -1381,6 +1418,32 @@ function scheduledMessageGroupTargetSelection(group, qqGroups) {
   return {ids: (group.target_groups || []).map(String), dynamicLabel: ""};
 }
 
+function scheduledTargetEnabled(group, openid) {
+  return !((group && group.disabled_target_groups) || []).map(String).includes(String(openid));
+}
+
+function setScheduledTargetEnabled(group, openid, enabled) {
+  if (!group) return;
+  const id = String(openid);
+  const disabled = new Set((group.disabled_target_groups || []).map(String));
+  if (enabled) disabled.delete(id); else disabled.add(id);
+  group.disabled_target_groups = Array.from(disabled);
+}
+
+function legacyScheduledDisabledTargets(group) {
+  if (!settings || !group) return [];
+  let ids = (group.target_groups || []).map(String);
+  if (group.target_mode === "all") {
+    ids = (settings.qq_group_openids || []).map(function (item) { return String(item.openid); });
+  } else if (group.target_mode === "forward_group") {
+    const wanted = new Set((group.forward_groups || []).map(String));
+    ids = (settings.qq_forwarding_groups || []).filter(function (item) { return wanted.has(String(item.id)); })
+      .reduce(function (result, item) { return result.concat((item.groups || []).map(String)); }, []);
+  }
+  const disabled = new Set((settings.qq_group_openids || []).filter(function (item) { return item.enabled !== true; }).map(function (item) { return String(item.openid); }));
+  return Array.from(new Set(ids.filter(function (id) { return disabled.has(id); })));
+}
+
 function normalizeScheduledMessageGroups(config) {
   const value = config || {};
   if (Array.isArray(value.message_groups) && value.message_groups.length) {
@@ -1391,6 +1454,7 @@ function normalizeScheduledMessageGroups(config) {
       group.target_mode = SCHEDULED_TARGET_MODES.includes(group.target_mode) ? group.target_mode : "groups";
       group.target_groups = Array.isArray(group.target_groups) ? group.target_groups.map(String).filter(Boolean) : [];
       group.forward_groups = Array.isArray(group.forward_groups) ? group.forward_groups.map(String).filter(Boolean) : [];
+      group.disabled_target_groups = Array.isArray(group.disabled_target_groups) ? group.disabled_target_groups.map(String).filter(Boolean) : legacyScheduledDisabledTargets(group);
       group.messages = normalizeScheduledMessages({messages: Array.isArray(group.messages) ? group.messages : []}).map(function (message) {
         delete message.target_mode; delete message.target_groups; delete message.forward_groups;
         return message;
@@ -1409,7 +1473,10 @@ function normalizeScheduledMessageGroups(config) {
     delete clean.target_mode; delete clean.target_groups; delete clean.forward_groups;
     buckets.get(key).messages.push(clean);
   });
-  return Array.from(buckets.values());
+  return Array.from(buckets.values()).map(function (group) {
+    group.disabled_target_groups = legacyScheduledDisabledTargets(group);
+    return group;
+  });
 }
 
 function pillSwitchMarkup(label, on) {
@@ -1423,14 +1490,22 @@ function renderScheduledMessageWorkspace() {
   const list = document.getElementById("scheduledGroupMessageList");
   const targets = document.getElementById("scheduledGroupTargetList");
   if (!tabs || !list || !targets) return;
-  const groupTabs = scheduledMessageGroupsDraft.map(function (item) {
-    return '<button type="button" class="fgtab' + (group && String(item.id) === String(group.id) ? ' active' : '') + '" data-scheduled-group="' + escapeHtml(item.id) + '"><span class="fgtab-name">' + escapeHtml(item.name) + '</span></button>';
-  }).join("");
-  const addGroupTab = '<button type="button" class="fgtab-add" id="btnAddScheduledGroupTab" title="添加消息组" aria-label="添加消息组">' + mcIcon("add", 16) + '</button>';
-  const deleteGroupAction = group && scheduledMessageGroupsDraft.length > 1
-    ? '<div class="fgtab-actions"><button type="button" class="fgctrl rowicon fg-delete scheduled-message-group-delete" data-delete-scheduled-group="' + escapeHtml(group.id) + '" title="删除当前消息组" aria-label="删除当前消息组">' + SVG_TRASH + '</button></div>'
-    : '';
-  tabs.innerHTML = '<div class="fgtab-list">' + groupTabs + addGroupTab + deleteGroupAction + '</div>';
+  list.dataset.groupId = group ? String(group.id) : "";
+  if (!scheduledMessageGroupRenameActive) {
+    const groupTabs = scheduledMessageGroupsDraft.map(function (item) {
+      const active = group && String(item.id) === String(group.id);
+      const enabled = item.enabled !== false;
+      return '<button type="button" class="fgtab' + (active ? ' active' : '') + (enabled ? '' : ' paused') + '" data-scheduled-group="' + escapeHtml(item.id) + '" title="' + escapeHtml(item.name + (enabled ? '' : '（已暂停）')) + '"><span class="fgtab-name">' + escapeHtml(item.name) + '</span>' + (enabled ? '' : '<span class="fgtab-state">暂停</span>') + '</button>';
+    }).join("");
+    const addGroupTab = '<button type="button" class="fgtab-add" id="btnAddScheduledGroupTab" title="添加消息组" aria-label="添加消息组">' + mcIcon("add", 16) + '</button>';
+    const actionRail = group
+      ? '<div class="fgtab-actions">' +
+        '<button type="button" class="fg-toggle rowicon' + (group.enabled === false ? ' paused' : '') + '" data-scheduled-group-toggle title="' + (group.enabled === false ? '恢复该消息组' : '暂停该消息组') + '" aria-label="' + (group.enabled === false ? '恢复该消息组' : '暂停该消息组') + '">' + (group.enabled === false ? SVG_PLAY : SVG_PAUSE) + '</button>' +
+        '<button type="button" class="fgctrl rowicon" data-scheduled-group-rename="' + escapeHtml(group.id) + '" title="重命名消息组" aria-label="重命名消息组">' + SVG_PEN + '</button>' +
+        '<button type="button" class="fgctrl rowicon fg-delete scheduled-message-group-delete" data-delete-scheduled-group="' + escapeHtml(group.id) + '" title="删除消息组" aria-label="删除消息组">' + SVG_TRASH + '</button>' +
+        '</div>' : '';
+    tabs.innerHTML = '<div class="fgtab-list">' + groupTabs + addGroupTab + '</div>' + actionRail;
+  }
   const messageCount = scheduledMessageGroupsDraft.reduce(function (sum, item) { return sum + (item.messages || []).length; }, 0);
   const summary = document.getElementById("scheduledMessageSummary");
   if (summary) summary.textContent = "共 " + scheduledMessageGroupsDraft.length + " 个消息组，" + messageCount + " 条消息";
@@ -1454,8 +1529,10 @@ function renderScheduledMessageWorkspace() {
       : message.schedule_type === "calendar"
       ? ({weekly:"每周", monthly:"每月", yearly:"每年"}[message.calendar_type] || "日历计划") + " " + (message.send_time || "09:00")
       : "每隔 " + ([message.interval_days ? message.interval_days + "日" : "", message.interval_hours ? message.interval_hours + "时" : "", message.interval_minutes ? message.interval_minutes + "分" : ""].filter(Boolean).join(" ") || "1分");
-    const summaryText = (message.content || "（纯图片消息）").replace(/\s+/g, " ").trim();
-    return '<tr data-id="' + escapeHtml(String(message.id || ("message-" + index))) + '"><td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td><td style="text-align:center"><input type="checkbox" class="scheduled-message-enabled" data-message-index="' + index + '" aria-label="启用消息 ' + (index + 1) + '"' + (message.enabled !== false ? ' checked' : '') + '></td><td><div class="scheduled-group-message-copy"><strong>' + escapeHtml(summaryText.slice(0, 100)) + '</strong><small>' + (message.image_data ? '附图' : '') + '</small></div></td><td>' + escapeHtml(schedule) + '</td><td><div class="table-actions"><button type="button" class="sec rowicon scheduled-group-message-edit" data-message-index="' + index + '" title="编辑消息" aria-label="编辑消息">' + SVG_PEN + '</button><button type="button" class="danger rowicon scheduled-group-message-remove" data-message-index="' + index + '" title="删除消息" aria-label="删除消息">' + SVG_TRASH + '</button></div></td></tr>';
+    const attachment = scheduledMessageAttachment(message);
+    const summaryText = (message.content || (attachment ? "（纯" + ({image:"图片", video:"视频", audio:"音频"}[attachment.type] || "附件") + "消息）" : "（空消息）")).replace(/\s+/g, " ").trim();
+    const attachmentSummary = attachment ? ({image:"附图", video:"附视频", audio:"附音频"}[attachment.type] || "附件") : "";
+    return '<tr data-id="' + escapeHtml(String(message.id)) + '"><td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td><td style="text-align:center"><input type="checkbox" class="scheduled-message-enabled" aria-label="启用消息 ' + (index + 1) + '"' + (message.enabled !== false ? ' checked' : '') + '></td><td><div class="scheduled-group-message-copy"><strong data-copy-value-override="' + escapeHtml(message.content || summaryText) + '">' + escapeHtml(summaryText) + '</strong><small>' + attachmentSummary + '</small></div></td><td class="scheduled-message-schedule">' + escapeHtml(schedule) + '</td><td><div class="table-actions"><button type="button" class="sec rowicon scheduled-group-message-edit" title="编辑消息" aria-label="编辑消息">' + SVG_PEN + '</button><button type="button" class="danger rowicon scheduled-group-message-remove" title="删除消息" aria-label="删除消息">' + SVG_TRASH + '</button></div></td></tr>';
   }).join("") : '<tr class="fgempty-row"><td colspan="5" class="fgempty-msg">这个消息组还没有定时消息。</td></tr>';
 
   const allQQGroups = settings && Array.isArray(settings.qq_group_openids) ? settings.qq_group_openids : [];
@@ -1472,15 +1549,17 @@ function renderScheduledMessageWorkspace() {
       ? '<button type="button" class="danger rowicon scheduled-group-target-remove" data-target-openid="' + escapeHtml(String(id)) + '" title="移出当前消息组" aria-label="移出当前消息组">' + SVG_TRASH + '</button>' : '';
     const dragHandle = group.target_mode === "groups" ? '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' : '<td></td>';
     const editAction = item ? '<button type="button" class="sec rowicon" data-kind="groupEdit" data-id="' + escapeHtml(String(id)) + '" title="编辑群资料" aria-label="编辑群资料">' + SVG_PEN + '</button>' : '';
-    const enableCheckbox = '<input type="checkbox" data-kind="group" data-i="' + targetIndex + '" aria-label="启用群 ' + escapeHtml(name) + '"' + (targetIndex < 0 ? ' disabled' : '') + (item && item.enabled === true ? ' checked' : '') + '>';
+    const enabled = item && scheduledTargetEnabled(group, id);
+    const enableCheckbox = '<input type="checkbox" data-kind="scheduledTargetGroup" data-openid="' + escapeHtml(String(id)) + '" aria-label="启用群 ' + escapeHtml(name) + '"' + (targetIndex < 0 ? ' disabled' : '') + (enabled ? ' checked' : '') + '>';
     return '<tr data-id="' + escapeHtml(String(id)) + '">' + dragHandle + '<td style="text-align:center">' + enableCheckbox + '</td><td>' + escapeHtml(name) + '</td><td>' + escapeHtml(item && item.qq_id || '—') + '</td><td>' + renderIdCell(String(id)) + '</td><td><div class="table-actions">' + editAction + removeAction + '</div></td></tr>';
   }).join("");
   targets.innerHTML = (dynamicLabel ? '<tr class="scheduled-group-target-mode"><td colspan="6">' + escapeHtml(dynamicLabel) + '</td></tr>' : '') + (names || '<tr class="fgempty-row"><td colspan="6" class="fgempty-msg">尚未选择 QQ 群。</td></tr>');
-  syncHeaderAll("scheduledGroupTargetsAllEnabled", selected.map(function (id) { return byId.get(String(id)); }).filter(Boolean), "enabled");
+  syncHeaderAll("scheduledGroupTargetsAllEnabled", selected.map(function (id) { return {enabled: scheduledTargetEnabled(group, id)}; }), "enabled");
 }
 
 async function saveScheduledMessageGroups() {
   const selectedGroupId = activeScheduledMessageGroupId;
+  const epoch = workspaceEpoch;
   const current = settings.scheduled_message || {};
   const groups = scheduledMessageGroupsDraft.map(function (group) {
     return Object.assign({}, group, {messages: (group.messages || []).map(function (message) {
@@ -1496,7 +1575,7 @@ async function saveScheduledMessageGroups() {
   });
   delete settings.scheduled_message.enabled;
   const saved = await saveAndReload();
-  if (saved) {
+  if (saved && epoch === workspaceEpoch) {
     scheduledMessageGroupsDraft = normalizeScheduledMessageGroups(settings.scheduled_message);
     activeScheduledMessageGroupId = scheduledMessageGroupsDraft.some(function (group) { return String(group.id) === String(selectedGroupId); })
       ? selectedGroupId : (scheduledMessageGroupsDraft[0] ? scheduledMessageGroupsDraft[0].id : null);
@@ -1846,7 +1925,7 @@ function ensureScheduledImagePreview() {
     preview.className = "scheduled-message-image-preview";
     preview.setAttribute("role", "tooltip");
     preview.hidden = true;
-    preview.innerHTML = '<img alt="">';
+    preview.innerHTML = '<img alt="" hidden><video muted playsinline preload="auto" hidden></video>';
     preview.addEventListener("pointerout", function (event) {
       if (preview.contains(event.relatedTarget) || (preview._anchor && preview._anchor.contains(event.relatedTarget))) return;
       closeScheduledImagePreview();
@@ -1870,30 +1949,107 @@ function placeScheduledImagePreview(anchor, preview) {
   preview.style.top = top + "px";
 }
 
+function scheduledMessageAttachment(message) {
+  if (!message) return null;
+  if (message.attachment_id) {
+    return {
+      id: message.attachment_id,
+      type: message.attachment_type || "image",
+      name: message.attachment_name || "已附加文件",
+      size: Number(message.attachment_size) || 0,
+      mime: message.attachment_mime || "",
+    };
+  }
+  if (message.image_data) {
+    return {id: "", type: "image", name: message.image_name || "已附加图片", size: scheduledImageDataSize(message.image_data), data: message.image_data};
+  }
+  return null;
+}
+
+function scheduledMessageAttachmentBytes(message) {
+  const attachment = scheduledMessageAttachment(message);
+  return attachment ? (attachment.size || 0) : 0;
+}
+
 function openScheduledImagePreview(anchor) {
   const index = Number(anchor && anchor.dataset.messageIndex);
   const message = scheduledMessageDraft && scheduledMessageDraft[index];
-  if (!message || !message.image_data) return;
+  const attachment = scheduledMessageAttachment(message);
+  if (!attachment || !["image", "video"].includes(attachment.type)) return;
   const preview = ensureScheduledImagePreview();
   const image = preview && preview.querySelector("img");
-  if (!preview || !image) return;
-  image.onload = function () { placeScheduledImagePreview(anchor, preview); };
-  image.src = message.image_data;
-  image.alt = message.image_name || "定时消息图片预览";
-  preview.hidden = false;
+  const video = preview && preview.querySelector("video");
+  if (!preview || !image || !video) return;
+  closeScheduledImagePreview();
+  const requestId = (preview._requestId || 0) + 1;
+  preview._requestId = requestId;
   preview._anchor = anchor;
-  placeScheduledImagePreview(anchor, preview);
+  const display = function (src) {
+    if (preview._requestId !== requestId || preview._anchor !== anchor) {
+      if (src.startsWith("blob:")) URL.revokeObjectURL(src);
+      return;
+    }
+    preview._objectUrl = src.startsWith("blob:") ? src : "";
+    const media = attachment.type === "video" ? video : image;
+    media.hidden = false;
+    const ready = function () {
+      if (preview._requestId !== requestId || preview._anchor !== anchor) return;
+      preview.hidden = false;
+      placeScheduledImagePreview(anchor, preview);
+    };
+    media.onerror = function () {
+      if (preview._requestId === requestId) closeScheduledImagePreview();
+    };
+    if (attachment.type === "video") {
+      video.onloadeddata = ready;
+      video.muted = true;
+    } else {
+      image.onload = ready;
+      image.alt = attachment.name || "定时消息图片预览";
+    }
+    media.src = src;
+  };
+  if (attachment.data) {
+    display(attachment.data);
+    return;
+  }
+  (async function () {
+    try {
+      await ensurePanelToken();
+      const response = await fetch(withActiveQQBot("/api/scheduled-message-media/" + encodeURIComponent(attachment.id)), {
+        headers: {"X-WRelay-Token": panelToken},
+      });
+      if (!response.ok) throw new Error("媒体预览读取失败");
+      display(URL.createObjectURL(await response.blob()));
+    } catch (_error) {
+      if (preview._requestId === requestId) closeScheduledImagePreview();
+    }
+  })();
 }
 
 function closeScheduledImagePreview() {
   const preview = document.querySelector(".scheduled-message-image-preview");
   if (!preview) return;
   const image = preview.querySelector("img");
+  const video = preview.querySelector("video");
   if (image) {
     image.onload = null;
+    image.onerror = null;
     image.removeAttribute("src");
     image.alt = "";
+    image.hidden = true;
   }
+  if (video) {
+    video.onloadeddata = null;
+    video.onerror = null;
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+    video.hidden = true;
+  }
+  preview._requestId = (preview._requestId || 0) + 1;
+  if (preview._objectUrl) URL.revokeObjectURL(preview._objectUrl);
+  preview._objectUrl = "";
   preview.hidden = true;
   preview.style.left = "";
   preview.style.top = "";
@@ -1934,7 +2090,7 @@ function normalizeScheduledMessages(config) {
   if (Array.isArray(value.messages)) {
     return value.messages.map(function (raw, index) {
       const message = Object.assign(newScheduledMessage(), raw || {});
-      message.id = String(message.id || "message-" + (index + 1));
+      message.id = String(raw?.id || "message-" + (index + 1));
       message.content = String(message.content || "");
       message.image_name = typeof message.image_data === "string" && message.image_data && typeof message.image_name === "string" ? message.image_name : "";
       message.target_mode = SCHEDULED_TARGET_MODES.includes(message.target_mode)
@@ -1967,6 +2123,7 @@ function normalizeScheduledMessages(config) {
   }
   if (String(value.content || "").trim()) {
     const legacy = newScheduledMessage();
+    legacy.id = "message-1";
     legacy.content = value.content;
     legacy.send_time = /^([01]\d|2[0-3]):[0-5]\d$/.test(value.send_time || "")
       ? value.send_time : "09:00";
@@ -1994,9 +2151,9 @@ function scheduledOptionMarkup(message, index) {
     '<label class="scheduled-message-entry-label">消息正文' +
     '<textarea class="scheduled-message-entry-content" data-field="content" maxlength="20000" placeholder="输入消息正文"></textarea></label>' +
     '<div class="scheduled-message-image-row">' +
-    '<input type="file" data-field="image_file_input" accept="image/png,image/jpeg,image/gif,image/webp" hidden>' +
-    '<button type="button" class="sec rowicon scheduled-message-image-pick" title="上传图片" aria-label="上传图片">' + mcIcon("upload", 16) + '</button>' +
-    '<button type="button" class="sec rowicon scheduled-message-image-remove" title="移除图片" aria-label="移除图片" hidden>' + SVG_TRASH + '</button>' +
+    '<input type="file" data-field="media_file_input" accept=".png,.jpg,.jpeg,.gif,.webp,.mp4,.webm,.mp3,.wav,.ogg,.m4a,image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm,audio/mpeg,audio/wav,audio/ogg,audio/mp4" hidden>' +
+    '<button type="button" class="sec rowicon scheduled-message-image-pick" title="上传附件" aria-label="上传附件">' + mcIcon("upload", 16) + '</button>' +
+    '<button type="button" class="sec rowicon scheduled-message-image-remove" title="移除附件" aria-label="移除附件" hidden>' + SVG_TRASH + '</button>' +
     '<span class="scheduled-message-image-name" data-message-index="' + index + '" tabindex="0"></span>' +
     '</div>' +
     '<div class="scheduled-message-timing-row">' +
@@ -2101,19 +2258,22 @@ function renderScheduledMessageEditor() {
   container.querySelectorAll(".scheduled-message-entry").forEach(function (entry, index) {
     const message = messages[index];
     entry.querySelector('[data-field="content"]').value = message.content || "";
+    const attachment = scheduledMessageAttachment(message);
     const imageName = entry.querySelector(".scheduled-message-image-name");
     if (imageName) {
-      imageName.textContent = message.image_data ? (message.image_name || "已附加图片") : "未附加图片";
-      imageName.classList.toggle("has-image", !!message.image_data);
+      const kindLabel = attachment ? ({image:"图片", video:"视频", audio:"音频"}[attachment.type] || "附件") : "附件";
+      imageName.textContent = attachment ? (attachment.name || "已附加" + kindLabel) : "未附加" + kindLabel;
+      const canPreview = !!attachment && (attachment.type === "image" || attachment.type === "video");
+      imageName.classList.toggle("has-image", canPreview);
       imageName.removeAttribute("title");
-      imageName.tabIndex = message.image_data ? 0 : -1;
-      imageName.setAttribute("aria-label", message.image_data ? "悬停或聚焦预览图片：" + (message.image_name || "已附加图片") : "未附加图片");
+      imageName.tabIndex = canPreview ? 0 : -1;
+      imageName.setAttribute("aria-label", canPreview ? "悬停或聚焦预览" + kindLabel + "：" + attachment.name : (attachment ? "已附加" + kindLabel + "：" + attachment.name : "未附加附件"));
     }
     const imageRemove = entry.querySelector(".scheduled-message-image-remove");
-    if (imageRemove) imageRemove.hidden = !message.image_data;
+    if (imageRemove) imageRemove.hidden = !attachment;
     const imagePick = entry.querySelector(".scheduled-message-image-pick");
     if (imagePick) {
-      const label = message.image_data ? "更换图片" : "上传图片";
+      const label = attachment ? "更换附件" : "上传附件";
       imagePick.title = label;
       imagePick.setAttribute("aria-label", label);
     }
@@ -2145,6 +2305,11 @@ function readScheduledMessageEditor() {
       content: get("content").value,
       image_data: (scheduledMessageDraft[index] && scheduledMessageDraft[index].image_data) || "",
       image_name: (scheduledMessageDraft[index] && scheduledMessageDraft[index].image_name) || "",
+      attachment_id: (scheduledMessageDraft[index] && scheduledMessageDraft[index].attachment_id) || "",
+      attachment_type: (scheduledMessageDraft[index] && scheduledMessageDraft[index].attachment_type) || "",
+      attachment_mime: (scheduledMessageDraft[index] && scheduledMessageDraft[index].attachment_mime) || "",
+      attachment_name: (scheduledMessageDraft[index] && scheduledMessageDraft[index].attachment_name) || "",
+      attachment_size: Number(scheduledMessageDraft[index] && scheduledMessageDraft[index].attachment_size) || 0,
       schedule_type: type,
       once_at: get("once_at").value,
       completed_at: "",
@@ -2237,90 +2402,107 @@ function openScheduledTargetPicker(index) {
   );
 }
 
-function openScheduledMessageEditor(addNew) {
+function openScheduledMessageEditor(target) {
   const modal = document.getElementById("scheduledMessageContentModal");
-  if (!modal) return;
-  const group = activeScheduledMessageGroup();
-  scheduledMessageEditorMode = addNew ? "add" : "edit";
-  scheduledMessageDraft = addNew
-    ? [newScheduledMessage()]
-    : (group && group.messages ? group.messages : []).map(function (message) { return Object.assign({}, message); });
+  const resolved = resolveScheduledMessageTarget(target);
+  if (!modal || !resolved || scheduledMessageSavePending) return;
+  scheduledMessageEditorTarget = target;
+  scheduledMessageDraft = [resolved.index < 0 ? newScheduledMessage() : {...resolved.group.messages[resolved.index]}];
   renderScheduledMessageEditor();
   modal.style.display = "flex";
   const first = document.querySelector(".scheduled-message-entry-content");
   if (first) first.focus();
 }
 
-async function confirmScheduledMessageEditor() {
-  if (scheduledImageReadPending) {
-    showAlert("定时消息", "请等待图片读取完成后再保存");
-    return;
-  }
-  const messages = readScheduledMessageEditor();
-  const group = activeScheduledMessageGroup();
-  if (!group) return;
-  let totalImageBytes = scheduledMessageGroupsDraft.reduce(function (sum, item) {
-    if (String(item.id) === String(group.id)) {
-      return scheduledMessageEditorMode === "add"
-        ? sum + (item.messages || []).reduce(function (groupBytes, message) {
-          return groupBytes + scheduledImageDataSize(message.image_data);
-        }, 0)
-        : sum;
+function closeScheduledMessageEditor() {
+  scheduledMessageEditorTarget = null;
+  scheduledMessageDraft = null;
+  closeScheduledImagePreview();
+  document.getElementById("scheduledMessageContentModal").style.display = "none";
+}
+
+async function saveScheduledMessageRows(group, updatedMessages) {
+  const originalMessages = group.messages;
+  const originalSettings = settings;
+  const originalConfig = settings.scheduled_message;
+  group.messages = updatedMessages;
+  scheduledMessageSavePending = true;
+  let saved = false;
+  try {
+    saved = await saveScheduledMessageGroups();
+    return saved;
+  } finally {
+    if (!saved) {
+      group.messages = originalMessages;
+      if (settings === originalSettings) settings.scheduled_message = originalConfig;
     }
-    return sum + (item.messages || []).reduce(function (groupBytes, message) {
-      return groupBytes + scheduledImageDataSize(message.image_data);
-    }, 0);
-  }, 0);
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index];
-    if (!message.content.trim() && !message.image_data) {
-      showAlert("定时消息", "消息 " + (index + 1) + " 需要填写正文或附加图片");
-      return;
-    }
-    totalImageBytes += scheduledImageDataSize(message.image_data);
-    if (totalImageBytes > 3 * 1024 * 1024) {
-      showAlert("定时消息", "所有定时消息图片合计不能超过 3 MiB");
-      return;
-    }
-    if (message.schedule_type === "interval" && !message.interval_days && !message.interval_hours && !message.interval_minutes) {
-      showAlert("定时消息", "消息 " + (index + 1) + " 的间隔至少需要 1 分钟");
-      return;
-    }
-    if (message.schedule_type === "once") {
-      const selectedAt = new Date(message.once_at);
-      if (!message.once_at || Number.isNaN(selectedAt.getTime())) {
-        showAlert("定时消息", "消息 " + (index + 1) + " 请选择有效的发送时间");
-        return;
-      }
-      if (!message.completed_at && selectedAt <= new Date()) {
-        showAlert("定时消息", "消息 " + (index + 1) + " 的发送时间必须晚于当前时间");
-        return;
-      }
-    }
-    if (message.schedule_type === "calendar" && message.calendar_type === "weekly" && !message.weekdays.length) {
-      showAlert("定时消息", "消息 " + (index + 1) + " 至少选择一个星期");
-      return;
-    }
-    if (message.schedule_type === "calendar" && message.calendar_type === "yearly") {
-      const maxDay = new Date(2000, message.month, 0).getDate();
-      if (message.day > maxDay) {
-        showAlert("定时消息", "消息 " + (index + 1) + " 的年度日期不存在，请选择该月的有效日期");
-        return;
-      }
-    }
-  }
-  group.messages = scheduledMessageEditorMode === "add"
-    ? (group.messages || []).concat(messages)
-    : messages;
-  const saved = await saveScheduledMessageGroups();
-  if (saved) {
-    scheduledMessageDraft = null;
-    scheduledMessageEditorMode = "edit";
-    document.getElementById("scheduledMessageContentModal").style.display = "none";
+    scheduledMessageSavePending = false;
   }
 }
 
-let scheduledImageReadPending = false;
+async function confirmScheduledMessageEditor() {
+  if (scheduledMessageSavePending) return;
+  if (scheduledAttachmentUploadPending) {
+    showAlert("定时消息", "请等待附件上传完成后再保存");
+    return;
+  }
+  const target = scheduledMessageEditorTarget;
+  const resolved = resolveScheduledMessageTarget(target);
+  if (!resolved) {
+    showAlert("保存失败", "这条消息或消息组已变化，请重新打开编辑窗口。");
+    return;
+  }
+  const [message] = readScheduledMessageEditor();
+  if (!message) return;
+  const {group, index: targetIndex} = resolved;
+  const previous = group.messages?.[targetIndex];
+  if (previous) {
+    message.enabled = previous.enabled !== false;
+    if (previous.schedule_type === "once" && message.schedule_type === "once" && previous.once_at === message.once_at) {
+      message.completed_at = previous.completed_at || "";
+      message.execution_status = previous.execution_status || "";
+    }
+  }
+  if (!message.content.trim() && !scheduledMessageAttachment(message)) {
+    showAlert("定时消息", "请填写正文或添加附件");
+    return;
+  }
+  if (scheduledAttachmentBytesExcept(resolved) + scheduledMessageAttachmentBytes(message) > 30 * 1024 * 1024) {
+    showAlert("定时消息", "所有定时消息附件合计不能超过 30 MiB");
+    return;
+  }
+  if (message.schedule_type === "interval" && !message.interval_days && !message.interval_hours && !message.interval_minutes) {
+    showAlert("定时消息", "发送间隔至少需要 1 分钟");
+    return;
+  }
+  if (message.schedule_type === "once") {
+    const selectedAt = new Date(message.once_at);
+    if (!message.once_at || Number.isNaN(selectedAt.getTime())) {
+      showAlert("定时消息", "请选择有效的发送时间");
+      return;
+    }
+    if (!message.completed_at && selectedAt <= new Date()) {
+      showAlert("定时消息", "发送时间必须晚于当前时间");
+      return;
+    }
+  }
+  if (message.schedule_type === "calendar" && message.calendar_type === "weekly" && !message.weekdays.length) {
+    showAlert("定时消息", "至少选择一个星期");
+    return;
+  }
+  if (message.schedule_type === "calendar" && message.calendar_type === "yearly" &&
+      message.day > new Date(2000, message.month, 0).getDate()) {
+    showAlert("定时消息", "年度日期不存在，请选择该月的有效日期");
+    return;
+  }
+  const updatedMessages = (group.messages || []).slice();
+  if (targetIndex < 0) updatedMessages.push(message);
+  else updatedMessages[targetIndex] = message;
+  const saved = await saveScheduledMessageRows(group, updatedMessages);
+  if (saved && scheduledMessageEditorTarget === target) closeScheduledMessageEditor();
+}
+
+let scheduledAttachmentUploadPending = false;
 
 function scheduledImageDataSize(dataUrl) {
   if (typeof dataUrl !== "string" || !dataUrl) return 0;
@@ -2331,23 +2513,77 @@ function scheduledImageDataSize(dataUrl) {
   return Math.max(0, Math.floor(encoded.length * 3 / 4) - padding);
 }
 
-function readScheduledImageFile(file) {
-  return new Promise(function (resolve, reject) {
-    const reader = new FileReader();
-    reader.onload = function () { resolve(String(reader.result || "")); };
-    reader.onerror = function () { reject(new Error("图片读取失败")); };
-    reader.readAsDataURL(file);
+async function uploadScheduledMessageAttachment(file) {
+  const url = withActiveQQBot("/api/scheduled-message-media");
+  await ensurePanelToken();
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": file.type || "application/octet-stream",
+      "X-File-Name": encodeURIComponent(file.name || "attachment"),
+      "X-WRelay-Token": panelToken,
+    },
+    body: file,
   });
+  let result = {};
+  try { result = await response.json(); } catch (_error) {}
+  if (!response.ok || !result.ok || !result.attachment) {
+    throw new Error(result.msg || "附件上传失败");
+  }
+  return result;
+}
+
+function startScheduledMessageGroupRename(groupId) {
+  const target = {groupId, messageId: null, epoch: workspaceEpoch};
+  const group = resolveScheduledMessageTarget(target)?.group;
+  const tabs = document.getElementById("scheduledMessageGroupTabs");
+  if (!group || !tabs || scheduledMessageGroupRenameActive) return;
+  const tab = Array.prototype.find.call(tabs.querySelectorAll("[data-scheduled-group]"), function (item) {
+    return String(item.dataset.scheduledGroup) === String(group.id);
+  });
+  if (!tab) return;
+  scheduledMessageGroupRenameActive = true;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "fg-rename";
+  input.value = group.name || "";
+  input.setAttribute("aria-label", "消息组名称");
+  tab.replaceWith(input);
+  input.focus();
+  input.select();
+  let finished = false;
+  const finish = async function (commit) {
+    if (finished) return;
+    finished = true;
+    scheduledMessageGroupRenameActive = false;
+    const name = input.value.trim();
+    const current = resolveScheduledMessageTarget(target)?.group;
+    if (commit && current && name && name !== current.name) {
+      current.name = name;
+      renderScheduledMessageWorkspace();
+      await saveScheduledMessageGroups();
+    } else {
+      renderScheduledMessageWorkspace();
+    }
+  };
+  input.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") { event.preventDefault(); finish(true); }
+    else if (event.key === "Escape") { event.preventDefault(); finish(false); }
+  });
+  input.addEventListener("blur", function () { finish(true); });
 }
 
 function initScheduledPickers() {
   const editButton = document.getElementById("btnScheduledMessageEdit");
   if (editButton) {
-    editButton.addEventListener("click", function () { openScheduledMessageEditor(true); });
+    editButton.addEventListener("click", function () {
+      const group = activeScheduledMessageGroup();
+      if (group) openScheduledMessageEditor({groupId: String(group.id), messageId: null, epoch: workspaceEpoch});
+    });
   }
   const addGroup = async function () {
     const suffix = scheduledMessageGroupsDraft.length + 1;
-    const group = {id: "scheduled-group-" + Date.now() + "-" + suffix, name: "消息组" + suffix, enabled: true, target_mode: "groups", target_groups: [], forward_groups: [], messages: []};
+    const group = {id: "scheduled-group-" + Date.now() + "-" + suffix, name: "消息组" + suffix, enabled: true, target_mode: "groups", target_groups: [], forward_groups: [], disabled_target_groups: [], messages: []};
     scheduledMessageGroupsDraft.push(group);
     activeScheduledMessageGroupId = group.id;
     renderScheduledMessageWorkspace();
@@ -2357,12 +2593,28 @@ function initScheduledPickers() {
   if (groupTabs) groupTabs.addEventListener("click", async function (event) {
     const add = event.target.closest("#btnAddScheduledGroupTab");
     if (add) { await addGroup(); return; }
+    const toggle = event.target.closest("[data-scheduled-group-toggle]");
+    if (toggle) {
+      const group = activeScheduledMessageGroup();
+      if (!group) return;
+      group.enabled = group.enabled === false;
+      renderScheduledMessageWorkspace();
+      await saveScheduledMessageGroups();
+      return;
+    }
+    const rename = event.target.closest("[data-scheduled-group-rename]");
+    if (rename) { startScheduledMessageGroupRename(rename.dataset.scheduledGroupRename); return; }
     const remove = event.target.closest("[data-delete-scheduled-group]");
     if (remove) {
-      const id = String(remove.dataset.deleteScheduledGroup || "");
+      const target = {groupId: remove.dataset.deleteScheduledGroup, messageId: null, epoch: workspaceEpoch};
+      if (!resolveScheduledMessageTarget(target)) return;
       showConfirmDlg("删除消息组", "删除该消息组及其中的定时消息？保存后生效。", function () {
-        scheduledMessageGroupsDraft = scheduledMessageGroupsDraft.filter(function (group) { return String(group.id) !== id; });
-        activeScheduledMessageGroupId = scheduledMessageGroupsDraft[0] ? scheduledMessageGroupsDraft[0].id : null;
+        const current = resolveScheduledMessageTarget(target);
+        if (!current) return;
+        scheduledMessageGroupsDraft.splice(scheduledMessageGroupsDraft.indexOf(current.group), 1);
+        if (activeScheduledMessageGroupId === target.groupId) {
+          activeScheduledMessageGroupId = scheduledMessageGroupsDraft[0]?.id || null;
+        }
         renderScheduledMessageWorkspace();
         saveScheduledMessageGroups();
       }, "删除");
@@ -2394,6 +2646,8 @@ function initScheduledPickers() {
       }
       currentGroup.target_mode = "groups";
       currentGroup.target_groups = picked.map(function (item) { return String(item.openid); });
+      const targetSet = new Set(currentGroup.target_groups);
+      currentGroup.disabled_target_groups = (currentGroup.disabled_target_groups || []).map(String).filter(function (id) { return targetSet.has(id); });
       currentGroup.forward_groups = [];
       renderScheduledMessageWorkspace();
       await saveScheduledMessageGroups();
@@ -2411,6 +2665,10 @@ function initScheduledPickers() {
     scheduledMessageTargetPickerOpen = true;
   });
   const messageList = document.getElementById("scheduledGroupMessageList");
+  const targetForRow = function (control) {
+    const row = control?.closest("tr[data-id]");
+    return row && {groupId: messageList.dataset.groupId, messageId: row.dataset.id, epoch: workspaceEpoch};
+  };
   const allEnabled = document.getElementById("scheduledMessageAllEnabled");
   if (allEnabled) allEnabled.addEventListener("change", async function () {
     const group = activeScheduledMessageGroup();
@@ -2421,24 +2679,37 @@ function initScheduledPickers() {
   });
   if (messageList) messageList.addEventListener("change", async function (event) {
     const checkbox = event.target.closest(".scheduled-message-enabled");
-    const group = activeScheduledMessageGroup();
-    const message = group && group.messages[Number(checkbox && checkbox.dataset.messageIndex)];
-    if (!checkbox || !message) return;
-    message.enabled = checkbox.checked;
+    const target = resolveScheduledMessageTarget(targetForRow(checkbox));
+    if (!target) return;
+    target.group.messages[target.index].enabled = checkbox.checked;
     renderScheduledMessageWorkspace();
     await saveScheduledMessageGroups();
   });
   if (messageList) messageList.addEventListener("click", function (event) {
-    const edit = event.target.closest(".scheduled-group-message-edit");
-    if (edit) { openScheduledMessageEditor(); return; }
-    const remove = event.target.closest(".scheduled-group-message-remove");
-    if (!remove) return;
-    const group = activeScheduledMessageGroup();
-    const index = Number(remove.dataset.messageIndex);
-    showConfirmDlg("删除定时消息", "删除这条消息？保存后生效。", function () {
-      group.messages.splice(index, 1);
-      renderScheduledMessageWorkspace();
-      saveScheduledMessageGroups();
+    const action = event.target.closest(".scheduled-group-message-edit, .scheduled-group-message-remove");
+    if (!action || scheduledMessageSavePending) return;
+    const target = targetForRow(action);
+    const resolved = resolveScheduledMessageTarget(target);
+    if (!resolved) {
+      showAlert("定时消息", "无法定位这条消息，请刷新后重试。");
+      return;
+    }
+    if (action.classList.contains("scheduled-group-message-edit")) {
+      openScheduledMessageEditor(target);
+      return;
+    }
+    const message = resolved.group.messages[resolved.index];
+    const label = String(message.content || scheduledMessageAttachment(message)?.name || "附件消息").trim().slice(0, 60);
+    showConfirmDlg("删除定时消息", "删除「" + label + "」？保存后生效。", async function () {
+      if (scheduledMessageSavePending) return;
+      const current = resolveScheduledMessageTarget(target);
+      if (!current) {
+        showAlert("删除失败", "这条消息或消息组已变化，请刷新后重试。");
+        return;
+      }
+      const messages = current.group.messages.slice();
+      messages.splice(current.index, 1);
+      await saveScheduledMessageRows(current.group, messages);
     }, "删除");
   });
   const targetList = document.getElementById("scheduledGroupTargetList");
@@ -2448,11 +2719,12 @@ function initScheduledPickers() {
     const group = activeScheduledMessageGroup();
     if (!group || group.target_mode !== "groups") return;
     group.target_groups = (group.target_groups || []).filter(function (id) { return String(id) !== String(remove.dataset.targetOpenid); });
+    group.disabled_target_groups = (group.disabled_target_groups || []).map(String).filter(function (id) { return id !== String(remove.dataset.targetOpenid); });
     renderScheduledMessageWorkspace();
     saveScheduledMessageGroups();
   });
   document.getElementById("scheduledMessageEntries").addEventListener("click", function (event) {
-    if (scheduledImageReadPending) return;
+    if (scheduledAttachmentUploadPending) return;
     const weekdayTrigger = event.target.closest(".scheduled-message-weekday-trigger");
     if (weekdayTrigger) {
       event.preventDefault();
@@ -2479,7 +2751,7 @@ function initScheduledPickers() {
     const imagePick = event.target.closest(".scheduled-message-image-pick");
     if (imagePick) {
       const entry = imagePick.closest(".scheduled-message-entry");
-      const input = entry && entry.querySelector('[data-field="image_file_input"]');
+      const input = entry && entry.querySelector('[data-field="media_file_input"]');
       if (input) input.click();
       return;
     }
@@ -2492,6 +2764,11 @@ function initScheduledPickers() {
       if (message) {
         message.image_data = "";
         message.image_name = "";
+        message.attachment_id = "";
+        message.attachment_type = "";
+        message.attachment_mime = "";
+        message.attachment_name = "";
+        message.attachment_size = 0;
         renderScheduledMessageEditor();
       }
       return;
@@ -2557,55 +2834,57 @@ function initScheduledPickers() {
   });
   document.getElementById("scheduledMessageEntries").addEventListener("change", async function (event) {
     const entry = event.target.closest(".scheduled-message-entry");
-    if (entry && event.target.dataset.field === "image_file_input") {
-      if (scheduledImageReadPending) {
+    if (entry && event.target.dataset.field === "media_file_input") {
+      if (scheduledAttachmentUploadPending) {
         event.target.value = "";
         return;
       }
       const file = event.target.files && event.target.files[0];
       if (!file) return;
-      const allowedTypes = ["image/png", "image/jpeg", "image/gif", "image/webp"];
-      if (!allowedTypes.includes(String(file.type || "").toLowerCase())) {
-        showAlert("定时消息", "仅支持 PNG、JPEG、GIF 或 WebP 图片");
+      const extension = String(file.name || "").split(".").pop().toLowerCase();
+      const allowedExtensions = ["png", "jpg", "jpeg", "gif", "webp", "mp4", "webm", "mp3", "wav", "ogg", "m4a"];
+      if (!allowedExtensions.includes(extension)) {
+        showAlert("定时消息", "支持 PNG、JPEG、GIF、WebP 图片，MP4、WebM 视频，以及 MP3、WAV、OGG、M4A 音频");
         event.target.value = "";
         return;
       }
-      if (file.size <= 0 || file.size > 2 * 1024 * 1024) {
-        showAlert("定时消息", "单张图片大小必须大于 0 且不超过 2 MiB");
+      if (file.size <= 0 || file.size > 30 * 1024 * 1024) {
+        showAlert("定时消息", "单个媒体文件大小必须大于 0 且不超过 30 MiB");
         event.target.value = "";
         return;
       }
       scheduledMessageDraft = readScheduledMessageEditor();
       const index = Number(entry.dataset.index);
-      const usedByOthers = scheduledMessageDraft.reduce(function (total, message, messageIndex) {
-        return total + (messageIndex === index ? 0 : scheduledImageDataSize(message.image_data));
-      }, 0);
-      if (usedByOthers + file.size > 3 * 1024 * 1024) {
-        showAlert("定时消息", "所有定时消息图片合计不能超过 3 MiB");
+      const target = scheduledMessageEditorTarget;
+      const resolved = resolveScheduledMessageTarget(target);
+      if (!resolved) {
+        showAlert("定时消息", "这条消息或消息组已变化，请重新打开编辑窗口。");
         event.target.value = "";
         return;
       }
-      scheduledImageReadPending = true;
+      const usedByOthers = scheduledAttachmentBytesExcept(resolved);
+      if (usedByOthers + file.size > 30 * 1024 * 1024) {
+        showAlert("定时消息", "所有定时消息附件合计不能超过 30 MiB");
+        event.target.value = "";
+        return;
+      }
+      scheduledAttachmentUploadPending = true;
       try {
-        const imageData = await readScheduledImageFile(file);
+        const response = await uploadScheduledMessageAttachment(file);
+        if (scheduledMessageEditorTarget !== target || !resolveScheduledMessageTarget(target)) return;
         scheduledMessageDraft = readScheduledMessageEditor();
         const latest = scheduledMessageDraft[index];
-        latest.image_data = imageData;
-        latest.image_name = file.name;
-        if (scheduledImageDataSize(latest.image_data) > 2 * 1024 * 1024) {
-          latest.image_data = "";
-          latest.image_name = "";
-          showAlert("定时消息", "单张图片大小必须不超过 2 MiB");
-        } else {
-          renderScheduledMessageEditor();
-        }
+        Object.assign(latest, response.attachment, {image_data: "", image_name: ""});
+        renderScheduledMessageEditor();
       } catch (error) {
-        scheduledMessageDraft = readScheduledMessageEditor();
-        showAlert("定时消息", "图片读取失败，请重新选择");
+        if (scheduledMessageEditorTarget === target && resolveScheduledMessageTarget(target)) {
+          scheduledMessageDraft = readScheduledMessageEditor();
+          showAlert("定时消息", error && error.message ? error.message : "附件上传失败，请重新选择");
+        }
       } finally {
-        scheduledImageReadPending = false;
+        scheduledAttachmentUploadPending = false;
+        event.target.value = "";
       }
-      event.target.value = "";
       return;
     }
     if (entry && event.target.dataset.field === "weekday") {
@@ -2637,14 +2916,18 @@ function renderScheduledMessage(config) {
 function preserveScheduledMessageAttachments(statusConfig, currentConfig) {
   if (statusConfig && Array.isArray(statusConfig.message_groups)) {
     const currentGroups = Array.isArray(currentConfig && currentConfig.message_groups) ? currentConfig.message_groups : [];
-    const oldGroups = new Map(currentGroups.map(function (group) { return [String(group.id), group]; }));
+    const oldGroups = new Map(currentGroups.map(function (group, index) {
+      return [String(group.id || "scheduled-group-" + (index + 1)), group];
+    }));
     const next = Object.assign({}, statusConfig);
-    next.message_groups = statusConfig.message_groups.map(function (group) {
-      const oldGroup = oldGroups.get(String(group.id));
-      const oldMessages = new Map(((oldGroup && oldGroup.messages) || []).map(function (message) { return [String(message.id), message]; }));
+    next.message_groups = statusConfig.message_groups.map(function (group, groupIndex) {
+      const oldGroup = oldGroups.get(String(group.id || "scheduled-group-" + (groupIndex + 1)));
+      const oldMessages = new Map(((oldGroup && oldGroup.messages) || []).map(function (message, index) {
+        return [String(message.id || "message-" + (index + 1)), message];
+      }));
       return Object.assign({}, group, {messages: (group.messages || []).map(function (message, index) {
-        const previous = oldMessages.get(String(message.id)) || ((oldGroup && oldGroup.messages) || [])[index];
-        if (!message.image_data && previous && previous.image_data) {
+        const previous = oldMessages.get(String(message.id || "message-" + (index + 1)));
+        if (!message.attachment_id && !message.image_data && previous?.image_data) {
           message = Object.assign({}, message, {image_data: previous.image_data, image_name: previous.image_name || ""});
         }
         return message;
@@ -2657,9 +2940,9 @@ function preserveScheduledMessageAttachments(statusConfig, currentConfig) {
     return [message.id, message];
   }));
   const next = Object.assign({}, statusConfig || {});
-  next.messages = normalizeScheduledMessages(statusConfig).map(function (message, index) {
-    const previous = currentById.get(message.id) || currentMessages[index];
-    if (!message.image_data && previous && previous.image_data) {
+  next.messages = normalizeScheduledMessages(statusConfig).map(function (message) {
+    const previous = currentById.get(message.id);
+    if (!message.attachment_id && !message.image_data && previous?.image_data) {
       message.image_data = previous.image_data;
       message.image_name = previous.image_name || "";
     }
@@ -2704,6 +2987,16 @@ function setActiveFg(ctx, id) {
   try { localStorage.setItem(ctx.storageKey, id); } catch (e) {}
   renderSettings();
 }
+function fgTargetEnabled(fg, id) {
+  return !((fg && fg.disabled_groups) || []).map(String).includes(String(id));
+}
+function setFgTargetEnabled(fg, id, enabled) {
+  if (!fg) return;
+  const value = String(id);
+  const disabled = new Set((fg.disabled_groups || []).map(String));
+  if (enabled) disabled.delete(value); else disabled.add(value);
+  fg.disabled_groups = Array.from(disabled);
+}
 function toggleFgMember(fg, id, field, on) {
   // 只修改当前组的成员集合（channels/sources/groups）；id 统一转字符串存储
   if (!fg) return;
@@ -2712,18 +3005,24 @@ function toggleFgMember(fg, id, field, on) {
   const idx = arr.indexOf(idStr);
   if (on && idx < 0) arr.push(idStr);
   if (!on && idx >= 0) arr.splice(idx, 1);
+  if (field === "groups") {
+    fg.disabled_groups = (fg.disabled_groups || []).map(String).filter(function (value) { return value !== idStr; });
+  }
 }
 function removeFgMember(ctx, id, field) {
   // 只把实体从当前转发组移除（脱组）：不删全局实体、不影响其他组
   const fg = getActiveFg(ctx);
   if (!fg) return;
   const idStr = String(id);
-  const arr = fg[field] || [];
-  const idx = arr.indexOf(idStr);
-  if (idx < 0) return;
+  if (!(fg[field] || []).some(value => String(value) === idStr)) return;
+  const groupId = fg.id;
+  const epoch = workspaceEpoch;
   showConfirmDlg("移出当前转发组", "将此成员移出「" + fg.name + "」？注册记录及其他组不受影响。", async function () {
-    const current = arr.indexOf(idStr);
-    if (current >= 0) arr.splice(current, 1);
+    if (epoch !== workspaceEpoch) return;
+    const current = getFgList(ctx).find(item => item.id === groupId);
+    if (!current || !(current[field] || []).some(value => String(value) === idStr)) return;
+    current[field] = current[field].filter(value => String(value) !== idStr);
+    if (field === "groups") current.disabled_groups = (current.disabled_groups || []).map(String).filter(value => value !== idStr);
     await saveAndReload();
   }, "移出");
 }
@@ -2793,7 +3092,8 @@ function openFgAddPicker(ctx, kind) {
   if (!candidates.length) {
     showAlert(
       "从已注册项新增",
-      "当前转发组已包含全部已注册的" + (kind === "group" ? "群" : kind === "chan" ? "频道" : kind === "biliSource" ? "Bilibili 来源" : kind === "youtubeSource" ? "YouTube 频道" : "来源") + "，没有可添加的条目"
+      "暂无可添加的项目",
+      {emptyState: true}
     );
     return;
   }
@@ -2809,6 +3109,13 @@ function openFgAddPicker(ctx, kind) {
     },
     {
       defaultChecked: false,
+      cardRows: true,
+      detailFn: function (item) {
+        if (kind === "chan") return String(item.id || "");
+        if (kind === "group") return String(item.openid || "");
+        if (kind === "source") return "@" + xSourceKey(item.source);
+        return "";
+      },
       rowDeleteIcon: SVG_TRASH,
       onRowEdit: kind === "group" ? function (item) { editGroupDetails(item); } : null,
       labelLinkFn: kind === "source"
@@ -2827,7 +3134,7 @@ function openFgAddPicker(ctx, kind) {
 function openUserAddPicker() {
   const candidates = (settings.qq_user_openids || []).filter(function (u) { return u.enabled !== true; });
   if (!candidates.length) {
-    showAlert("从已注册项新增", "当前没有未加入白名单的已注册用户");
+    showAlert("从已注册项新增", "暂无可添加的用户", {emptyState: true});
     return;
   }
   showConfirmSelect(
@@ -2843,6 +3150,8 @@ function openUserAddPicker() {
     },
     {
       defaultChecked: false,
+      cardRows: true,
+      detailFn: function (u) { return String(u.openid || ""); },
       onRowDelete: function (u) { deleteRegisteredItem("user", u); },
     }
   );
@@ -2926,7 +3235,7 @@ async function scanReadableChannels(btn) {
   const known = {};
   settings.discord_channels.forEach(function (c) { known[String(c.id)] = true; });
   const pending = list.filter(function (ch) { return !known[String(ch.id)]; });
-  if (!pending.length) { showAlert("注册结果", "没有发现新频道"); return; }
+  if (!pending.length) { showAlert("注册结果", "暂无可注册的新频道", {emptyState: true}); return; }
   showConfirmSelect("全部可读频道", pending, function (ch) { return ch.name + " (" + ch.id + ")"; }, async function (selected) {
     if (!selected.length) { showAlert("注册结果", "未选择任何频道"); return; }
     let added = 0;
@@ -2935,7 +3244,7 @@ async function scanReadableChannels(btn) {
       if (known[id]) return;
       settings.discord_channels.push({
         id: id, name: String(ch.name || "").replace(/^#/, ""), enabled: false,
-        translation_enabled: false, translation_append_original: true, translation_show_datetime: false,
+        translation_enabled: true, translation_append_original: true, translation_show_datetime: false,
       });
       known[id] = true;
       added++;
@@ -2946,7 +3255,7 @@ async function scanReadableChannels(btn) {
       renderSettings();
     }
     showAlert("注册结果", "已注册 " + added + " 个新频道（默认未启用）");
-  }, {defaultChecked: false, groupBy: function (ch) { return ch.guild; }});
+  }, {defaultChecked: false, cardRows: true, detailFn: function (ch) { return String(ch.id || ""); }, groupBy: function (ch) { return ch.guild; }});
 }
 function renderFgTabs(ctx) {
   const wrap = document.getElementById(ctx.tabsId);
@@ -3003,6 +3312,7 @@ function renderFgTabs(ctx) {
       rename.className = "fgctrl rowicon";
       rename.dataset.kind = "fgRename";
       rename.dataset.ctx = ctx.key;
+      rename.dataset.id = fg.id;
       rename.title = "重命名转发组";
       rename.setAttribute("aria-label", rename.title);
       rename.innerHTML = SVG_PEN;
@@ -3014,6 +3324,7 @@ function renderFgTabs(ctx) {
         del.className = "fgctrl rowicon fg-delete";
         del.dataset.kind = "fgDel";
         del.dataset.ctx = ctx.key;
+        del.dataset.id = fg.id;
         del.title = "删除转发组";
         del.setAttribute("aria-label", del.title);
         del.innerHTML = SVG_TRASH;   // 与成员行内删除按钮同一白色垃圾桶图标
@@ -3050,6 +3361,7 @@ async function addForwardingGroup(ctx) {
     id: ctx.idPrefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     name: "转发组" + n,
     enabled: true,
+    disabled_groups: [],
   };
   ctx.emptyMembers.forEach(function (f) { fg[f] = []; });
   list.push(fg);
@@ -3059,14 +3371,15 @@ async function addForwardingGroup(ctx) {
 }
 let fgRenameActive = false;
 let fgRenameCtxKey = null;   // 正在重命名的转发组上下文 key（discord / x）
-function startFgRename(ctx) {
-  const fg = getActiveFg(ctx);
+function startFgRename(ctx, groupId) {
+  const fg = getFgList(ctx).find(item => item.id === groupId);
   // 转发组重命名
   if (!fg || fgRenameActive) return;
   const wrap = document.getElementById(ctx.tabsId);
   const tabs = Array.prototype.slice.call(wrap.querySelectorAll(".fgtab"));
   const tabBtn = tabs.find(function (b) { return b.dataset.id === fg.id; });
   if (!tabBtn) return;
+  const epoch = workspaceEpoch;
   fgRenameActive = true;
   fgRenameCtxKey = ctx.key;
   const input = document.createElement("input");
@@ -3086,8 +3399,10 @@ function startFgRename(ctx) {
     fgRenameActive = false;
     fgRenameCtxKey = null;
     const v = input.value.trim();
-    if (commit && v && v !== fg.name) {
-      fg.name = v;   // 只改 name，id 保持不变
+    if (epoch !== workspaceEpoch) return;
+    const current = getFgList(ctx).find(item => item.id === groupId);
+    if (commit && current && v && v !== current.name) {
+      current.name = v;
       saveAndReload();
     } else {
       renderSettings();
@@ -3243,7 +3558,7 @@ function renderSettings() {
     const gacc = g.qq_id || "";
     tr.innerHTML =
       '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
-      '<td style="text-align:center"><input type="checkbox" data-kind="group" data-i="' + gi + '"' + (g.enabled ? " checked" : "") + '></td>' +
+      '<td style="text-align:center"><input type="checkbox" data-kind="forwardGroupTarget" data-fg="discord" data-openid="' + escapeHtml(String(g.openid)) + '"' + (fgTargetEnabled(activeFg, g.openid) ? " checked" : "") + '></td>' +
       '<td>' +
         (gname ? '<div style="color:var(--fg);font-size:12px;word-break:break-all;">' + escapeHtml(gname) + '</div>' : '') +
       '</td>' +
@@ -3280,8 +3595,8 @@ function renderSettings() {
       '<td class="discord-channel-real-name">' + (realName ? realNameHtml : '') + '</td>' +
       '<td>' + renderIdCell(c.id) + '</td>' +
       '<td><div class="table-actions">' +
-        '<button class="sec rowicon' + (channelFilterActive(c) ? ' filter-active' : '') + '" title="内容筛选" aria-label="内容筛选" data-kind="chanFilter" data-i="' + gi + '">' + SVG_FUNNEL + '</button>' +
-        '<button class="sec rowicon" title="编辑名称与来源地址" aria-label="编辑名称与来源地址" data-kind="chanEdit" data-i="' + gi + '">' + SVG_PEN + '</button>' +
+        '<button class="sec rowicon' + (channelFilterActive(c) ? ' filter-active' : '') + '" title="内容筛选" aria-label="内容筛选" data-kind="chanFilter">' + SVG_FUNNEL + '</button>' +
+        '<button class="sec rowicon" title="编辑名称与来源地址" aria-label="编辑名称与来源地址" data-kind="chanEdit">' + SVG_PEN + '</button>' +
         '<button class="danger rowicon" title="移出当前转发组" aria-label="移出当前转发组" data-kind="fgChanRemove" data-id="' + escapeHtml(String(c.id)) + '">' + SVG_TRASH + '</button>' +
       '</div></td>';
     cb.appendChild(tr);
@@ -3309,8 +3624,8 @@ function renderSettings() {
         '<td style="font-size:12px;">' + escapeHtml(uacc) + '</td>' +
       '<td>' + renderIdCell(u.openid) + '</td>' +
       '<td><div class="table-actions">' +
-        '<button class="sec rowicon" title="编辑用户资料" aria-label="编辑用户资料" data-kind="userEdit" data-i="' + ui + '">' + SVG_PEN + '</button>' +
-        '<button class="danger rowicon" title="删除用户" aria-label="删除用户" data-kind="userDel" data-i="' + ui + '">' + SVG_TRASH + '</button>' +
+        '<button class="sec rowicon" title="编辑用户资料" aria-label="编辑用户资料" data-kind="userEdit">' + SVG_PEN + '</button>' +
+        '<button class="danger rowicon" title="删除用户" aria-label="删除用户" data-kind="userDel">' + SVG_TRASH + '</button>' +
         '</div></td>';
       ub.appendChild(tr);
     });
@@ -3321,7 +3636,7 @@ function renderSettings() {
   renderUnifiedRelayFilter();
   // 表头全选框状态仅反映「当前转发组」实际显示的成员（而非全部全局实体），
   // 避免隐藏的非本组成员导致半选误判：全部→勾选，全不→取消，部分→半选，无成员→两者均 false
-  syncHeaderAll("groupAllEnabled", grpRows, "enabled");
+  syncHeaderAll("groupAllEnabled", grpRows.map(function (group) { return {enabled: fgTargetEnabled(activeFg, group.openid)}; }), "enabled");
   syncHeaderAll("chanAllEnabled", chanRows, "enabled");
   syncHeaderAll("userAllEnabled", settings.qq_user_openids || [], "enabled");
   // X / Bilibili / QQ → QQ 页面与 Discord 页共用同一份 settings，跟随保存刷新
@@ -3337,17 +3652,17 @@ function renderAIControls() {
   document.getElementById("translationProvider").value = translation.provider || "tencent_tmt";
   document.getElementById("translationFallback").value = translation.fallback_provider || "";
   syncTranslationFallback("translationProvider", "translationFallback");
-  const allEnabled = function (items) {
+  const allEnabled = function (items, defaultEnabled) {
     const list = items || [];
-    return list.length > 0 && list.every(function (item) {
+    return list.length ? list.every(function (item) {
       return item.translation_enabled === true;
-    });
+    }) : defaultEnabled;
   };
-  renderTranslationToggleFor("btnTranslationDiscord", allEnabled(settings.discord_channels), "Discord → QQ 翻译");
-  renderTranslationToggleFor("btnTranslationX", allEnabled(settings.x_rss_sources), "X → QQ 翻译");
-  renderTranslationToggleFor("btnTranslationBilibili", allEnabled(settings.bilibili_sources), "Bilibili → QQ 翻译");
-  renderTranslationToggleFor("btnTranslationYoutube", allEnabled(settings.youtube_sources), "YouTube → QQ 翻译");
-  renderTranslationToggleFor("btnTranslationSteam", allEnabled(settings.steam_sources), "Steam → QQ 翻译");
+  renderTranslationToggleFor("btnTranslationDiscord", allEnabled(settings.discord_channels, true), "Discord → QQ 翻译", !(settings.discord_channels || []).length);
+  renderTranslationToggleFor("btnTranslationX", allEnabled(settings.x_rss_sources, true), "X → QQ 翻译", !(settings.x_rss_sources || []).length);
+  renderTranslationToggleFor("btnTranslationBilibili", allEnabled(settings.bilibili_sources, false), "Bilibili → QQ 翻译", !(settings.bilibili_sources || []).length);
+  renderTranslationToggleFor("btnTranslationYoutube", allEnabled(settings.youtube_sources, true), "YouTube → QQ 翻译", !(settings.youtube_sources || []).length);
+  renderTranslationToggleFor("btnTranslationSteam", allEnabled(settings.steam_sources, true), "Steam → QQ 翻译", !(settings.steam_sources || []).length);
   renderTranslationToggleFor("btnTranslationManual", translation.enabled === true, "QQ → QQ 手动转发翻译");
 }
 
@@ -3382,9 +3697,11 @@ function syncLegacyAiConfig(profile) {
   });
 }
 
-function renderTranslationToggleFor(buttonId, on, label) {
+function renderTranslationToggleFor(buttonId, on, label, noSources) {
   const btn = document.getElementById(buttonId);
   if (!btn) return;
+  btn.disabled = !!noSources;
+  btn.title = noSources ? "暂无来源，添加来源后可批量切换" : "启用或关闭 " + label;
   btn.dataset.on = on ? "1" : "0";
   btn.setAttribute("aria-checked", on ? "true" : "false");
   btn.innerHTML = pillSwitchMarkup(label, on);
@@ -3459,14 +3776,14 @@ function renderQQPage() {
     tr.setAttribute("data-id", String(group.openid));
     tr.innerHTML =
       '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
-      '<td style="text-align:center"><input type="checkbox" data-kind="group" data-i="' + index + '"' + (group.enabled ? " checked" : "") + '></td>' +
+      '<td style="text-align:center"><input type="checkbox" data-kind="forwardGroupTarget" data-fg="qq" data-openid="' + escapeHtml(String(group.openid)) + '"' + (fgTargetEnabled(qfg, group.openid) ? " checked" : "") + '></td>' +
       '<td>' + (name ? '<div style="color:var(--fg);font-size:12px;word-break:break-all;">' + escapeHtml(name) + '</div>' : '') + '</td>' +
       '<td style="font-size:12px;">' + escapeHtml(account) + '</td>' +
       '<td>' + renderIdCell(group.openid) + '</td>' +
       '<td style="text-align:right"><div class="table-actions"><button class="sec rowicon" data-kind="groupEdit" data-id="' + escapeHtml(String(group.openid)) + '" title="编辑群资料" aria-label="编辑群资料">' + SVG_PEN + '</button><button class="danger rowicon" data-kind="qqFgGroupRemove" data-id="' + escapeHtml(String(group.openid)) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
     groupBody.appendChild(tr);
   });
-  syncHeaderAll("qqGroupAllEnabled", groupRows, "enabled");
+  syncHeaderAll("qqGroupAllEnabled", groupRows.map(function (group) { return {enabled: fgTargetEnabled(qfg, group.openid)}; }), "enabled");
 }
 
 // ---------------- X → QQ 页面 ----------------
@@ -3520,8 +3837,8 @@ function renderXPage() {
           : '@' + escapeHtml(handle)) +
       '</td>' +
       '<td style="text-align:right"><div class="table-actions">' +
-        '<button class="sec rowicon' + (xSourceFilterActive(s) ? ' filter-active' : '') + '" title="内容筛选" aria-label="内容筛选" data-kind="xSourceFilter" data-i="' + i + '">' + SVG_FUNNEL + '</button>' +
-        '<button class="sec rowicon" title="编辑名称与来源地址" aria-label="编辑名称与来源地址" data-kind="xSourceEdit" data-i="' + i + '">' + SVG_PEN + '</button>' +
+        '<button class="sec rowicon' + (xSourceFilterActive(s) ? ' filter-active' : '') + '" title="内容筛选" aria-label="内容筛选" data-kind="xSourceFilter">' + SVG_FUNNEL + '</button>' +
+        '<button class="sec rowicon" title="编辑名称与来源地址" aria-label="编辑名称与来源地址" data-kind="xSourceEdit">' + SVG_PEN + '</button>' +
         '<button class="danger rowicon" data-kind="xFgSourceRemove" data-id="' + escapeHtml(handle) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
     srcBody.appendChild(tr);
   });
@@ -3546,16 +3863,17 @@ function renderXPage() {
     tr.setAttribute("data-id", String(g.openid));
     tr.innerHTML =
       '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
-      '<td style="text-align:center"><input type="checkbox" data-kind="group" data-i="' + gi + '"' + (g.enabled ? " checked" : "") + '></td>' +
+      '<td style="text-align:center"><input type="checkbox" data-kind="forwardGroupTarget" data-fg="x" data-openid="' + escapeHtml(String(g.openid)) + '"' + (fgTargetEnabled(xfg, g.openid) ? " checked" : "") + '></td>' +
       '<td>' +
         (gname ? '<div style="color:var(--fg);font-size:12px;word-break:break-all;">' + escapeHtml(gname) + '</div>' : '') +
+        (g.enabled !== true ? '<small class="help-text">全局接收未启用</small>' : '') +
       '</td>' +
       '<td style="font-size:12px;">' + escapeHtml(gacc) + '</td>' +
       '<td>' + renderIdCell(g.openid) + '</td>' +
       '<td style="text-align:right"><div class="table-actions"><button class="sec rowicon" data-kind="groupEdit" data-id="' + escapeHtml(String(g.openid)) + '" title="编辑群资料" aria-label="编辑群资料">' + SVG_PEN + '</button><button class="danger rowicon" data-kind="xFgGroupRemove" data-id="' + escapeHtml(String(g.openid)) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
     xgBody.appendChild(tr);
   });
-  syncHeaderAll("xGroupAllEnabled", grpRows, "enabled");
+  syncHeaderAll("xGroupAllEnabled", grpRows.map(function (group) { return {enabled: fgTargetEnabled(xfg, group.openid)}; }), "enabled");
 
   // 白名单：全局数据（settings.qq_user_openids），与 Discord → QQ 页
   // 共用同一份 settings 数组，任一页修改经 saveAndReload 后两边同步重渲染
@@ -3579,7 +3897,7 @@ function renderXPage() {
         '</td>' +
         '<td style="font-size:12px;">' + escapeHtml(uacc) + '</td>' +
         '<td>' + renderIdCell(u.openid) + '</td>' +
-        '<td style="text-align:right"><div class="table-actions"><button class="sec rowicon" data-kind="userEdit" data-i="' + ui + '" title="编辑用户资料" aria-label="编辑用户资料">' + SVG_PEN + '</button><button class="danger rowicon" data-kind="xUserDel" data-i="' + ui + '" title="删除用户" aria-label="删除用户">' + SVG_TRASH + '</button></div></td>';
+        '<td style="text-align:right"><div class="table-actions"><button class="sec rowicon" data-kind="userEdit" title="编辑用户资料" aria-label="编辑用户资料">' + SVG_PEN + '</button><button class="danger rowicon" data-kind="xUserDel" title="删除用户" aria-label="删除用户">' + SVG_TRASH + '</button></div></td>';
       xb.appendChild(tr);
     });
     syncHeaderAll("xUserAllEnabled", settings.qq_user_openids || [], "enabled");
@@ -3644,7 +3962,7 @@ function renderBilibiliPage() {
       '<td class="mono" title="' + escapeHtml(source.value || "") + '">' + (sourceUrl
         ? '<a class="source-link bilibili-source-link" href="' + escapeHtml(sourceUrl) + '" target="_blank" rel="noopener noreferrer" title="打开 Bilibili 来源">' + escapeHtml(source.value || source.uid || "") + '</a>'
         : escapeHtml(source.value || source.uid || "")) + '</td>' +
-      '<td style="text-align:right"><div class="table-actions"><button class="sec rowicon' + (bilibiliSourceFilterActive(source) ? ' filter-active' : '') + '" data-kind="biliSourceFilterEdit" data-i="' + index + '" title="内容筛选" aria-label="内容筛选">' + SVG_FUNNEL + '</button><button class="sec rowicon" data-kind="biliSourceEdit" data-i="' + index + '" title="编辑名称与来源地址" aria-label="编辑名称与来源地址">' + SVG_PEN + '</button><button class="danger rowicon" data-kind="biliFgSourceRemove" data-id="' + escapeHtml(sourceId) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
+      '<td style="text-align:right"><div class="table-actions"><button class="sec rowicon' + (bilibiliSourceFilterActive(source) ? ' filter-active' : '') + '" data-kind="biliSourceFilterEdit" title="内容筛选" aria-label="内容筛选">' + SVG_FUNNEL + '</button><button class="sec rowicon" data-kind="biliSourceEdit" title="编辑名称与来源地址" aria-label="编辑名称与来源地址">' + SVG_PEN + '</button><button class="danger rowicon" data-kind="biliFgSourceRemove" data-id="' + escapeHtml(sourceId) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
     sourceBody.appendChild(tr);
   });
   syncHeaderAll("bilibiliSourceAllEnabled", sourceRows, "enabled");
@@ -3666,14 +3984,14 @@ function renderBilibiliPage() {
     tr.setAttribute("data-id", String(group.openid));
     tr.innerHTML =
       '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
-      '<td style="text-align:center"><input type="checkbox" data-kind="group" data-i="' + index + '"' + (group.enabled ? " checked" : "") + '></td>' +
+      '<td style="text-align:center"><input type="checkbox" data-kind="forwardGroupTarget" data-fg="bilibili" data-openid="' + escapeHtml(String(group.openid)) + '"' + (fgTargetEnabled(fg, group.openid) ? " checked" : "") + '></td>' +
       '<td>' + (name ? '<div style="color:var(--fg);font-size:12px;word-break:break-all;">' + escapeHtml(name) + '</div>' : '') + '</td>' +
       '<td style="font-size:12px;">' + escapeHtml(account) + '</td>' +
       '<td>' + renderIdCell(group.openid) + '</td>' +
       '<td style="text-align:right"><div class="table-actions"><button class="sec rowicon" data-kind="groupEdit" data-id="' + escapeHtml(String(group.openid)) + '" title="编辑群资料" aria-label="编辑群资料">' + SVG_PEN + '</button><button class="danger rowicon" data-kind="biliFgGroupRemove" data-id="' + escapeHtml(String(group.openid)) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
     groupBody.appendChild(tr);
   });
-  syncHeaderAll("bilibiliGroupAllEnabled", groupRows, "enabled");
+  syncHeaderAll("bilibiliGroupAllEnabled", groupRows.map(function (group) { return {enabled: fgTargetEnabled(fg, group.openid)}; }), "enabled");
 
   const baseInput = document.getElementById("bilibiliRsshubBase");
   if (baseInput && document.activeElement !== baseInput) baseInput.value = settings.bilibili_rsshub_base || "";
@@ -3783,8 +4101,8 @@ function renderYoutubePage() {
         ? '<a class="source-link youtube-source-link" href="' + escapeHtml(channelUrl) + '" target="_blank" rel="noopener noreferrer" title="打开 YouTube 频道">' + escapeHtml(source.value || "") + '</a>'
         : escapeHtml(source.value || "")) + '</td>' +
       '<td style="text-align:right"><div class="table-actions">' +
-        '<button class="sec rowicon' + (youtubeSourceFilterActive(source) ? ' filter-active' : '') + '" title="内容筛选" aria-label="内容筛选" data-kind="youtubeSourceFilterEdit" data-i="' + index + '">' + SVG_FUNNEL + '</button>' +
-        '<button class="sec rowicon" title="编辑名称与来源地址" aria-label="编辑名称与来源地址" data-kind="youtubeSourceEdit" data-i="' + index + '">' + SVG_PEN + '</button>' +
+        '<button class="sec rowicon' + (youtubeSourceFilterActive(source) ? ' filter-active' : '') + '" title="内容筛选" aria-label="内容筛选" data-kind="youtubeSourceFilterEdit">' + SVG_FUNNEL + '</button>' +
+        '<button class="sec rowicon" title="编辑名称与来源地址" aria-label="编辑名称与来源地址" data-kind="youtubeSourceEdit">' + SVG_PEN + '</button>' +
         '<button class="danger rowicon" data-kind="youtubeFgSourceRemove" data-id="' + escapeHtml(sourceId) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
     sourceBody.appendChild(tr);
   });
@@ -3807,14 +4125,14 @@ function renderYoutubePage() {
     tr.setAttribute("data-id", String(group.openid));
     tr.innerHTML =
       '<td class="drag-handle" title="拖拽排序">' + SVG_GRIP + '</td>' +
-      '<td style="text-align:center"><input type="checkbox" data-kind="group" data-i="' + index + '"' + (group.enabled ? " checked" : "") + '></td>' +
+      '<td style="text-align:center"><input type="checkbox" data-kind="forwardGroupTarget" data-fg="youtube" data-openid="' + escapeHtml(String(group.openid)) + '"' + (fgTargetEnabled(fg, group.openid) ? " checked" : "") + '></td>' +
       '<td>' + (name ? '<div style="color:var(--fg);font-size:12px;word-break:break-all;">' + escapeHtml(name) + '</div>' : '') + '</td>' +
       '<td style="font-size:12px;">' + escapeHtml(account) + '</td>' +
       '<td>' + renderIdCell(group.openid) + '</td>' +
       '<td style="text-align:right"><div class="table-actions"><button class="sec rowicon" data-kind="groupEdit" data-id="' + escapeHtml(String(group.openid)) + '" title="编辑群资料" aria-label="编辑群资料">' + SVG_PEN + '</button><button class="danger rowicon" data-kind="youtubeFgGroupRemove" data-id="' + escapeHtml(String(group.openid)) + '" title="移出当前转发组" aria-label="移出当前转发组">' + SVG_TRASH + '</button></div></td>';
     groupBody.appendChild(tr);
   });
-  syncHeaderAll("youtubeGroupAllEnabled", groupRows, "enabled");
+  syncHeaderAll("youtubeGroupAllEnabled", groupRows.map(function (group) { return {enabled: fgTargetEnabled(fg, group.openid)}; }), "enabled");
 
   const intervalInput = document.getElementById("youtubePollInterval");
   if (intervalInput && document.activeElement !== intervalInput) {
@@ -3869,7 +4187,7 @@ function conciseChainStatusError(st, chain) {
       ? "RSS 失败；可配置 API Key。"
       : "请求失败；检查频道或 API Key。";
   }
-  if (/timeout|timed out|connection|network|代理|proxy|dns/.test(raw)) return "网络失败；检查代理。";
+  if (/timeout|timed out|connect(?:ion|error)|disconnected|protocolerror|network|代理|proxy|dns/.test(raw)) return "网络失败；检查代理。";
   if (name === "YouTube" && st.last_result === "fetch_failed") {
     return st.data_api_enabled === false
       ? "RSS 失败；可试 API Key。"
@@ -3998,11 +4316,13 @@ function renderBilibiliStatus(st) {
   const botUp = st.bot_running === true;
   const pollTs = Number(st.last_poll_ts) || 0;
   const pollText = pollTs ? xrssFmtTime(pollTs) : "—";
+  let enabledSources = st.sources_enabled;
   let srcText = "—";
   if (st.sources_total !== undefined) {
     srcText = st.sources_enabled + " / " + st.sources_total;
   } else if (settings && Array.isArray(settings.bilibili_sources)) {
     const counts = routedEnabledTotal("bilibili_sources", "bilibili_forwarding_groups", "sources", function (item) { return item.id || bilibiliSourceId(item.kind, item.value); });
+    enabledSources = counts.enabled;
     srcText = counts.enabled + " / " + counts.total;
   }
 
@@ -4022,6 +4342,9 @@ function renderBilibiliStatus(st) {
     badgeText = "投递保护异常";
     badgeCls = "badge off";
     failed = true;
+  } else if (enabledSources === 0) {
+    badgeText = "无启用来源";
+    badgeCls = "badge neutral";
   } else if (!st.qq_connected) {
     if (!pollTs) badgeText = "等待 QQ 连接";
     else if (st.last_result === "ok") badgeText = "RSS 正常 · QQ 未连接";
@@ -4047,7 +4370,8 @@ function renderBilibiliStatus(st) {
   badge.textContent = badgeText;
   badge.className = badgeCls;
   const errorHint = conciseChainStatusError(st, "Bilibili");
-  badge.title = failed || st.ok === false ? errorHint : badgeText;
+  badge.title = failed || st.ok === false ? errorHint
+    : badgeText === "无启用来源" ? "请在启用的转发组中加入已启用的来源和 QQ 接收群。" : badgeText;
   setStatusCardAmbient(badge, badgeCls === "badge on");
   const overviewBilibili = document.getElementById("overviewBilibili");
   setOverviewRouteStatus(overviewBilibili, badgeText, "Bilibili RSS",
@@ -4097,15 +4421,19 @@ function renderYoutubeStatus(st) {
   const botUp = st.bot_running === true;
   const pollTs = Number(st.last_poll_ts) || 0;
   const pollText = pollTs ? xrssFmtTime(pollTs) : "—";
+  const pollTotal = Number(st.poll_progress?.total) || 0;
+  const pollCompleted = Array.isArray(st.poll_progress?.completed) ? st.poll_progress.completed.filter(Boolean) : [];
+  let enabledSources = st.sources_enabled;
   let srcText = "—";
   if (st.sources_total !== undefined) {
     srcText = st.sources_enabled + " / " + st.sources_total;
   } else if (settings && Array.isArray(settings.youtube_sources)) {
     const counts = routedEnabledTotal("youtube_sources", "youtube_forwarding_groups", "sources", function (item) { return item.id || youtubeSourceId(item.value); });
+    enabledSources = counts.enabled;
     srcText = counts.enabled + " / " + counts.total;
   }
 
-  let badgeText, badgeCls, failed = false;
+  let badgeText, badgeCls, failed = false, progressText = "";
   if (!botUp) {
     badgeText = "未运行";
     badgeCls = "badge neutral";
@@ -4126,6 +4454,10 @@ function renderYoutubeStatus(st) {
     else if (st.last_result === "ok") badgeText = "YouTube 正常 · QQ 未连接";
     else badgeText = "YouTube 请求失败 · QQ 未连接";
     badgeCls = "badge warn";
+  } else if (pollTotal > 0) {
+    badgeText = "正在检查频道";
+    badgeCls = "badge warn";
+    progressText = "已完成 " + pollCompleted.length + "/" + pollTotal + " 个频道";
   } else if (st.last_result === "fetch_failed") {
     badgeText = "YouTube 请求失败";
     badgeCls = "badge off";
@@ -4134,6 +4466,12 @@ function renderYoutubeStatus(st) {
     badgeText = "RSS 解析失败";
     badgeCls = "badge off";
     failed = true;
+  } else if (enabledSources === 0) {
+    badgeText = "无启用来源";
+    badgeCls = "badge neutral";
+  } else if (!pollTs) {
+    badgeText = "等待首次检查结果";
+    badgeCls = "badge warn";
   } else {
     badgeText = "运行中";
     badgeCls = "badge on";
@@ -4144,16 +4482,33 @@ function renderYoutubeStatus(st) {
   badge.title = failed || st.ok === false ? errorHint : badgeText;
   setStatusCardAmbient(badge, badgeCls === "badge on");
   const overviewYoutube = document.getElementById("overviewYoutube");
-  setOverviewRouteStatus(overviewYoutube, badgeText, "YouTube RSS",
+  setOverviewRouteStatus(overviewYoutube, badgeText, progressText || "YouTube RSS",
     badgeCls.includes("neutral") ? "neutral" : badgeCls.includes("on") ? "on" : badgeCls.includes("off") ? "off" : "warn");
 
   const summary = document.getElementById("youtubeSummary");
   if (summary) {
     const sendFailed = Number(st.last_failed_count) || 0;
-    summary.classList.toggle("err", failed || sendFailed > 0 || st.ok === false);
+    summary.classList.toggle("err", failed || (!progressText && sendFailed > 0) || st.ok === false);
     summary.title = failed || st.ok === false ? errorHint : "";
     if (!botUp) {
       summary.textContent = "—";
+    } else if (progressText) {
+      const resultLabels = {
+        ok: "正常",
+        fetch_failed: "请求失败",
+        parse_failed: "RSS 解析失败",
+        protection_failed: "投递保护异常",
+      };
+      const failedCount = pollCompleted.filter(item => item.result !== "ok").length;
+      const visibleResults = pollCompleted.slice(-3);
+      const otherCount = pollCompleted.length - visibleResults.length;
+      summary.innerHTML = '<strong>' + escapeHtml(progressText) + '</strong>'
+        + (failedCount ? '<span class="rss-send-fail">检查失败 ' + failedCount + ' 个</span>' : '')
+        + visibleResults.map(function (item) {
+          const label = resultLabels[item.result] || "检查结束";
+          return '<span>' + escapeHtml(item.name || item.id || "未命名频道") + ' · ' + escapeHtml(label) + '</span>';
+        }).join("")
+        + (otherCount ? '<span>还有 ' + otherCount + ' 个频道已完成</span>' : '');
     } else if (failed) {
       const configFailed = !!st.config_error || st.last_result === "config_failed";
       const protectionFailed = !configFailed && (!!st.protection_error || st.last_result === "protection_failed");
@@ -4176,38 +4531,107 @@ function renderYoutubeStatus(st) {
   renderPageCredentialShortcut();
 }
 
-async function refreshYoutubeStatus() {
-  const owner = activeQQBotId;
-  const epoch = workspaceEpoch;
-  try {
-    const data = await jget("/api/youtube/status");
-    if (owner === activeQQBotId && epoch === workspaceEpoch) renderYoutubeStatus(data);
-  } catch (err) { /* 面板瞬断：保留当前显示，下一轮覆盖 */ }
-}
-
-function renderSteamOverviewStatus(st) {
-  const target = document.getElementById("overviewSteam");
-  if (!target || !st) return;
+function renderSteamStatus(st) {
+  const summary = document.getElementById("steamStatus");
+  const badge = document.getElementById("steamBadge");
+  const overview = document.getElementById("overviewSteam");
+  const health = Array.isArray(st.source_health) ? st.source_health.filter(Boolean) : [];
+  const firstSourceError = health.find(item => item.error)?.error;
+  const hasError = !!(st.ok === false || st.last_error || firstSourceError);
   const botUp = st.bot_running === true || (st.bot_running === undefined && st.running === true);
-  let label = "运行中", state = "on";
-  if (st.last_error && st.bot_running !== false) { label = "检查失败"; state = "off"; }
-  else if (!botUp) { label = "未运行"; state = "neutral"; }
-  else if (st.qq_connected === false) { label = "等待 QQ 连接"; state = "warn"; }
-  setOverviewRouteStatus(target, label, "Steam 游戏与商店监控", state);
-  if (st.last_error) target.title += "\n" + conciseChainStatusError(st, "Steam");
-}
+  const completedAt = Number(st.last_completed_poll_ts ?? st.last_poll_ts) || 0;
+  let label = "运行中", state = "on", scanProgress = "";
+  if (st.bot_running === false || (!botUp && !hasError)) {
+    label = "未运行";
+    state = "neutral";
+  } else if (st.qq_connected === false) {
+    label = "等待 QQ 连接";
+    state = "warn";
+  } else if (st.scanning) {
+    label = completedAt ? "正在检查" : "正在首次检查";
+    state = "warn";
+    const total = Number(st.scan_total) || 0;
+    if (total > 0) {
+      const scanned = Math.max(0, Math.min(total, Number(st.scanned) || 0));
+      scanProgress = "已检查 " + scanned + "/" + total + " 个游戏";
+    }
+  } else if (hasError) {
+    const partial = firstSourceError && health.some(item => !item.error);
+    label = partial ? "部分来源失败" : st.running === undefined ? "状态不可用" : "检查失败";
+    state = "off";
+  } else if (st.sources_enabled === 0) {
+    label = "无启用来源";
+    state = "neutral";
+  } else if (!completedAt) {
+    label = "等待首次检查";
+    state = "warn";
+  }
 
-async function refreshSteamStatus() {
-  const owner = activeQQBotId;
-  const epoch = workspaceEpoch;
-  try {
-    const data = await jget("/api/steam/status");
-    if (owner === activeQQBotId && epoch === workspaceEpoch) renderSteamOverviewStatus(data);
-  } catch (err) {
-    if (owner === activeQQBotId && epoch === workspaceEpoch) {
-      setOverviewRouteStatus(document.getElementById("overviewSteam"), "状态不可用", "Steam", "warn");
+  const errorHint = state === "off" ? conciseChainStatusError({
+    ...st, last_error: st.last_error || firstSourceError, last_result: st.running === true ? "fetch_failed" : "",
+  }, "Steam") : "";
+  const source = st.scanning ? String(st.current_source || "") : "";
+  const tooltip = [label, source, scanProgress, errorHint].filter(Boolean).join(" · ");
+  setOverviewRouteStatus(overview, label, scanProgress || "Steam 游戏与商店监控", state);
+  if (overview) overview.title = tooltip;
+  if (badge) {
+    badge.textContent = label;
+    badge.className = "badge " + state;
+    badge.title = tooltip;
+  }
+  if (summary) {
+    summary.classList.toggle("err", state === "off");
+    summary.dataset.state = state;
+    summary.title = tooltip;
+    const pollText = completedAt ? xrssFmtTime(completedAt) : "—";
+    const lastPoll = '<small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
+    if (label === "未运行") {
+      summary.textContent = "—";
+    } else if (errorHint) {
+      summary.innerHTML = '<strong>' + escapeHtml(label) + '</strong><span>' + escapeHtml(errorHint) + '</span>' + lastPoll;
+    } else {
+      const scanDetails = [source, scanProgress].filter(Boolean).join(" · ");
+      summary.innerHTML = (scanDetails ? '<span>' + escapeHtml(scanDetails) + '</span>' : '')
+        + '<span>来源 ' + (Number(st.sources_enabled) || 0) + ' / ' + (Number(st.sources_total) || 0) + '</span>'
+        + lastPoll
+        + '<span>发现 ' + (Number(st.last_new_count) || 0) + ' 条</span>'
+        + '<span>发送 ' + (Number(st.last_sent_count) || 0) + ' 条</span>'
+        + '<span>积压 ' + (Number(st.protection_queue_pending) || 0) + ' 条</span>';
     }
   }
+  renderChainStatusShortcut();
+}
+
+const watchedChainStatusRequests = new Map();
+function refreshWatchedChainStatus(service, render, force) {
+  const owner = currentQQBotId();
+  const epoch = workspaceEpoch;
+  const previous = watchedChainStatusRequests.get(service);
+  if (!force && previous?.owner === owner && previous.epoch === epoch) return previous.promise;
+  const request = {owner, epoch};
+  watchedChainStatusRequests.set(service, request);
+  request.promise = jget("/api/" + service + "/status?bot_id=" + encodeURIComponent(owner))
+    .catch(() => ({ok: false, bot_running: true}))
+    .then(function (data) {
+      if (watchedChainStatusRequests.get(service) === request && owner === currentQQBotId() && epoch === workspaceEpoch) {
+        render(data || {ok: false, bot_running: true});
+      }
+    }).finally(function () {
+      if (watchedChainStatusRequests.get(service) === request) watchedChainStatusRequests.delete(service);
+    });
+  return request.promise;
+}
+
+function refreshYoutubeStatus(force = false) {
+  return refreshWatchedChainStatus("youtube", renderYoutubeStatus, force);
+}
+
+function refreshSteamStatus(force = false) {
+  return refreshWatchedChainStatus("steam", renderSteamStatus, force);
+}
+
+function refreshWatchedChainStatuses(force = false) {
+  return Promise.all([refreshYoutubeStatus(force), refreshSteamStatus(force)]);
 }
 
 // ---------------- 消息追踪（近期投递结果，只读） ----------------
@@ -4414,7 +4838,7 @@ function openXSourceRegister() {
     if (dup) { showAlert("注册新源", "该账号已在源列表中"); return; }
     settings.x_rss_sources.push({
       source: handle, name: nameInput.value.trim(), enabled: true,
-      translation_enabled: false, translation_append_original: true, translation_show_datetime: false,
+      translation_enabled: true, translation_append_original: true, translation_show_datetime: false,
     });
     await saveAndReload();
   };
@@ -4516,11 +4940,11 @@ function openYoutubeSourceRegister() {
   valueWrap.className = "bilibili-source-field";
   const valueLabel = document.createElement("div");
   valueLabel.className = "bilibili-source-field-label";
-  valueLabel.textContent = "频道 ID 或 @handle";
+  valueLabel.textContent = "频道链接、用户名或频道 ID";
   const valueInput = document.createElement("input");
   valueInput.type = "text";
   valueInput.autocomplete = "off";
-  valueInput.placeholder = "UC... 或 @handle";
+  valueInput.placeholder = "例如：频道链接或 @用户名";
   valueWrap.appendChild(valueLabel);
   valueWrap.appendChild(valueInput);
   form.appendChild(valueWrap);
@@ -4538,11 +4962,6 @@ function openYoutubeSourceRegister() {
   nameWrap.appendChild(nameInput);
   form.appendChild(nameWrap);
 
-  const hint = document.createElement("div");
-  hint.className = "bilibili-source-field bilibili-source-field-wide";
-  hint.style.cssText = "font-size:12px;color:var(--muted);line-height:1.5;";
-  hint.textContent = "使用 YouTube 官方频道 RSS（feeds/videos.xml），无需 RSSHub。支持频道 ID（UC 开头）或 @handle；第一期只转发视频标题、封面和链接。";
-  form.appendChild(hint);
   body.appendChild(form);
 
   [valueInput, nameInput].forEach(function (input) {
@@ -4556,7 +4975,7 @@ function openYoutubeSourceRegister() {
   async function saveSource() {
     const value = normalizeYoutubeChannelValue(valueInput.value);
     if (!value) {
-      showAlert("注册 YouTube 频道", "请填写有效的频道 ID（UC 开头）或 @handle，也可以粘贴频道主页地址");
+      showAlert("注册 YouTube 频道", "请输入有效的频道主页链接、@开头的频道用户名或频道 ID");
       return;
     }
     if (!Array.isArray(settings.youtube_sources)) settings.youtube_sources = [];
@@ -4571,7 +4990,7 @@ function openYoutubeSourceRegister() {
       value: value,
       name: nameInput.value.trim() || value,
       enabled: true,
-      translation_enabled: false,
+      translation_enabled: true,
       translation_append_original: true,
       translation_show_datetime: false,
     });
@@ -4579,7 +4998,7 @@ function openYoutubeSourceRegister() {
     await saveAndReload();
   }
   document.getElementById("youtubeSourceModalTitle").textContent = "注册 YouTube 频道";
-  document.getElementById("youtubeSourceModalContext").textContent = "填写频道 ID（UC 开头）或 @handle";
+  document.getElementById("youtubeSourceModalContext").textContent = "填写频道主页链接，或输入 @开头的频道用户名";
   document.getElementById("youtubeSourceSave").onclick = saveSource;
   document.getElementById("youtubeSourceModal").style.display = "flex";
   valueInput.focus();
@@ -4740,8 +5159,10 @@ function applyDndOrder(bodyId, newIds) {
     if (!group) return false;
     if (bodyId === "scheduledGroupMessageList") {
       const messages = group.messages || [];
-      if (messages.length !== newIds.length || !newIds.every(function (id) { return messages.some(function (item) { return String(item.id) === String(id); }); })) return false;
-      group.messages = newIds.map(function (id) { return messages.find(function (item) { return String(item.id) === String(id); }); });
+      const byId = new Map(messages.map(message => [String(message.id), message]));
+      if (byId.size !== messages.length || new Set(newIds.map(String)).size !== messages.length ||
+          newIds.length !== messages.length || !newIds.every(id => byId.has(String(id)))) return false;
+      group.messages = newIds.map(id => byId.get(String(id)));
     } else {
       if (group.target_mode !== "groups") return false;
       const targets = group.target_groups || [];
@@ -5014,13 +5435,14 @@ function setConfirmButtons(okText, showCancel, cancelText, showOk) {
   cancel.textContent = cancelText || "取消";
 }
 
-function showAlert(title, message) {
+function showAlert(title, message, opts) {
   scheduledMessageTargetPickerOpen = false;
   document.getElementById("confirmTitle").textContent = title;
   const body = document.getElementById("confirmBody");
   body.innerHTML = "";
   const p = document.createElement("div");
   p.style.whiteSpace = "pre-wrap";
+  if (opts && opts.emptyState) p.className = "registration-empty-state";
   p.textContent = localizeUserError(message);
   body.appendChild(p);
   setConfirmButtons("确定", false);
@@ -5049,6 +5471,7 @@ function editUserDetails(user) { editQQDetails(user, false); }
 function editGroupDetails(group) { editQQDetails(group, true); }
 function editQQDetails(user, isGroup) {
   const openid = String(user.openid);
+  const epoch = workspaceEpoch;
   document.getElementById("confirmTitle").textContent = isGroup ? "编辑群资料" : "编辑用户资料";
   const body = document.getElementById("confirmBody");
   body.innerHTML = "";
@@ -5070,6 +5493,7 @@ function editQQDetails(user, isGroup) {
   const account = field(isGroup ? "QQ群号" : "QQ 账号", user.qq_id, 20, "numeric");
   setConfirmButtons("保存", true);
   confirmAction = async function () {
+    if (epoch !== workspaceEpoch) return;
     const value = account.value.trim();
     if (value && !/^[0-9]+$/.test(value)) {
       showAlert("保存失败", (isGroup ? "QQ群号" : "QQ 账号") + "请填写数字，或留空。");
@@ -5099,33 +5523,46 @@ function showConfirmSelect(title, items, labelFn, onOkSelected, opts) {
   const rows = [];
   function renderRow(it) {
     const row = document.createElement("label");
-    row.style.display = "flex";
-    row.style.alignItems = "center";
-    row.style.gap = "8px";
-    row.style.cursor = "pointer";
-    row.style.padding = "2px 0";
+    if (opts.cardRows) row.className = "registry-picker-row";
+    else row.style.cssText = "display:flex;align-items:center;gap:8px;cursor:pointer;padding:2px 0;";
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.checked = typeof defaultChecked === "function" ? !!defaultChecked(it) : defaultChecked !== false;
     cb.style.width = "16px";
     cb.style.height = "16px";
     const span = document.createElement("span");
-    span.className = "mono";
+    span.className = opts.cardRows ? "registry-picker-info" : "mono";
     span.style.flex = "1";
     span.style.minWidth = "0";
     const labelLink = typeof opts.labelLinkFn === "function" ? opts.labelLinkFn(it) : "";
+    const detail = opts.cardRows && typeof opts.detailFn === "function" ? String(opts.detailFn(it) || "") : "";
+    let displayLabel = String(labelFn(it));
+    if (detail && displayLabel.endsWith(detail + ")")) displayLabel = displayLabel.slice(0, -(detail.length + 2)).trim();
+    else if (detail && displayLabel.endsWith(detail)) displayLabel = displayLabel.slice(0, -detail.length).replace(/\s*·\s*$/, "").trim();
+    if (!displayLabel) displayLabel = detail;
+    const name = document.createElement("span");
+    if (opts.cardRows) name.className = "registry-picker-name";
     if (labelLink) {
       const link = document.createElement("a");
       link.className = "x-account-link";
       link.href = labelLink;
       link.target = "_blank";
       link.rel = "noopener noreferrer";
-      link.textContent = labelFn(it);
+      link.textContent = displayLabel;
       link.title = "打开 X 主页";
       link.addEventListener("click", function (e) { e.stopPropagation(); });
-      span.appendChild(link);
+      name.appendChild(link);
     } else {
-      span.textContent = labelFn(it);
+      name.textContent = displayLabel;
+    }
+    name.title = displayLabel;
+    span.appendChild(name);
+    if (detail && detail !== displayLabel) {
+      const secondary = document.createElement("span");
+      secondary.className = "registry-picker-detail";
+      secondary.textContent = detail;
+      secondary.title = detail;
+      span.appendChild(secondary);
     }
     row.appendChild(cb);
     row.appendChild(span);
@@ -5512,8 +5949,8 @@ function renderRegistrationReview(data) {
   body.innerHTML = "";
   if (!items.length) {
     const empty = document.createElement("div");
-    empty.style.cssText = "color:var(--muted);padding:8px 0;";
-    empty.textContent = "没有待审核的注册申请";
+    empty.className = "registration-empty-state";
+    empty.textContent = "暂无待审核申请";
     body.appendChild(empty);
   }
   let codeFilter = null;
@@ -5530,8 +5967,9 @@ function renderRegistrationReview(data) {
     codeFilter.style.cssText = "width:100%;box-sizing:border-box;margin:0 0 8px;";
     body.appendChild(codeFilter);
     noMatch = document.createElement("div");
-    noMatch.style.cssText = "display:none;color:var(--muted);padding:8px 0;";
-    noMatch.textContent = "没有匹配的申请识别码";
+    noMatch.className = "registration-empty-state";
+    noMatch.style.display = "none";
+    noMatch.textContent = "暂无匹配的申请";
     body.appendChild(noMatch);
   }
   const reviewRows = [];
@@ -5547,9 +5985,8 @@ function renderRegistrationReview(data) {
     row.className = "registration-review-row";
     row.dataset.applicationCode = String(it.application_code || "")
       .replace(/[^a-z0-9]/gi, "").toUpperCase();
-    row.style.cssText = "display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--panel-border);";
     const info = document.createElement("div");
-    info.style.cssText = "flex:1;min-width:0;";
+    info.className = "registration-review-info";
     info.innerHTML =
       '<div>' + escapeHtml(label) + (it.bot_id ? '' : ' · 历史申请，归属未知，审核将加入当前账号') + '</div>' +
       '<div style="font-size:12px;color:var(--name-green);">申请识别码：' + escapeHtml(it.application_code || "旧申请需重新提交") + '</div>' +
@@ -5579,7 +6016,7 @@ function renderRegistrationReview(data) {
       let visibleCount = 0;
       reviewRows.forEach(function (row) {
         const matches = !query || row.dataset.applicationCode.includes(query);
-        row.style.display = matches ? "flex" : "none";
+        row.hidden = !matches;
         if (matches) visibleCount += 1;
       });
       noMatch.style.display = visibleCount ? "none" : "block";
@@ -5651,7 +6088,7 @@ function migrateFilterMessageType(type) {
   return mapped && filterSupportedTypes().indexOf(mapped) >= 0 ? mapped : type;
 }
 
-let filterEditIndex = -1;
+let filterSourceTarget = null;
 let filterEditScope = "channel";
 let filterUsernames = [];
 let filterKeywords = [];
@@ -5931,11 +6368,13 @@ function renderRelayChannelsList() {
   const channels = Array.isArray(items) ? items : [];
   const entryName = isX ? "账号" : isBilibili ? "来源" : "频道";
   document.getElementById("relayChannelsTitle").textContent = "已注册" + entryName;
-  document.querySelector("#relayChannelsModal .relay-channels-desc").textContent = isX
+  const description = document.querySelector("#relayChannelsModal .relay-channels-desc");
+  description.style.display = isX || isBilibili ? "" : "none";
+  description.textContent = isX
     ? "这里显示全部已登记的 X 账号。修改备注后点击保存即可。"
     : isBilibili
       ? "这里显示全部已登记的 Bilibili 来源；来源名称直接使用 UID、标签或关键词。"
-      : "这里显示全部已登记的 Discord 频道。修改备注后点击保存即可。";
+      : "";
   if (!channels.length) {
     list.innerHTML = '<div class="relay-channels-empty">当前没有已注册' + entryName + "</div>";
   } else {
@@ -6108,7 +6547,7 @@ function sourceIdForScope(scope, source) {
   if (scope === "channel") return String(source.id || "");
   if (scope === "xsource") return xSourceKey(source.source);
   if (scope === "bsource") return String(source.id || bilibiliSourceId(source.kind || "up", source.value || ""));
-  if (scope === "youtubeSource") return String(source.id || youtubeSourceId(source.value));
+  if (scope === "youtubeSource") return youtubeSourceId(source.value);
   return "";
 }
 
@@ -6128,9 +6567,15 @@ function replaceForwardingSourceReference(scope, oldId, newId) {
   });
 }
 
-function openSourceContentEditor(scope, index) {
-  const items = sourceItemsForScope(scope);
-  const source = items[Number(index)];
+function findSourceById(scope, sourceId) {
+  if (!sourceId) return null;
+  const matches = sourceItemsForScope(scope).filter(source => sourceIdForScope(scope, source) === sourceId);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function openSourceContentEditor(scope, sourceId) {
+  const source = findSourceById(scope, sourceId);
+  const epoch = workspaceEpoch;
   if (!source) return;
   const body = document.getElementById("confirmBody");
   body.replaceChildren();
@@ -6168,6 +6613,12 @@ function openSourceContentEditor(scope, index) {
   document.getElementById("confirmTitle").textContent = "编辑来源内容";
   setConfirmButtons("保存", true);
   confirmAction = async function () {
+    if (epoch !== workspaceEpoch) return;
+    const source = findSourceById(scope, sourceId);
+    if (!source) {
+      showAlert("保存失败", "该来源已变化，请重新打开编辑窗口。");
+      return;
+    }
     let nextAddress = addressInput.value.trim();
     if (!nextAddress) {
       showAlert("无法保存", "来源地址不能为空。");
@@ -6202,12 +6653,11 @@ function openSourceContentEditor(scope, index) {
       }
     }
 
-    const oldId = sourceIdForScope(scope, source);
     const nextId = scope === "channel" ? nextAddress
       : scope === "xsource" ? xSourceKey(nextAddress)
         : scope === "bsource" ? bilibiliSourceId(source.kind || "up", nextAddress)
           : youtubeSourceId(nextAddress);
-    const duplicate = items.some(function (item) {
+    const duplicate = sourceItemsForScope(scope).some(function (item) {
       if (item === source) return false;
       if (scope === "bsource") {
         return String(item.kind || "up") === String(source.kind || "up") && String(item.value || "").toLowerCase() === nextAddress.toLowerCase();
@@ -6232,7 +6682,7 @@ function openSourceContentEditor(scope, index) {
       source.kind = "channel";
       if (!source.name) source.name = nextAddress;
     }
-    replaceForwardingSourceReference(scope, oldId, nextId);
+    replaceForwardingSourceReference(scope, sourceId, nextId);
     await saveAndReload();
   };
   document.getElementById("confirmModal").style.display = "flex";
@@ -6249,6 +6699,30 @@ function syncFilterTranslationInputs() {
   append.closest(".content-filter-check")?.classList.toggle("disabled", append.disabled);
   datetime.closest(".content-filter-check")?.classList.toggle("disabled", datetime.disabled);
 }
+
+function mountImageCardOptions(container) {
+  container.replaceChildren(document.getElementById("imageCardOptionsTemplate").content.cloneNode(true));
+  const enabled = container.querySelector('[data-image-card="enabled"]');
+  const light = container.querySelector('[data-image-card="light"]');
+  const initialEnabled = settings?.image_card_enabled !== false;
+  const initialLight = settings?.image_card_theme === "light";
+  enabled.checked = initialEnabled;
+  light.checked = initialLight;
+  const sync = () => {
+    light.closest("label").style.display = enabled.checked ? "" : "none";
+    light.disabled = !enabled.checked;
+  };
+  enabled.addEventListener("change", sync);
+  sync();
+  return () => {
+    const changes = {};
+    if (enabled.checked !== initialEnabled) changes.image_card_enabled = enabled.checked;
+    if (light.checked !== initialLight) changes.image_card_theme = light.checked ? "light" : "dark";
+    return changes;
+  };
+}
+
+let readFilterImageCardOptions = () => ({});
 
 function prepareFilterModal(config, label) {
   const c = config || {};
@@ -6286,6 +6760,7 @@ function prepareFilterModal(config, label) {
   document.getElementById("filterTranslationEnabled").checked = c.translation_enabled === true;
   document.getElementById("filterTranslationAppendOriginal").checked = c.translation_append_original !== false;
   document.getElementById("filterTranslationShowDatetime").checked = c.translation_show_datetime === true;
+  readFilterImageCardOptions = mountImageCardOptions(document.getElementById("filterImageCardFields"));
   syncFilterTranslationInputs();
   filterBilibiliSourceKind = String(c.kind || "up");
   // 手动转发统一弹窗：用 Tab 分屏编辑 Discord / X / Bilibili 三套筛选。
@@ -6368,36 +6843,16 @@ function bilibiliSourceFilterActive(source) {
   return sourceFilterActive(source, "bsource", true);
 }
 
-function openFilterModal(index) {
-  const c = settings.discord_channels[index];
-  if (!c) return;
-  filterEditScope = "channel";
-  filterEditIndex = index;
-  prepareFilterModal(c, "# " + (c.name || c.id));
-}
-
-function openXSourceFilterModal(index) {
-  const source = (settings.x_rss_sources || [])[index];
+function openSourceFilterModal(scope, sourceId) {
+  const source = findSourceById(scope, sourceId);
   if (!source) return;
-  filterEditScope = "xsource";
-  filterEditIndex = index;
-  prepareFilterModal(source, "@" + xSourceKey(source.source));
-}
-
-function openBilibiliSourceFilterModal(index) {
-  const source = (settings.bilibili_sources || [])[index];
-  if (!source) return;
-  filterEditScope = "bsource";
-  filterEditIndex = index;
-  prepareFilterModal(source, String(source.value || ""));
-}
-
-function openYoutubeSourceFilterModal(index) {
-  const source = (settings.youtube_sources || [])[index];
-  if (!source) return;
-  filterEditScope = "youtubeSource";
-  filterEditIndex = index;
-  prepareFilterModal(source, source.name || source.value || "");
+  filterEditScope = scope;
+  filterSourceTarget = {id: sourceId, epoch: workspaceEpoch};
+  let label = source.name || source.value || "";
+  if (scope === "channel") label = "# " + (source.name || sourceId);
+  if (scope === "xsource") label = "@" + sourceId;
+  if (scope === "bsource") label = String(source.value || "");
+  prepareFilterModal(source, label);
 }
 
 const MANUAL_RELAY_SCOPE_META = {
@@ -6425,14 +6880,14 @@ function switchRelayFilterTab(scope) {
   const meta = MANUAL_RELAY_SCOPE_META[scope];
   if (!meta) return;
   filterEditScope = scope;
-  filterEditIndex = -1;
+  filterSourceTarget = null;
   prepareFilterModal(settings[meta.key] || {}, meta.label);
   renderFilterScopeTabs();
 }
 
 function closeFilterModal() {
   document.getElementById("filterModal").style.display = "none";
-  filterEditIndex = -1;
+  filterSourceTarget = null;
   filterEditScope = "channel";
 }
 
@@ -6463,15 +6918,12 @@ document.getElementById("filterSave").addEventListener("click", async function (
       }),
     };
   } else {
-    if (filterEditIndex < 0) return;
-    const c = filterEditScope === "xsource"
-      ? settings.x_rss_sources[filterEditIndex]
-      : filterEditScope === "bsource"
-        ? settings.bilibili_sources[filterEditIndex]
-        : filterEditScope === "youtubeSource"
-          ? (settings.youtube_sources || [])[filterEditIndex]
-          : settings.discord_channels[filterEditIndex];
-    if (!c) return;
+    if (!filterSourceTarget || filterSourceTarget.epoch !== workspaceEpoch) return;
+    const c = findSourceById(filterEditScope, filterSourceTarget.id);
+    if (!c) {
+      showAlert("保存失败", "该来源已变化，请重新打开内容筛选。");
+      return;
+    }
     c.translation_enabled = document.getElementById("filterTranslationEnabled").checked;
     c.translation_append_original = document.getElementById("filterTranslationAppendOriginal").checked;
     c.translation_show_datetime = document.getElementById("filterTranslationShowDatetime").checked;
@@ -6505,22 +6957,42 @@ document.getElementById("filterSave").addEventListener("click", async function (
         delete c.filter_message_types;
       }
     }
-    closeFilterModal();
-    await saveAndReload();
-    return;
   }
+  const imageCardChanges = readFilterImageCardOptions();
   closeFilterModal();
-  await saveAndReload();
+  await saveAndReloadWithImageCard(imageCardChanges);
 });
+
+async function saveAndReloadWithImageCard(changes) {
+  const original = settings;
+  const previous = Object.fromEntries(Object.keys(changes).map(key => [key, original[key]]));
+  Object.assign(original, changes);
+  let saved = false;
+  try {
+    saved = await saveAndReload();
+    return saved;
+  } finally {
+    if (!saved && settings === original) {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete original[key];
+        else original[key] = value;
+      }
+    }
+  }
+}
 
 async function saveAndReload() {
   if (settings?._profile_bot && settings._profile_bot !== currentQQBotId()) {
     showAlert("保存失败", "账号正在切换，请等待配置加载完成"); return false;
   }
+  const epoch = workspaceEpoch;
   const result = await jpost("/api/settings/save", settings);
+  if (epoch !== workspaceEpoch) return false;
   if (!result.ok) {
     if (result.conflict) {
-      settings = result.settings || await jget("/api/settings");
+      const loaded = result.settings || await jget("/api/settings");
+      if (epoch !== workspaceEpoch) return false;
+      settings = loaded;
       renderSettings();
       showAlert("配置已刷新", "配置已被其他操作修改，当前页面已刷新，请重新确认本次修改。");
     } else {
@@ -6528,7 +7000,9 @@ async function saveAndReload() {
     }
     return false;
   }
-  settings = await jget("/api/settings");
+  const loaded = await jget("/api/settings");
+  if (epoch !== workspaceEpoch) return false;
+  settings = loaded;
   renderSettings();
   await refreshChannelNames();
   await refreshStatus();
@@ -6607,7 +7081,7 @@ async function saveQQConfig() {
     // 凭据变化后重启使新配置生效；仅改显示名称不重启。
     let rr;
     try {
-      rr = await jpost("/api/bot/restart");
+      rr = await postBotLifecycle("/api/bot/restart");
     } catch (e) { rr = { ok: false }; }
     if (!rr || !rr.ok) {
       saveBtn.disabled = false;
@@ -7030,7 +7504,7 @@ async function openTranslationConfigModal() {
   if (!r || !r.ok) {
     status.textContent = localizeUserError((r && r.msg), "无法读取 TMT 配置状态");
   } else if (idReady && keyReady) {
-    status.textContent = "TMT SecretId / SecretKey 已配置；输入框留空表示保持当前密钥。";
+    status.textContent = "TMT SecretId / SecretKey 已配置。";
   } else {
     status.textContent = "TMT 密钥尚未完整配置，请填写 SecretId 和 SecretKey。";
   }
@@ -7105,7 +7579,7 @@ async function saveTranslationConfig() {
   }
   // .env.prod 中的密钥需要新 Bot 进程重新加载；失败时不回滚已保存配置。
   let restartResult;
-  try { restartResult = await jpost("/api/bot/restart"); } catch (e) { restartResult = {ok: false}; }
+  try { restartResult = await postBotLifecycle("/api/bot/restart"); } catch (e) { restartResult = {ok: false}; }
   saveBtn.disabled = false;
   cancelBtn.disabled = false;
   if (!restartResult || !restartResult.ok) {
@@ -7154,7 +7628,7 @@ async function saveDiscordConfig() {
   // 保存成功后再重启，使新配置生效；重启失败不回滚配置
   let rr;
   try {
-    rr = await jpost("/api/bot/restart");
+    rr = await postBotLifecycle("/api/bot/restart");
   } catch (e) { rr = { ok: false }; }
   if (!rr || !rr.ok) {
     saveBtn.disabled = false;
@@ -7175,30 +7649,42 @@ const NETWORK_PROXY_FIELDS = {
   steam: "networkProxySteam",
   translation: "networkProxyTranslation",
 };
+const networkProxyTestRequests = new WeakMap();
+let networkProxyModalSession = 0;
 function closeNetworkProxyModal() {
+  networkProxyModalSession += 1;
   document.getElementById("networkProxyModal").style.display = "none";
 }
 function setNetworkProxyTestStatus(service, message, state) {
-  const suffix = service === "discord" ? "Discord" : "X";
-  const status = document.getElementById("networkProxy" + suffix + "Status");
+  const fieldId = NETWORK_PROXY_FIELDS[service];
+  const status = fieldId && document.getElementById(fieldId + "Status");
   if (!status) return;
   status.textContent = message || "";
   status.classList.toggle("success", state === "success");
   status.classList.toggle("failure", state === "failure");
 }
 async function openNetworkProxyModal() {
+  const session = ++networkProxyModalSession;
   const modal = document.getElementById("networkProxyModal");
   const saveButton = document.getElementById("networkProxySave");
+  const detectButton = document.getElementById("networkProxyDetectSystem");
   const detectStatus = document.getElementById("networkProxySystemStatus");
   modal.style.display = "flex";
   saveButton.disabled = true;
+  detectButton.disabled = true;
   if (detectStatus) {
     detectStatus.textContent = "";
     detectStatus.classList.remove("success", "failure");
   }
-  for (const service of ["discord", "x"]) setNetworkProxyTestStatus(service, "", "");
+  const testButtons = modal.querySelectorAll("[data-proxy-test]");
+  for (const button of testButtons) {
+    networkProxyTestRequests.delete(button);
+    button.disabled = true;
+    setNetworkProxyTestStatus(button.dataset.proxyTest, "", "");
+  }
   let result;
   try { result = await jget("/api/network-proxy"); } catch (_error) { result = null; }
+  if (session !== networkProxyModalSession) return;
   if (!result || !result.ok || !result.proxies) {
     showAlert("读取代理设置失败", (result && result.msg) || "无法读取当前代理设置");
     return;
@@ -7207,6 +7693,8 @@ async function openNetworkProxyModal() {
     const input = document.getElementById(id);
     if (input) input.value = result.proxies[service] || "";
   }
+  for (const button of testButtons) button.disabled = false;
+  detectButton.disabled = false;
   saveButton.disabled = false;
 }
 async function testNetworkProxy(service, button) {
@@ -7217,13 +7705,21 @@ async function testNetworkProxy(service, button) {
     input?.focus();
     return false;
   }
+  const request = {session: networkProxyModalSession};
+  networkProxyTestRequests.set(button, request);
   button.disabled = true;
   setNetworkProxyTestStatus(service, "正在检测…", "");
   let result;
   try {
     result = await jpost("/api/network-proxy/test", {service: service, proxy: proxy});
   } catch (_error) { result = null; }
+  if (request.session !== networkProxyModalSession || networkProxyTestRequests.get(button) !== request) return false;
+  networkProxyTestRequests.delete(button);
   button.disabled = false;
+  if (input.value.trim() !== proxy) {
+    setNetworkProxyTestStatus(service, "", "");
+    return false;
+  }
   const success = !!(result && result.ok);
   setNetworkProxyTestStatus(
     service,
@@ -7232,32 +7728,47 @@ async function testNetworkProxy(service, button) {
   );
   return success;
 }
+for (const [service, fieldId] of Object.entries(NETWORK_PROXY_FIELDS)) {
+  document.getElementById(fieldId)?.addEventListener("input", function () {
+    setNetworkProxyTestStatus(service, "", "");
+  });
+}
 async function detectSystemNetworkProxy(button) {
+  const session = networkProxyModalSession;
+  const modal = document.getElementById("networkProxyModal");
   const status = document.getElementById("networkProxySystemStatus");
+  const saveButton = document.getElementById("networkProxySave");
+  if (saveButton.disabled) return;
   button.disabled = true;
+  saveButton.disabled = true;
   status.textContent = "正在读取 Windows 系统代理…";
   status.classList.remove("success", "failure");
   let result;
   try { result = await jget("/api/network-proxy/detect-system"); }
   catch (_error) { result = null; }
+  if (session !== networkProxyModalSession) return;
+  saveButton.disabled = false;
   if (!result || !result.ok || !result.proxy) {
     status.textContent = (result && result.msg) || "读取系统代理失败，请检查 Clash Verge 状态。";
     status.classList.add("failure");
     button.disabled = false;
     return;
   }
-  document.getElementById(NETWORK_PROXY_FIELDS.discord).value = result.proxy;
-  document.getElementById(NETWORK_PROXY_FIELDS.x).value = result.proxy;
-  status.textContent = "已填入当前系统代理，正在检测 Discord 和 X…";
-  const checks = await Promise.all(["discord", "x"].map(function (service) {
-    const testButton = document.querySelector('[data-proxy-test="' + service + '"]');
-    return testButton ? testNetworkProxy(service, testButton) : Promise.resolve(false);
+  const fields = Object.values(NETWORK_PROXY_FIELDS).map(id => document.getElementById(id));
+  for (const field of fields) field.value = result.proxy;
+  status.textContent = "已填入全部 " + fields.length + " 项代理，正在检测连接…";
+  const checks = await Promise.all(Array.from(modal.querySelectorAll("[data-proxy-test]"), function (testButton) {
+    return testNetworkProxy(testButton.dataset.proxyTest, testButton);
   }));
-  if (checks.every(Boolean)) {
-    status.textContent = "两项连接检测都已通过；点「保存并重启机器人」应用设置。";
+  if (session !== networkProxyModalSession) return;
+  const passed = checks.filter(Boolean).length;
+  if (fields.some(field => field.value.trim() !== result.proxy)) {
+    status.textContent = "部分代理地址已修改，请检测修改后的地址。";
+  } else if (passed === fields.length) {
+    status.textContent = "全部 " + fields.length + " 项连接检测通过。点击「保存并重启机器人」应用设置。";
     status.classList.add("success");
   } else {
-    status.textContent = "代理地址已填入，但至少一项检测失败；请查看对应结果后再决定是否保存。";
+    status.textContent = "已填入全部 " + fields.length + " 项代理，" + passed + " 项检测通过。请查看各行结果。";
     status.classList.add("failure");
   }
   button.disabled = false;
@@ -7285,7 +7796,7 @@ async function saveNetworkProxy() {
     return;
   }
   let restarted;
-  try { restarted = await jpost("/api/bot/restart"); } catch (_error) { restarted = {ok: false}; }
+  try { restarted = await postBotLifecycle("/api/bot/restart"); } catch (_error) { restarted = {ok: false}; }
   saveButton.disabled = false;
   if (!restarted || !restarted.ok) {
     modal.dataset.restartPending = "1";
@@ -7299,7 +7810,7 @@ async function saveNetworkProxy() {
 
 document.addEventListener("contextmenu", async function (e) {
   const value = e.target.closest(".fgsection :is(.middle-value, .id-value)[data-copy-value]");
-  if (!value) return;
+  if (!value || value.closest(".scheduled-message-schedule")) return;
   e.preventDefault();
   e.stopPropagation();
   await copyForwardingValue(value);
@@ -7362,10 +7873,7 @@ document.addEventListener("click", async function (e) {
       personalQQModal: function () { window.WRelayPersonalQQ.close(); },
       discordConfigModal: closeDiscordConfigModal,
       youtubeApiKeyModal: closeYoutubeApiKeyModal,
-      scheduledMessageContentModal: function () {
-        scheduledMessageDraft = null;
-        document.getElementById("scheduledMessageContentModal").style.display = "none";
-      },
+      scheduledMessageContentModal: closeScheduledMessageEditor,
       messageTraceModal: closeMessageTraceModal,
       diagnosticModal: closeDiagnosticModal,
       backupRestoreModal: closeBackupRestore,
@@ -7553,23 +8061,30 @@ document.addEventListener("click", async function (e) {
     return;
   }
   if (k === "fgRename") {
-    startFgRename(FG_CTX[btn.dataset.ctx] || FG_DISCORD);
+    const ctx = FG_CTX[btn.dataset.ctx];
+    if (ctx) startFgRename(ctx, btn.dataset.id);
     return;
   }
   if (k === "fgDel") {
-    const ctx = FG_CTX[btn.dataset.ctx] || FG_DISCORD;
-    const fg = getActiveFg(ctx);
+    const ctx = FG_CTX[btn.dataset.ctx];
+    if (!ctx) return;
+    const groupId = btn.dataset.id;
+    const fg = getFgList(ctx).find(item => item.id === groupId);
     // Discord/X 至少保留 1 个转发组；QQ→QQ 允许删除仅含一个群的最后一组。
     if (!fg) return;
+    const epoch = workspaceEpoch;
     const removeGroup = async function () {
+      if (epoch !== workspaceEpoch) return;
       // 删除时基于最新 settings 解析，避免操作期间对象被替换
       const curList = getFgList(ctx);
-      const targetIndex = curList.findIndex(function (x) { return x.id === fg.id; });
+      const targetIndex = curList.findIndex(function (x) { return x.id === groupId; });
       if (targetIndex < 0) return;
       curList.splice(targetIndex, 1);
-      const next = curList[Math.max(0, targetIndex - 1)] || null;
-      ctx.activeId = next ? next.id : null;
-      try { localStorage.setItem(ctx.storageKey, ctx.activeId || ""); } catch (e) {}
+      if (ctx.activeId === groupId) {
+        const next = curList[Math.max(0, targetIndex - 1)] || null;
+        ctx.activeId = next ? next.id : null;
+        try { localStorage.setItem(ctx.storageKey, ctx.activeId || ""); } catch (e) {}
+      }
       await saveAndReload();
     };
     if (forwardingGroupIsEmpty(ctx, fg)) {
@@ -7719,6 +8234,7 @@ document.addEventListener("click", async function (e) {
     scanReadableChannels(btn);
     return;
   }
+  const rowId = btn.closest("tr[data-id]")?.dataset.id;
   if (k === "xFgSourceRemove") {
     // 与转发组行内"删除"同机制：仅把来源移出当前 X 转发组（不删注册源）
     removeFgMember(FG_X, btn.dataset.id, "sources");
@@ -7734,11 +8250,11 @@ document.addEventListener("click", async function (e) {
     return;
   }
   if (k === "biliSourceFilterEdit") {
-    openBilibiliSourceFilterModal(Number(btn.dataset.i));
+    openSourceFilterModal("bsource", rowId);
     return;
   }
   if (k === "biliSourceEdit") {
-    openSourceContentEditor("bsource", Number(btn.dataset.i));
+    openSourceContentEditor("bsource", rowId);
     return;
   }
   if (k === "youtubeFgSourceRemove") {
@@ -7746,11 +8262,11 @@ document.addEventListener("click", async function (e) {
     return;
   }
   if (k === "youtubeSourceFilterEdit") {
-    openYoutubeSourceFilterModal(Number(btn.dataset.i));
+    openSourceFilterModal("youtubeSource", rowId);
     return;
   }
   if (k === "youtubeSourceEdit") {
-    openSourceContentEditor("youtubeSource", Number(btn.dataset.i));
+    openSourceContentEditor("youtubeSource", rowId);
     return;
   }
   if (k === "youtubeFgGroupRemove") {
@@ -7774,35 +8290,29 @@ document.addEventListener("click", async function (e) {
     if (group) editGroupDetails(group);
     return;
   } else if (k === "userEdit") {
-    const u = settings.qq_user_openids[Number(btn.dataset.i)];
+    const u = (settings.qq_user_openids || []).find(item => String(item.openid) === rowId);
     if (u) editUserDetails(u);
     return;
-  } else if (k === "userDel") {
-    const idx = Number(btn.dataset.i);
-    const u = settings.qq_user_openids[idx];
-    const label = (u.name || "").trim() || (u.remark || "").trim() || identityName("users", u.openid) || u.openid;
-    showConfirmDlg("删除用户", "确定要删除用户「" + label + "」吗？", async function () {
-      settings.qq_user_openids.splice(idx, 1);
-      await saveAndReload();
-    }, "删除");
-  } else if (k === "xUserDel") {
-    // X → QQ 页白名单行内删除：与 Discord 页 userDel 同机制（同一份全局数据）
-    const idx = Number(btn.dataset.i);
-    const u = settings.qq_user_openids[idx];
+  } else if (k === "userDel" || k === "xUserDel") {
+    const u = (settings.qq_user_openids || []).find(item => String(item.openid) === rowId);
     if (!u) return;
+    const epoch = workspaceEpoch;
     const label = (u.name || "").trim() || (u.remark || "").trim() || identityName("users", u.openid) || u.openid;
     showConfirmDlg("删除用户", "确定要删除用户「" + label + "」吗？", async function () {
-      settings.qq_user_openids.splice(idx, 1);
+      if (epoch !== workspaceEpoch) return;
+      const index = (settings.qq_user_openids || []).findIndex(item => String(item.openid) === rowId);
+      if (index < 0) return;
+      settings.qq_user_openids.splice(index, 1);
       await saveAndReload();
     }, "删除");
   } else if (k === "chanFilter") {
-    openFilterModal(Number(btn.dataset.i));
+    openSourceFilterModal("channel", rowId);
   } else if (k === "xSourceFilter") {
-    openXSourceFilterModal(Number(btn.dataset.i));
+    openSourceFilterModal("xsource", rowId);
   } else if (k === "chanEdit") {
-    openSourceContentEditor("channel", Number(btn.dataset.i));
+    openSourceContentEditor("channel", rowId);
   } else if (k === "xSourceEdit") {
-    openSourceContentEditor("xsource", Number(btn.dataset.i));
+    openSourceContentEditor("xsource", rowId);
   } else if (k === "fgChanRemove") {
     removeFgMember(FG_DISCORD, btn.dataset.id, "channels");
   } else if (btn.id === "btnAddUser") {
@@ -7849,13 +8359,15 @@ document.addEventListener("click", async function (e) {
     }, "清空");
   } else if (btn.id === "btnStart") {
     await runBotAction("/api/bot/start", "启动失败", "启动机器人失败");
-    await sleep(800); await refreshStatus();
+    await sleep(800);
+    await Promise.all([refreshStatus(), refreshWatchedChainStatuses()]);
   } else if (btn.id === "btnStop") {
     await runBotAction("/api/bot/stop", "停止失败", "停止机器人失败");
     await sleep(800); await refreshStatus();
   } else if (btn.id === "btnRestart") {
     await runBotAction("/api/bot/restart", "重启失败", "重启机器人失败");
-    await sleep(1500); await refreshStatus();
+    await sleep(1500);
+    await Promise.all([refreshStatus(), refreshWatchedChainStatuses()]);
   } else if (btn.id === "btnSettingsAutostart") {
     const stateButton = document.getElementById("btnSettingsAutostart");
     const enabled = stateButton.dataset.on !== "1";
@@ -7944,10 +8456,7 @@ const keyboardModalClosers = {
   qqConfigModal: closeQQConfigModal,
   discordConfigModal: closeDiscordConfigModal,
   youtubeApiKeyModal: closeYoutubeApiKeyModal,
-  scheduledMessageContentModal: function () {
-    scheduledMessageDraft = null;
-    document.getElementById("scheduledMessageContentModal").style.display = "none";
-  },
+  scheduledMessageContentModal: closeScheduledMessageEditor,
   messageTraceModal: closeMessageTraceModal,
   diagnosticModal: closeDiagnosticModal,
   backupRestoreModal: closeBackupRestore,
@@ -8161,20 +8670,14 @@ document.addEventListener("change", async function (e) {
     const group = activeScheduledMessageGroup();
     if (!group) return;
     const qqGroups = (settings.qq_group_openids || []).filter(groupInActiveQQBotWorkspace);
-    const targetIds = new Set(scheduledMessageGroupTargetSelection(group, qqGroups).ids.map(String));
-    (settings.qq_group_openids || []).forEach(function (item) {
-      if (targetIds.has(String(item.openid)) && groupInActiveQQBotWorkspace(item)) item.enabled = el.checked;
-    });
-    await saveAndReload();
+    scheduledMessageGroupTargetSelection(group, qqGroups).ids.forEach(function (id) { setScheduledTargetEnabled(group, id, el.checked); });
+    await saveScheduledMessageGroups();
     return;
   }
   if (el.id === "groupAllEnabled" || el.id === "xGroupAllEnabled" || el.id === "bilibiliGroupAllEnabled" || el.id === "youtubeGroupAllEnabled" || el.id === "qqGroupAllEnabled") {
     const ctx = el.id === "xGroupAllEnabled" ? FG_X : el.id === "bilibiliGroupAllEnabled" ? FG_BILIBILI : el.id === "youtubeGroupAllEnabled" ? FG_YOUTUBE : el.id === "qqGroupAllEnabled" ? FG_QQ : FG_DISCORD;
     const fg = getActiveFg(ctx);
-    const groupSet = memberIdSet(fg && fg.groups);
-    settings.qq_group_openids.forEach(function (g) {
-      if (groupSet[String(g.openid)]) g.enabled = el.checked;
-    });
+    (fg && fg.groups || []).forEach(function (id) { setFgTargetEnabled(fg, id, el.checked); });
     await saveAndReload();
     return;
   }
@@ -8193,6 +8696,18 @@ document.addEventListener("change", async function (e) {
     return;
   }
   if (!el.dataset.kind) return;
+  if (el.dataset.kind === "forwardGroupTarget") {
+    const fg = getActiveFg(FG_CTX[el.dataset.fg] || FG_DISCORD);
+    if (!fg) return;
+    setFgTargetEnabled(fg, el.dataset.openid, el.checked);
+    await saveAndReload();
+    return;
+  }
+  if (el.dataset.kind === "scheduledTargetGroup") {
+    setScheduledTargetEnabled(activeScheduledMessageGroup(), el.dataset.openid, el.checked);
+    await saveScheduledMessageGroups();
+    return;
+  }
   if (el.dataset.kind === "xSource") {
     const s = (settings.x_rss_sources || [])[Number(el.dataset.i)];
     if (s) {
@@ -8298,9 +8813,11 @@ async function refreshStatus() {
   try {
     const st = await jget("/api/status");
     if (owner !== activeQQBotId || epoch !== workspaceEpoch || (settings && settings._profile_bot && settings._profile_bot !== owner)) return;
+    const processChanged = latestStatus && (latestStatus.running !== st.running || latestStatus.pid !== st.pid);
     latestStatus = st;
     renderStatus(st);
-    if (st.scheduled_message !== undefined && settings && !scheduledMessageEditorFocused() && !scheduledMessageTargetPickerOpen) {
+    if (processChanged) void refreshWatchedChainStatuses();
+    if (st.scheduled_message !== undefined && settings && !scheduledMessageEditorFocused() && !scheduledMessageTargetPickerOpen && !scheduledMessageGroupRenameActive) {
       settings.scheduled_message = preserveScheduledMessageAttachments(
         st.scheduled_message,
         settings.scheduled_message,
@@ -8322,6 +8839,7 @@ function setupForwardingValueClipping() {
     "chanList", "groupList", "userList", "xSourceList", "xGroupList", "xUserList",
     "bilibiliSourceList", "bilibiliGroupList", "youtubeSourceList",
     "youtubeGroupList", "qqFgGroupList", "steamSourceList", "steamGroupList",
+    "scheduledGroupMessageTable", "scheduledGroupTargetTable",
   ];
   const bodies = tableIds.map(id => document.querySelector("#" + id + " tbody")).filter(Boolean);
   const observer = new MutationObserver(formatValues);
@@ -8339,17 +8857,20 @@ function setupForwardingValueClipping() {
             const value = node.nodeValue;
             const parent = node.parentElement;
             if (!parent || !value.trim() ||
-                parent.closest(".middle-value, .id-cell, button, select, textarea, svg, .chan-name-edit")) continue;
+                parent.closest(".middle-value, .id-cell, button, select, textarea, svg, .chan-name-edit, .scheduled-group-message-copy small")) continue;
             const characters = Array.from(value);
             const tailLength = characters.length > 12 ? 4 : characters.length > 4 ? 2 : 1;
             const wrapper = document.createElement("span");
             const prefix = document.createElement("span");
             const suffix = document.createElement("span");
             wrapper.className = "middle-value";
-            wrapper.dataset.copyValue = value;
+            const copyOverride = parent.closest("[data-copy-value-override]");
+            const copyValue = copyOverride ? copyOverride.dataset.copyValueOverride : value;
+            wrapper.dataset.copyValue = copyValue;
             wrapper.setAttribute("role", "button");
             wrapper.setAttribute("tabindex", "0");
-            wrapper.setAttribute("aria-label", value + "，右键复制；聚焦后按 Enter 或空格复制");
+            wrapper.setAttribute("aria-label", copyValue + (cell.matches(".scheduled-message-schedule")
+              ? "，聚焦后按 Enter 或空格复制" : "，右键复制；聚焦后按 Enter 或空格复制"));
             prefix.className = "middle-value-prefix";
             suffix.className = "middle-value-suffix";
             prefix.textContent = characters.slice(0, -tailLength).join("");
@@ -8410,6 +8931,9 @@ async function init() {
     endPanelLoading();
     document.body.classList.remove("panel-initializing");
   }
+  void refreshWatchedChainStatuses();
+  setInterval(refreshYoutubeStatus, 10000);
+  setInterval(refreshSteamStatus, 10000);
   await loadAppInfo();
   // 启动后自动检查一次（默认开启，可在设置页关闭）；只提示，不自动安装
   if (isAutoUpdateCheckEnabled()) await checkForUpdates();
@@ -8426,12 +8950,6 @@ async function init() {
   // Bilibili RSS 状态卡片：与 X RSS 相同的轻量轮询
   await refreshBilibiliStatus();
   setInterval(refreshBilibiliStatus, 10000);
-  // YouTube 状态卡片：同样使用轻量轮询
-  await refreshYoutubeStatus();
-  setInterval(refreshYoutubeStatus, 10000);
-  // Steam 状态同时更新总览卡片；详情卡片仍由 Steam 页按需显示
-  await refreshSteamStatus();
-  setInterval(refreshSteamStatus, 10000);
   await refreshMaintenance();
   setInterval(refreshMaintenance, 10000);
   await refreshMessageTrace();

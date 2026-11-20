@@ -9,8 +9,11 @@ from datetime import date, datetime
 import re
 
 from plugins.scheduled_message_media import (
+    SCHEDULED_ATTACHMENT_MAX_BYTES,
+    SCHEDULED_ATTACHMENTS_TOTAL_MAX_BYTES,
     SCHEDULED_IMAGES_TOTAL_MAX_BYTES,
     decode_scheduled_image_data,
+    validate_attachment_metadata,
 )
 from plugins.filter import (
     ALL_MESSAGE_TYPES,
@@ -199,8 +202,11 @@ class SettingsModel(dict):
                 "name": "转发组1",
                 "enabled": True,
                 "groups": [str(group.get("openid")) for group in groups if group.get("openid")],
+                "disabled_groups": [],
             }],
             "discord_channels": channels,
+            "image_card_enabled": True,
+            "image_card_theme": "dark",
             "qq_c2c_relay_filter": {
                 "filter_message_types": list(DISCORD_MESSAGE_TYPES),
             },
@@ -390,6 +396,45 @@ class SettingsModel(dict):
                     if isinstance(item, dict) and item.get("openid") and item.get("enabled")
                 ],
             )
+        # 旧转发组把接收群状态保存在 qq_group_openids.enabled。迁移时将
+        # 当时未启用的成员写入组内停用列表，保留各组原有投递结果。
+        global_disabled = {
+            str(item.get("openid"))
+            for item in result.get("qq_group_openids", [])
+            if isinstance(item, dict) and item.get("openid") and item.get("enabled") is not True
+        }
+        for key in (
+            "forwarding_groups", "x_forwarding_groups", "bilibili_forwarding_groups",
+            "youtube_forwarding_groups", "steam_forwarding_groups", "qq_forwarding_groups",
+        ):
+            groups = result.get(key)
+            if not isinstance(groups, list):
+                continue
+            for group in groups:
+                if not isinstance(group, dict):
+                    continue
+                if "disabled_groups" not in group:
+                    members = group.get("groups") if isinstance(group.get("groups"), list) else []
+                    group["disabled_groups"] = [str(value) for value in members if str(value) in global_disabled]
+        # 定时消息组也迁移成组内接收群开关。all / forward_group 模式按当前
+        # 解析出的成员迁移；之后的勾选状态不再读写 QQ 群全局开关。
+        scheduled = result.get("scheduled_message")
+        if isinstance(scheduled, dict):
+            message_groups = scheduled.get("message_groups")
+            if isinstance(message_groups, list):
+                group_map = {str(item.get("id")): item for item in result.get("qq_forwarding_groups", []) if isinstance(item, dict)}
+                known = {str(item.get("openid")) for item in result.get("qq_group_openids", []) if isinstance(item, dict) and item.get("openid")}
+                for group in message_groups:
+                    if not isinstance(group, dict) or "disabled_target_groups" in group:
+                        continue
+                    mode = group.get("target_mode") or "groups"
+                    if mode == "all":
+                        members = known
+                    elif mode == "forward_group":
+                        members = {str(value) for forward_id in group.get("forward_groups", []) for value in group_map.get(str(forward_id), {}).get("groups", [])}
+                    else:
+                        members = {str(value) for value in group.get("target_groups", [])}
+                    group["disabled_target_groups"] = sorted(members & global_disabled)
         # bot_id 为空表示沿用第一个已连接 QQ Bot。旧配置补上空值，
         # 以保持原有单 Bot 投递行为不变。
         qq_groups = result.get("qq_group_openids")
@@ -444,6 +489,14 @@ def _validate_account_entries(data):
                     not numeric_id(str(target)[len(PREFIX):]) or not numeric_id(owner[len(PREFIX):])
                 ):
                     return "个人 QQ 的群号或账号格式无效"
+
+
+def _validate_image_card(data):
+    if not isinstance(data.get("image_card_enabled", True), bool):
+        return "image_card_enabled 必须是布尔值"
+    if data.get("image_card_theme", "dark") not in ("dark", "light"):
+        return "image_card_theme 必须是 dark 或 light"
+    return None
 
 
 def _validate_x_sources(data):
@@ -837,6 +890,9 @@ def _validate_scheduled_messages(data):
                     return prefix + ".%s 必须是列表" % key
                 if any(not isinstance(item, str) or not item.strip() for item in values):
                     return prefix + ".%s 的每一项必须是非空字符串" % key
+            disabled_targets = group.get("disabled_target_groups", [])
+            if not isinstance(disabled_targets, list) or any(not isinstance(item, str) or not item.strip() for item in disabled_targets):
+                return prefix + ".disabled_target_groups 必须是非空字符串列表"
             if target_mode == SCHEDULED_TARGET_FORWARD_GROUP and not group.get("forward_groups"):
                 return prefix + ".forward_groups 在转发组模式下不能为空"
             children = group.get("messages", [])
@@ -850,6 +906,7 @@ def _validate_scheduled_messages(data):
                     forward_groups=group.get("forward_groups", [])))
         if message_groups:
             messages = grouped_messages
+    total_attachment_bytes = 0
     total_image_bytes = 0
     for index, message in enumerate(messages, start=1):
         prefix = "scheduled_message.messages[%d]" % index
@@ -872,6 +929,31 @@ def _validate_scheduled_messages(data):
         image_name = message.get("image_name", "")
         if not isinstance(image_name, str) or len(image_name) > 255:
             return prefix + ".image_name 必须是 255 个字符以内的字符串"
+        attachment_id = message.get("attachment_id", "")
+        attachment_type = message.get("attachment_type", "")
+        attachment_mime = message.get("attachment_mime", "")
+        attachment_name = message.get("attachment_name", "")
+        attachment_size = message.get("attachment_size", 0)
+        if not isinstance(attachment_id, str):
+            return prefix + ".attachment_id 必须是字符串"
+        if attachment_id:
+            if image_data:
+                return prefix + "不能同时包含旧图片数据和媒体附件"
+            if attachment_type not in ("image", "video", "audio"):
+                return prefix + ".attachment_type 必须是 image、video 或 audio"
+            if not isinstance(attachment_mime, str) or not isinstance(attachment_name, str) or len(attachment_name) > 255:
+                return prefix + ".attachment_mime 或 attachment_name 无效"
+            try:
+                validate_attachment_metadata(attachment_id, attachment_type, attachment_mime)
+            except ValueError as exc:
+                return prefix + ".attachment_id " + str(exc)
+            if type(attachment_size) is not int or not 0 < attachment_size <= SCHEDULED_ATTACHMENT_MAX_BYTES:
+                return prefix + ".attachment_size 必须大于 0 且不超过 30 MiB"
+            total_attachment_bytes += attachment_size
+            if total_attachment_bytes > SCHEDULED_ATTACHMENTS_TOTAL_MAX_BYTES:
+                return "所有定时消息附件总大小不能超过 30 MiB"
+        elif attachment_type or attachment_mime or attachment_name or attachment_size not in (0, None):
+            return prefix + "不能在没有附件时填写附件信息"
         if image_data:
             try:
                 image_bytes, _mime_type = decode_scheduled_image_data(image_data)
@@ -880,10 +962,13 @@ def _validate_scheduled_messages(data):
             total_image_bytes += len(image_bytes)
             if total_image_bytes > SCHEDULED_IMAGES_TOTAL_MAX_BYTES:
                 return "定时消息图片总大小不能超过 3 MiB"
+            total_attachment_bytes += len(image_bytes)
+            if total_attachment_bytes > SCHEDULED_ATTACHMENTS_TOTAL_MAX_BYTES:
+                return "所有定时消息附件总大小不能超过 30 MiB"
         elif image_name:
             return prefix + ".image_name 不能在没有图片时填写"
-        if not content.strip() and not image_data:
-            return prefix + ".content 不能为空（仅图片消息除外）"
+        if not content.strip() and not image_data and not attachment_id:
+            return prefix + ".content 不能为空（仅附件消息除外）"
         target_mode = message.get("target_mode", SCHEDULED_TARGET_GROUP)
         if target_mode not in SCHEDULED_TARGET_MODES:
             return prefix + ".target_mode 必须是 groups、forward_group 或 all"
@@ -1058,6 +1143,9 @@ def _validate_forwarding_groups(
             for field in fields:
                 if not isinstance(group.get(field), list):
                     return "%s 的每一项 %s 必须是列表" % (key, field)
+            disabled = group.get("disabled_groups", [])
+            if not isinstance(disabled, list) or any(not isinstance(item, str) or not item.strip() for item in disabled):
+                return "%s 的每一项 disabled_groups 必须是非空字符串列表" % key
 
 
 
@@ -1072,6 +1160,7 @@ def validate_settings(
         return "配置必须是 JSON 对象"
 
     validators = (
+        _validate_image_card,
         _validate_account_entries,
         _validate_x_sources,
         _validate_bilibili_sources_and_protection,

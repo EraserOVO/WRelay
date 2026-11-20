@@ -50,6 +50,9 @@ body .modal-shell button.rowicon {
 }
 .modal-shell .form-field { font-size: 13px; color: var(--muted); }
 .modal-shell .form-field > input { margin-top: 6px; }
+/* 筛选勾选项不是纵向表单字段，不继承输入框上边距或说明文字颜色。 */
+.modal-shell .content-filter-check.form-field { color: var(--fg); }
+.modal-shell .content-filter-check.form-field > input { margin: 0; }
 
 /* Bot profile import: consistent form rhythm and a custom file picker. */
 #profileImportModal .modal-body.modal-grid {
@@ -288,6 +291,7 @@ body #runtimeLogModal { z-index: 990; }
 body #runtimeLogModal #log { width: 100%; height: 320px; min-height: 180px; max-height: 42vh; margin: 0 0 16px; padding: 12px; box-sizing: border-box; overflow: auto; font-family: Consolas, "Cascadia Mono", monospace; background: var(--log-bg); border: 1px solid var(--field-border); border-radius: var(--radius-control); }
 #runtimeLogModal .log-toolbar-left { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
 #runtimeLogModal #logLevel { width: auto; min-width: 120px; }
+#runtimeLogModal #btnOpenMessageTrace { margin-left: auto; }
 body #runtimeLogModal #btnLogAutoScroll { display: inline-flex; align-items: center; gap: 8px; padding: 0 8px; border: 0; background: transparent; color: var(--fg); }
 #runtimeLogModal #btnLogAutoScroll[data-on="1"] .settings-switch-track { background: var(--primary); }
 #runtimeLogModal .modal-footer #btnClearLog { background: transparent; color: var(--danger-icon); border: 1px solid var(--field-border); }

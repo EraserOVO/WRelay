@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import json
 import math
 from io import BytesIO
 
@@ -10,6 +12,7 @@ from nonebot.adapters.qq import Message as QQMessage
 from nonebot.adapters.qq import MessageSegment as QQMessageSegment
 
 from plugins.config import get_active_group_routing_snapshot, get_group_bot_ids
+from plugins.delivery_dedup import delivered_groups, record_delivered_groups
 from plugins.failure_notification import notify_delivery_failure
 from plugins.media import make_text, make_media_link
 from plugins.message_trace import record_delivery
@@ -88,6 +91,8 @@ async def _record_trace(
 ):
     """追踪写入绝不能影响真实投递。"""
     try:
+        if not text_parts and media_items and media_items[0].get("card_preview"):
+            text_parts = [make_text(media_items[0]["card_preview"])]
         await record_delivery(
             channel_id,
             message_id,
@@ -459,6 +464,29 @@ async def _send_ordered_emoji_parts(
     return ok_map
 
 
+def _card_receipt_key(item, channel_id, message_id):
+    part = item.get("card_part")
+    if not part or not channel_id or not message_id:
+        return ""
+    segment = item["segment"]
+    data = getattr(segment, "data", None) or {}
+    content = data.get("content")
+    # The same message can be rendered again during a retry. Use the actual page
+    # identity so a changed template or different media is not mistaken for a receipt.
+    digest = hashlib.sha256(content).hexdigest() if isinstance(content, bytes) else ""
+    payload = json.dumps([str(channel_id), str(message_id), part, getattr(segment, "type", ""),
+                          digest, item.get("url"), data.get("text")], ensure_ascii=False)
+    return "card-part:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+async def _record_card_receipts(key, groups):
+    if key and groups:
+        try:
+            await record_delivered_groups(key, groups)
+        except Exception as exc:
+            logger.warning("转发卡片分片回执保存失败: {}", exc)
+
+
 async def send_media_items(qq_bot, groups, media_items, channel_id="", message_id=""):
     """发送媒体到指定群；返回 {group_openid: 是否送达}
     有来源链接的媒体上传重试后仍失败时，降级为文字 + 原链接（该降级视为已送达）；
@@ -472,6 +500,13 @@ async def send_media_items(qq_bot, groups, media_items, channel_id="", message_i
         if not pending_groups:
             break
 
+        receipt_key = await asyncio.to_thread(_card_receipt_key, item, channel_id, message_id) if item.get("card_part") else ""
+        if receipt_key:
+            confirmed = await delivered_groups(receipt_key, pending_groups)
+            pending_groups = [group for group in pending_groups if group not in confirmed]
+            if not pending_groups:
+                continue
+
         message = QQMessage([item["segment"]])
 
         results = await _send_to_groups(
@@ -482,6 +517,7 @@ async def send_media_items(qq_bot, groups, media_items, channel_id="", message_i
             message_id=message_id,
         )
 
+        await _record_card_receipts(receipt_key, [group for group, ok in results.items() if ok])
         pending = [group for group, ok in results.items() if not ok]
 
         if not pending:
@@ -533,6 +569,7 @@ async def send_media_items(qq_bot, groups, media_items, channel_id="", message_i
             message_id=message_id,
         )
 
+        await _record_card_receipts(receipt_key, [group for group, ok in deg_results.items() if ok])
         for group, ok in deg_results.items():
             if not ok:
                 ok_map[group] = False

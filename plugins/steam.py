@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import copy
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 import hashlib
 import json
+import math
 import time
 from pathlib import Path
 
@@ -24,6 +27,7 @@ from plugins.stats import record
 from plugins.steam_data import (app_id, bundle_details, bundle_ids, creator_app_ids, creator_clan_id,
                                 creator_url, game_details, parse_announcements, parse_news, store_items)
 from plugins.translation import translate_text_parts
+from plugins.message_card import CardSource, render_configured_card, source_link
 from plugins import steam_state as logic
 
 _states = {}
@@ -34,6 +38,7 @@ _next_poll = {}
 _retry_after = {}
 _request_lock = asyncio.Lock()
 _last_request = 0.0
+_host_cooldowns = {}
 _client = None
 _proxy_client = None
 _proxy_address = None
@@ -41,6 +46,8 @@ _tasks = []
 _poll_jobs = {}
 _previous_connected = set()
 _stopping = False
+_RETRY_DELAYS = (3, 10, 30)
+_MAX_INLINE_RATE_LIMIT_WAIT = 30
 _LEGACY_QUEUE_HEADERS = frozenset({
     "Steam 游戏公告", "Steam 游戏新闻", "Steam 游戏折扣", "Steam DLC折扣",
     "Steam 捆绑包折扣", "Steam 新游戏商店页面",
@@ -52,6 +59,10 @@ _EVENT_LABELS = {
     "new_listing": "新上架", "early_access": "抢先体验",
     "release": "发售", "full_release": "正式发售",
 }
+
+
+class _SteamRateLimited(httpx.HTTPError):
+    pass
 
 
 def _path(owner):
@@ -122,18 +133,13 @@ async def _snapshot(owner):
         return copy.deepcopy(await _get_state(owner))
 
 
-async def _client_instance(use_proxy=False):
+async def _client_instance(proxy):
     global _client, _proxy_client, _proxy_address
-    if not use_proxy:
+    if not proxy:
         if _client is None:
             _client = httpx.AsyncClient(follow_redirects=True, timeout=30, trust_env=False,
                                         headers={"User-Agent": "WRelay Steam monitor"})
         return _client
-    proxy = get_network_proxy("steam") or str(
-        getattr(get_driver().config, "discord_proxy", "") or ""
-    ).strip()
-    if not proxy:
-        return await _client_instance(False)
     if _proxy_client is None or _proxy_address != proxy:
         if _proxy_client is not None:
             await _proxy_client.aclose()
@@ -143,28 +149,75 @@ async def _client_instance(use_proxy=False):
     return _proxy_client
 
 
-async def _get(url, params=None):
-    """Bound request rate across accounts and retry transient failures."""
-    global _last_request
-    use_proxy = False
-    for attempt in range(3):
+def _retry_after_seconds(response, fallback):
+    value = response.headers.get("Retry-After", "").strip()
+    try:
+        wait = float(value)
+    except ValueError:
         try:
-            async with _request_lock:
-                delay = 1.0 - (time.monotonic() - _last_request)
+            date = parsedate_to_datetime(value)
+            if date.tzinfo is None:
+                date = date.replace(tzinfo=timezone.utc)
+            wait = date.timestamp() - time.time()
+        except (ValueError, OverflowError, OSError):
+            return fallback
+    if not math.isfinite(wait) or wait < 0:
+        return fallback
+    return max(fallback, wait)
+
+
+async def _request(url, params, proxy, retry_delay):
+    global _last_request
+    host = httpx.URL(url).host
+    while True:
+        async with _request_lock:
+            now = time.monotonic()
+            wait = _host_cooldowns.get(host, 0) - now
+            if wait <= 0:
+                _host_cooldowns.pop(host, None)
+                delay = 1.0 - (now - _last_request)
                 if delay > 0:
                     await asyncio.sleep(delay)
                 _last_request = time.monotonic()
-                response = await (await _client_instance(use_proxy)).get(url, params=params)
+                response = await (await _client_instance(proxy)).get(url, params=params)
+                if response.status_code == 429:
+                    wait = _retry_after_seconds(response, retry_delay)
+                    _host_cooldowns[host] = time.monotonic() + wait
+                return response
+        # The cooldown is shared across Steam accounts. Release the lock so
+        # other hosts can proceed, and defer long waits to a later poll.
+        if wait > _MAX_INLINE_RATE_LIMIT_WAIT:
+            raise _SteamRateLimited("Steam 请求受限（HTTP 429），约 %d 秒后可重试" % math.ceil(wait))
+        await asyncio.sleep(wait)
+
+
+async def _get(url, params=None):
+    """Bound request rate across accounts and retry transient failures."""
+    proxy = await asyncio.to_thread(get_network_proxy, "steam")
+    for attempt, delay in enumerate(_RETRY_DELAYS):
+        last_attempt = attempt == len(_RETRY_DELAYS) - 1
+        try:
+            response = await _request(url, params, proxy, delay)
             response.raise_for_status()
             return response
-        except (httpx.TimeoutException, httpx.NetworkError, httpx.ProxyError, httpx.HTTPStatusError) as exc:
-            status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else 0
-            if attempt == 2 or (status and status != 429 and status < 500):
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            if last_attempt or (status != 429 and status < 500):
                 raise
-            if not status and getattr(get_driver().config, "discord_proxy", None):
-                use_proxy = True
-            await asyncio.sleep((3, 10)[attempt])
+            if status != 429:
+                await asyncio.sleep(delay)
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.ProxyError,
+                httpx.RemoteProtocolError):
+            if last_attempt:
+                raise
+            if not proxy:
+                proxy = str(getattr(get_driver().config, "discord_proxy", "") or "").strip() or None
+            await asyncio.sleep(delay)
     raise RuntimeError("Steam 请求失败")
+
+
+def _error_message(exc, limit=240):
+    return (str(exc).strip() or type(exc).__name__)[:limit]
 
 
 async def _news(appid, watermark, feeds=None):
@@ -280,14 +333,14 @@ async def _poll_bundles(owner, source, groups, region, limit, candidate_apps, cl
                 if row.get("visible") is True:
                     found.update(bundle_ids(row))
         except (httpx.HTTPError, ValueError, KeyError) as exc:
-            errors.append("游戏购买选项：" + str(exc)[:120])
+            errors.append("游戏购买选项：" + _error_message(exc, 120))
     ids = sorted(found, key=int)
     for start in range(0, len(ids), 25):
         batch = ids[start:start + 25]
         try:
             rows = await _browse(batch, "bundleid", region)
         except (httpx.HTTPError, ValueError, KeyError) as exc:
-            errors.append("捆绑包数据：" + str(exc)[:120])
+            errors.append("捆绑包数据：" + _error_message(exc, 120))
             continue
         for bundleid, row in rows.items():
             try:
@@ -300,7 +353,7 @@ async def _poll_bundles(owner, source, groups, region, limit, candidate_apps, cl
             except OverflowError:
                 raise
             except ValueError as exc:
-                errors.append("捆绑包 %s：%s" % (bundleid, str(exc)[:120]))
+                errors.append("捆绑包 %s：%s" % (bundleid, _error_message(exc, 120)))
     if errors:
         raise RuntimeError("%d 项 Steam 捆绑包检查失败：%s" % (len(errors), "; ".join(errors[:3])))
 
@@ -331,9 +384,9 @@ async def _poll_source(owner, source, groups, region, limit, cache):
     failures = []
     candidate_apps = []
     visited = set(appids)
+    progress = _status.setdefault(owner, {})
+    progress.update(scanned=0, scan_total=len(appids))
     for index, appid in enumerate(appids):
-        _status.setdefault(owner, {}).update(scanning=True, current_source=source.get("name") or source["value"],
-                                             scanned=index, scan_total=len(appids))
         try:
             game = await _details(appid, region, cache)
             if "discount" in source["events"] and source.get("include_dlc") is True and game["type"] == "game":
@@ -352,14 +405,15 @@ async def _poll_source(owner, source, groups, region, limit, cache):
         except OverflowError:
             raise
         except Exception as exc:
-            failures.append("%s: %s" % (appid, str(exc)[:120]))
+            failures.append("%s: %s" % (appid, _error_message(exc, 120)))
+        progress.update(scanned=index + 1, scan_total=len(appids))
     if "discount" in source["events"] and source.get("include_bundles") is True:
         try:
             await _poll_bundles(owner, source, groups, region, limit, candidate_apps, clan, role)
         except OverflowError:
             raise
         except Exception as exc:
-            failures.append(str(exc)[:160])
+            failures.append(_error_message(exc, 160))
     if failures:
         raise RuntimeError("%d 个 Steam 游戏读取失败：%s" % (len(failures), "; ".join(failures[:3])))
     return len(appids) if source["kind"] == "creator" else 1
@@ -375,7 +429,9 @@ async def _poll_owner(owner, settings):
     sources, routes = settings["sources"], settings["routes"]
     initial_state = await _snapshot(owner)
     sequence_before = initial_state["sequence"]
+    last_completed = _status.get(owner, {}).get("last_completed_poll_ts", 0)
     _status[owner] = {"ok": True, "running": True, "scanning": True, "last_poll_ts": int(started),
+                      "last_completed_poll_ts": last_completed,
                       "last_error": "", "source_health": [],
                       "sources_total": settings["sources_total"], "sources_enabled": settings["sources_enabled"],
                       "last_new_count": 0, "last_sent_count": 0}
@@ -389,6 +445,7 @@ async def _poll_owner(owner, settings):
         if len((await _snapshot(owner))["queue"]) >= limit:
             failures.append("Steam 待投递队列已满，等待队列发送")
             break
+        _status[owner].update(current_source=source.get("name") or source["value"], scanned=0, scan_total=0)
         try:
             count = await _poll_source(owner, source, groups, settings["region"], limit, cache)
             health.append({"id": source["id"], "name": source.get("name") or source["value"], "error": "", "games": count})
@@ -398,13 +455,14 @@ async def _poll_owner(owner, settings):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            message = str(exc)[:240]
+            message = _error_message(exc)
             logger.warning("Steam 来源检查失败 {}: {}", source.get("value"), message)
             failures.append(message)
             health.append({"id": source["id"], "name": source.get("name") or source["value"], "error": message})
     state = await _snapshot(owner)
     current_status = _status.get(owner) or {}
     _status[owner] = {"ok": not failures, "running": True, "scanning": False, "last_poll_ts": int(started),
+                      "last_completed_poll_ts": int(time.time()),
                       "last_error": "; ".join(failures[:3]), "source_health": health,
                       "sources_total": settings["sources_total"], "sources_enabled": settings["sources_enabled"],
                       "last_new_count": max(0, state["sequence"] - sequence_before),
@@ -476,12 +534,19 @@ async def _dispatch_locked(owner, settings):
                     config.get_steam_source_delivery_config, chosen["source"]
                 )
                 formatted = _format_queue_message(chosen)
+                original = [make_text(formatted)]
                 text_parts = await translate_text_parts(
-                    [make_text(formatted)],
+                    original,
                     ("steam", chosen["source"], chosen["identity"]),
                     config=delivery_config["translation"],
                 )
-                result = await send_and_record(channel, msg_id, text_parts, [], targets,
+                _, _, body = formatted.partition("\n")
+                title = body.splitlines()[0].strip() if body else "Steam"
+                source = CardSource("Steam", title, _EVENT_LABELS.get(chosen.get("event"), "动态"), source_link(original))
+                text_parts, media_items = await render_configured_card(
+                    source, delivery_config, original, text_parts, [], delivery_config["translation"], header_parts=0,
+                )
+                result = await send_and_record(channel, msg_id, text_parts, media_items, targets,
                                                idempotency_key=chosen["identity"])
             except Exception:
                 _retry_after[(owner, chosen["seq"])] = now + 60
@@ -517,7 +582,8 @@ async def _poll_job(owner):
         raise
     except Exception as exc:
         logger.exception("Steam 轮询失败: {}", owner or "默认账号")
-        _status[owner] = {"ok": False, "running": True, "scanning": False, "last_error": str(exc)[:240]}
+        _status[owner] = {"ok": False, "running": True, "scanning": False,
+                          "last_completed_poll_ts": int(time.time()), "last_error": _error_message(exc)}
         _next_poll[owner] = time.monotonic() + 60
 
 
@@ -552,8 +618,9 @@ async def _dispatch_loop():
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    logger.warning("Steam 待投递队列处理失败 {}: {}", owner or "默认账号", exc)
-                    _status.setdefault(owner, {}).update(ok=False, last_error=str(exc)[:240])
+                    message = _error_message(exc)
+                    logger.warning("Steam 待投递队列处理失败 {}: {}", owner or "默认账号", message)
+                    _status.setdefault(owner, {}).update(ok=False, last_error=message)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -581,6 +648,7 @@ async def _stop():
     await asyncio.gather(*_tasks, *_poll_jobs.values(), return_exceptions=True)
     _tasks.clear()
     _poll_jobs.clear()
+    _host_cooldowns.clear()
     if _client is not None:
         await _client.aclose()
         _client = None
@@ -608,8 +676,9 @@ async def api_steam_status(bot_id: str = ""):
         result["sources_enabled"] = settings["sources_enabled"]
         result.setdefault("last_new_count", 0)
         result.setdefault("last_sent_count", 0)
+        result.setdefault("last_completed_poll_ts", 0)
         connected = set(get_qq_bots()) | set(personal_qq.connected_bots())
         result["qq_connected"] = bot_id in connected if bot_id else bool(connected)
         return result
     except (OSError, ValueError, RuntimeError) as exc:
-        return {"ok": False, "running": bool(_tasks), "last_error": str(exc)[:240]}
+        return {"ok": False, "running": bool(_tasks), "last_error": _error_message(exc)}

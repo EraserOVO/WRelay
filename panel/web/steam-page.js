@@ -24,12 +24,24 @@
     activeGroupId = draft.groups[0].id;
     return draft.groups[0];
   }
+  function draftActionOwner() {
+    const owner = draftOwner, activeBotId = currentQQBotId();
+    return () => draft && draftOwner === owner && (settings._profile_bot || "") === owner && currentQQBotId() === activeBotId;
+  }
+  async function editRegisteredGroup(target) {
+    const isCurrentOwner = draftActionOwner();
+    const targetId = String(target.openid);
+    if (!await flushDraftSave() || !isCurrentOwner()) return;
+    const current = (settings.qq_group_openids || []).find(item =>
+      String(item.openid) === targetId && groupInActiveQQBotWorkspace(item));
+    if (current) editGroupDetails(current);
+  }
   function markDraftDirty(delay = 400) {
     if (!draft) return;
     draftDirty = true; draftEditVersion++; draftSaveError = "";
     if (draftConflict) { draftWarning(); return; }
     clearTimeout(draftSaveTimer);
-    draftSaveTimer = setTimeout(() => saveDraftNow(), Math.max(0, delay));
+    if (delay !== null) draftSaveTimer = setTimeout(() => saveDraftNow(), Math.max(0, delay));
     draftWarning();
   }
   function addGroup() {
@@ -37,7 +49,7 @@
     if (draft.groups.length >= 30) return showAlert("添加转发组", "最多 30 个转发组。");
     const names = new Set(draft.groups.map(group => group.name));
     let number = 1; while (names.has("转发组" + number)) number++;
-    const group = {id: id("steam-group"), name: "转发组" + number, enabled: true, sources: [], groups: []};
+    const group = {id: id("steam-group"), name: "转发组" + number, enabled: true, sources: [], groups: [], disabled_groups: []};
     draft.groups.push(group); activeGroupId = group.id; markDraftDirty(0);
     renderGroups(); renderSources();
   }
@@ -47,7 +59,7 @@
     if (!group) return showAlert("请稍候", "账号配置尚未加载。");
     const memberIds = new Set((group.sources || []).map(String));
     const candidates = draft.sources.filter(source => !memberIds.has(String(source.id)));
-    if (!candidates.length) return showAlert("从已登记项新增", "当前转发组已包含全部已登记的 Steam 来源。");
+    if (!candidates.length) return showAlert("从已登记项新增", "暂无可添加的来源", {emptyState: true});
     showConfirmSelect("从已登记项新增", candidates, source => {
       const type = source.kind === "game" ? "游戏" : "开发商 / 发行商";
       return ((source.name || source.value || "未命名来源") + " · " + type).trim();
@@ -56,6 +68,7 @@
       markDraftDirty(0); renderSources(); renderGroups();
     }, {
       defaultChecked: false,
+      cardRows: true,
       rowDeleteIcon: globalThis.mcIcon("delete-2", 14),
       onRowDelete: source => showConfirmDlg("删除 Steam 来源", "确定从 Steam 配置和所有转发组中删除「" + (source.name || source.value || "未命名来源") + "」？", () => {
         draft.sources = draft.sources.filter(item => String(item.id) !== String(source.id));
@@ -101,7 +114,7 @@
         id: id(isGame ? "game" : "creator"), kind: kind.value, value,
         name: nameInput.value.trim(), enabled: true,
         events: isGame ? ["announcements", "news", "discount"] : ["discount", "new_listing", "early_access", "release", "full_release"],
-        news_feeds: [], translation_enabled: false, translation_append_original: true,
+        news_feeds: [], translation_enabled: true, translation_append_original: true,
       };
       draft.sources.push(source);
       markDraftDirty(0); renderSources(); renderGroups();
@@ -110,7 +123,9 @@
     valueInput.focus();
   }
   function editSource(source) {
-    const edited = clone(source), body = $("confirmBody"); body.replaceChildren();
+    const isCurrentOwner = draftActionOwner();
+    const sourceId = String(source.id);
+    const body = $("confirmBody"); body.replaceChildren();
     const form = node("div", null, "steam-register-form");
     function textField(title, value, type = "text") {
       const label = node("label", null, "steam-field");
@@ -118,16 +133,19 @@
       const input = node("input", null, "steam-input"); input.type = type; input.value = value || "";
       label.append(input); form.append(label); return input;
     }
-    const nameInput = textField("名称（可留空）", edited.name || "");
-    const valueInput = textField(edited.kind === "game" ? "AppID 或 Steam 游戏地址" : "开发商或发行商主页地址", edited.value || "");
+    const nameInput = textField("名称（可留空）", source.name || "");
+    const valueInput = textField(source.kind === "game" ? "AppID 或 Steam 游戏地址" : "开发商或发行商主页地址", source.value || "");
     body.append(form);
     $("confirmTitle").textContent = "编辑来源内容";
     setConfirmButtons("保存", true);
     confirmAction = () => {
       const value = valueInput.value.trim();
       if (!value) { valueInput.focus(); return showAlert("无法保存", "请填写 AppID 或 Steam 来源地址。"); }
-      edited.name = nameInput.value.trim(); edited.value = value;
-      Object.assign(source, edited); markDraftDirty(0); renderSources(); renderGroups();
+      const current = isCurrentOwner() && draft.sources.find(item => String(item.id) === sourceId);
+      if (!current) return showAlert("无法保存", "该 Steam 来源已变化，请刷新后重试。");
+      current.name = nameInput.value.trim();
+      current.value = value;
+      markDraftDirty(0); renderSources(); renderGroups();
     };
     $("confirmModal").style.display = "flex";
     nameInput.focus();
@@ -164,11 +182,14 @@
       source.translation_enabled === true || source.translation_append_original === false;
   }
   function editSourceFilter(source) {
-    const edited = clone(source), body = $("confirmBody"); body.replaceChildren();
-    const supportedEvents = eventsFor(edited);
-    const selectedEvents = new Set(Array.isArray(edited.events) ? edited.events : supportedEvents);
+    const isCurrentOwner = draftActionOwner();
+    const sourceId = String(source.id);
+    const body = $("confirmBody"); body.replaceChildren();
+    const supportedEvents = eventsFor(source);
+    const selectedEvents = new Set(Array.isArray(source.events) ? source.events : supportedEvents);
     const eventList = node("div", null, "content-filter-checks");
-    eventsFor(edited).forEach(event => {
+    const optionChanges = {};
+    supportedEvents.forEach(event => {
       const label = node("label", null, "content-filter-check");
       const input = node("input"); input.type = "checkbox"; input.checked = selectedEvents.has(event);
       input.addEventListener("change", () => input.checked ? selectedEvents.add(event) : selectedEvents.delete(event));
@@ -178,8 +199,8 @@
     const extras = node("div", null, "content-filter-checks");
     function option(title, key) {
       const label = node("label", null, "content-filter-check");
-      const input = node("input"); input.type = "checkbox"; input.checked = !!edited[key];
-      input.addEventListener("change", () => { edited[key] = input.checked; });
+      const input = node("input"); input.type = "checkbox"; input.checked = !!source[key];
+      input.addEventListener("change", () => { optionChanges[key] = input.checked; });
       label.append(input, document.createTextNode(title)); extras.append(label);
     }
     option("折扣包含 DLC", "include_dlc"); option("折扣包含捆绑包", "include_bundles");
@@ -191,27 +212,35 @@
       const label = node("label", null, "content-filter-check");
       const input = node("input");
       input.type = "checkbox";
-      input.checked = edited[key] === undefined ? defaultValue : edited[key] === true;
-      input.addEventListener("change", () => { edited[key] = input.checked; });
+      input.checked = source[key] === undefined ? defaultValue : source[key] === true;
+      input.addEventListener("change", () => { optionChanges[key] = input.checked; });
       label.append(input, document.createTextNode(title));
       translationOptions.append(label);
     }
     translationOption("启用翻译", "translation_enabled", false);
     translationOption("保留原文", "translation_append_original", true);
     body.append(translationTitle, translationOptions);
+    const cardFields = node("div");
+    const readImageCardOptions = mountImageCardOptions(cardFields);
+    body.append(cardFields);
     let feedsInput = null;
-    if (edited.kind === "game") {
+    if (source.kind === "game") {
       const field = node("label", null, "steam-field");
       field.append(node("span", "新闻来源筛选（feed 名称，逗号分隔；留空接收全部）", "steam-field-label"));
       feedsInput = node("input", null, "steam-input"); feedsInput.type = "text";
-      feedsInput.value = (edited.news_feeds || []).join(", "); field.append(feedsInput); body.append(field);
+      feedsInput.value = (source.news_feeds || []).join(", "); field.append(feedsInput); body.append(field);
     }
     $("confirmTitle").textContent = "内容筛选";
     setConfirmButtons("保存", true);
-    confirmAction = () => {
-      edited.events = supportedEvents.filter(event => selectedEvents.has(event));
-      if (feedsInput) edited.news_feeds = feedsInput.value.split(/[,，]/).map(item => item.trim()).filter(Boolean);
-      Object.assign(source, edited); markDraftDirty(0); renderSources(); renderGroups();
+    confirmAction = async () => {
+      if (draftSavePromise && !await draftSavePromise) return;
+      const current = isCurrentOwner() && draft.sources.find(item => String(item.id) === sourceId);
+      if (!current) return showAlert("无法保存", "该 Steam 来源已变化，请刷新后重试。");
+      current.events = supportedEvents.filter(event => selectedEvents.has(event));
+      if (feedsInput) current.news_feeds = feedsInput.value.split(/[,，]/).map(item => item.trim()).filter(Boolean);
+      Object.assign(current, optionChanges);
+      markDraftDirty(null); renderSources(); renderGroups();
+      await saveDraftNow(false, readImageCardOptions());
     };
     $("confirmModal").style.display = "flex";
   }
@@ -223,16 +252,16 @@
     const candidates = (settings.qq_group_openids || []).filter(target =>
       groupInActiveQQBotWorkspace(target) && !memberIds.has(String(target.openid))
     );
-    if (!candidates.length) return showAlert("从已登记项新增", "当前转发组已包含全部已登记的 QQ 接收群。");
+    if (!candidates.length) return showAlert("从已登记项新增", "暂无可添加的群", {emptyState: true});
     showConfirmSelect("从已登记项新增", candidates, target => {
       const name = target.name || target.remark || target.qq_id || target.openid;
       return (name + (target.qq_id ? " · " + target.qq_id : "") + " · " + target.openid).trim();
     }, selected => {
       group.groups = [...new Set([...(group.groups || []).map(String), ...selected.map(target => String(target.openid))])];
+      const selectedIds = new Set(selected.map(target => String(target.openid)));
+      group.disabled_groups = (group.disabled_groups || []).map(String).filter(value => !selectedIds.has(value));
       markDraftDirty(0); renderGroups();
-    }, {defaultChecked: false, onRowEdit: async target => {
-      if (await flushDraftSave()) editGroupDetails(target);
-    }});
+    }, {defaultChecked: false, cardRows: true, detailFn: target => String(target.openid || ""), onRowEdit: editRegisteredGroup});
   }
   function renderGroupTabs() {
     const tabs = $("steamFgTabs"), priorScroll = tabs.querySelector(".fgtab-list")?.scrollLeft || 0;
@@ -262,6 +291,8 @@
       rename.type = "button"; rename.title = "重命名转发组"; rename.setAttribute("aria-label", rename.title);
       rename.innerHTML = globalThis.mcIcon("edit-2", 16);
       rename.addEventListener("click", () => {
+        const isCurrentOwner = draftActionOwner();
+        const groupId = String(group.id);
         const input = node("input", null, "fg-rename"); input.type = "text"; input.value = group.name || "";
         input.addEventListener("click", event => event.stopPropagation());
         name.replaceWith(input); input.focus(); input.select();
@@ -269,7 +300,12 @@
         const finish = commit => {
           if (finished) return; finished = true;
           const next = input.value.trim();
-          if (commit && next) { group.name = next; markDraftDirty(0); }
+          if (!isCurrentOwner()) return;
+          const current = draft.groups.find(item => String(item.id) === groupId);
+          if (commit && next && current && current.name !== next) {
+            current.name = next;
+            markDraftDirty(0);
+          }
           renderGroups();
         };
         input.addEventListener("blur", () => finish(true));
@@ -286,11 +322,14 @@
         remove.innerHTML = globalThis.mcIcon("delete-2", 16);
         remove.addEventListener("click", () => {
           if (draft.groups.length <= 1) return;
+          const isCurrentOwner = draftActionOwner();
+          const groupId = String(group.id);
           const deleteGroup = () => {
-            const index = draft.groups.findIndex(item => item.id === group.id);
+            if (!isCurrentOwner()) return;
+            const index = draft.groups.findIndex(item => String(item.id) === groupId);
             if (index < 0 || draft.groups.length <= 1) return;
             draft.groups.splice(index, 1);
-            activeGroupId = draft.groups[Math.max(0, index - 1)]?.id || draft.groups[0].id;
+            if (String(activeGroupId) === groupId) activeGroupId = draft.groups[Math.max(0, index - 1)]?.id || draft.groups[0].id;
             markDraftDirty(0); renderGroups(); renderSources();
           };
           const hasMembers = (group.sources || []).length || (group.groups || []).length;
@@ -398,22 +437,14 @@
       orderCell.setAttribute("aria-label", orderCell.title);
       row.append(orderCell);
       const enabledCell = node("td"); enabledCell.style.textAlign = "center";
-      const enabled = node("input"); enabled.type = "checkbox"; enabled.checked = target.enabled === true;
+      const disabled = new Set((group?.disabled_groups || []).map(String));
+      const enabled = node("input"); enabled.type = "checkbox"; enabled.checked = !disabled.has(String(target.openid));
       enabled.setAttribute("aria-label", "允许 " + (target.name || target.qq_id || target.openid) + " 接收转发");
-      enabled.addEventListener("change", async () => {
-        const targetId = String(target.openid), nextEnabled = enabled.checked;
-        if (!await flushDraftSave()) { renderGroups(); return; }
-        const liveTarget = (settings.qq_group_openids || []).find(item => String(item.openid) === targetId);
-        if (!liveTarget) return renderGroups();
-        const originalSettings = settings, previous = liveTarget.enabled;
-        liveTarget.enabled = nextEnabled;
-        try {
-          const saved = await saveAndReload();
-          if (!saved && settings === originalSettings) { liveTarget.enabled = previous; renderGroups(); }
-        } catch (error) {
-          if (settings === originalSettings) { liveTarget.enabled = previous; renderGroups(); }
-          showAlert("保存失败", "无法连接管理服务，请稍后重试。");
-        }
+      enabled.addEventListener("change", () => {
+        const ids = new Set((group.disabled_groups || []).map(String));
+        if (enabled.checked) ids.delete(String(target.openid)); else ids.add(String(target.openid));
+        group.disabled_groups = Array.from(ids);
+        markDraftDirty(0); renderGroups();
       });
       enabledCell.append(enabled); row.append(enabledCell);
       const nameCell = node("td");
@@ -427,21 +458,21 @@
       const actions = node("td");
       const actionWrap = node("div", null, "table-actions");
       const edit = node("button", null, "sec rowicon"); edit.type = "button"; edit.title = "编辑群资料"; edit.setAttribute("aria-label", edit.title);
-      edit.innerHTML = globalThis.mcIcon("edit-2", 16); edit.addEventListener("click", async () => {
-        if (await flushDraftSave()) editGroupDetails(target);
-      });
+      edit.innerHTML = globalThis.mcIcon("edit-2", 16); edit.addEventListener("click", () => editRegisteredGroup(target));
       const remove = node("button", null, "danger rowicon"); remove.type = "button"; remove.title = "移出当前转发组"; remove.setAttribute("aria-label", remove.title);
       remove.innerHTML = globalThis.mcIcon("delete-2", 16); remove.addEventListener("click", () => {
         if (!group) return;
         group.groups = group.groups.filter(value => String(value) !== String(target.openid));
+        group.disabled_groups = (group.disabled_groups || []).map(String).filter(value => value !== String(target.openid));
         markDraftDirty(0); renderGroups();
       });
       actionWrap.append(edit, remove); actions.append(actionWrap); row.append(actions); body.append(row);
     });
     const allEnabled = $("steamGroupAllEnabled");
     if (allEnabled) {
-      allEnabled.checked = targets.length > 0 && targets.every(target => target.enabled === true);
-      allEnabled.indeterminate = targets.some(target => target.enabled === true) && targets.some(target => target.enabled !== true);
+      const disabled = new Set((group?.disabled_groups || []).map(String));
+      allEnabled.checked = targets.length > 0 && targets.every(target => !disabled.has(String(target.openid)));
+      allEnabled.indeterminate = targets.some(target => !disabled.has(String(target.openid))) && targets.some(target => disabled.has(String(target.openid)));
       allEnabled.disabled = !targets.length;
     }
   }
@@ -525,8 +556,9 @@
       group.enabled = group.enabled !== false;
       group.sources = Array.isArray(group.sources) ? group.sources : [];
       group.groups = Array.isArray(group.groups) ? group.groups : [];
+      group.disabled_groups = Array.isArray(group.disabled_groups) ? group.disabled_groups.map(String) : [];
     });
-    if (!values.groups.length) values.groups.push({id: "steam_default", name: "转发组1", enabled: true, sources: [], groups: []});
+    if (!values.groups.length) values.groups.push({id: "steam_default", name: "转发组1", enabled: true, sources: [], groups: [], disabled_groups: []});
     return values;
   }
   function renderPollingSettings() {
@@ -584,7 +616,7 @@
     retry.disabled = draftSaveInFlight || !draftDirty;
     $("steamResetDraft").disabled = draftSaveInFlight;
   }
-  async function saveDraftNow(forceConflict = false) {
+  async function saveDraftNow(forceConflict = false, imageCardChanges = {}) {
     clearTimeout(draftSaveTimer);
     if (draftSavePromise) return draftSavePromise;
     if (!draft || !draftDirty) return true;
@@ -608,7 +640,11 @@
     draftSaveError = ""; draftSaveInFlight = true;
     draftSavePromise = (async () => {
       let saved = false;
-      try { saved = await saveAndReload(); }
+      try {
+        saved = Object.keys(imageCardChanges).length
+          ? await saveAndReloadWithImageCard(imageCardChanges)
+          : await saveAndReload();
+      }
       catch (error) { draftSaveError = "保存失败，草稿已保留。"; showAlert("保存失败", "无法连接管理服务，请稍后重试。"); }
       if (owner !== draftOwner || owner !== (settings._profile_bot || "")) return false;
       if (saved) {
@@ -746,19 +782,13 @@
   });
   $("steamGroupAllEnabled").addEventListener("change", async event => {
     const group = activeGroup(); if (!group) return;
-    const memberIds = new Set((group.groups || []).map(String)), nextEnabled = event.target.checked;
-    if (!await flushDraftSave()) { renderGroups(); return; }
-    const targets = (settings.qq_group_openids || []).filter(target => memberIds.has(String(target.openid)) && groupInActiveQQBotWorkspace(target));
-    if (!targets.length) return;
-    const originalSettings = settings, previous = targets.map(target => target.enabled);
-    targets.forEach(target => { target.enabled = nextEnabled; });
-    try {
-      const saved = await saveAndReload();
-      if (!saved && settings === originalSettings) { targets.forEach((target, index) => { target.enabled = previous[index]; }); renderGroups(); }
-    } catch (error) {
-      if (settings === originalSettings) { targets.forEach((target, index) => { target.enabled = previous[index]; }); renderGroups(); }
-      showAlert("保存失败", "无法连接管理服务，请稍后重试。");
-    }
+    const memberIds = new Set((group.groups || []).map(String));
+    const disabled = new Set((group.disabled_groups || []).map(String));
+    (settings.qq_group_openids || []).filter(target => memberIds.has(String(target.openid)) && groupInActiveQQBotWorkspace(target)).forEach(target => {
+      if (event.target.checked) disabled.delete(String(target.openid)); else disabled.add(String(target.openid));
+    });
+    group.disabled_groups = Array.from(disabled);
+    markDraftDirty(0); renderGroups();
   });
   $("steamRegion").addEventListener("change", savePollingSettings);
   $("steamPollInterval").addEventListener("change", savePollingSettings);
@@ -767,56 +797,5 @@
   $("steamResetDraft").addEventListener("click", () => showConfirmDlg("重新加载 Steam 设置", "将放弃尚未保存的 Steam 来源和转发组修改。", () => {
     clearTimeout(draftSaveTimer); drafts.delete(draftOwner); draft = null; draftDirty = false; draftConflict = false; draftSaveError = ""; renderSteamPage();
   }, "重新加载"));
-  async function status() {
-    if (typeof activePage === "undefined" || activePage !== "steam") return;
-    const owner = currentQQBotId();
-    try {
-      const data = await jget("/api/steam/status");
-      if (owner !== currentQQBotId()) return;
-      const sourceFailed = Array.isArray(data.source_health) && data.source_health.some(item => item && item.error);
-      const hasError = !!data.last_error || sourceFailed;
-      const errorHint = data.last_error && typeof conciseChainStatusError === "function"
-        ? conciseChainStatusError(data, "Steam")
-        : "部分 Steam 来源检查失败，请查看运行日志。";
-      const badgeText = data.bot_running === false ? "未运行" : hasError ? "检查失败" : data.qq_connected === false ? "等待 QQ 连接" : "运行中";
-      const state = data.bot_running === false ? "neutral" : hasError ? "off" : data.qq_connected === false ? "warn" : "on";
-      const pollTs = Number(data.last_poll_ts) || 0;
-      const pollText = pollTs && typeof xrssFmtTime === "function" ? xrssFmtTime(pollTs) : "—";
-      const srcText = (Number(data.sources_enabled) || 0) + " / " + (Number(data.sources_total) || 0);
-      const summary = $("steamStatus");
-      summary.classList.toggle("err", hasError);
-      summary.dataset.state = state;
-      if (data.bot_running === false) {
-        summary.textContent = "—";
-      } else if (hasError) {
-        summary.innerHTML = '<strong>检查异常</strong><span>' + escapeHtml(errorHint) + '</span>'
-          + '<small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>';
-      } else {
-        summary.innerHTML = '<span>来源 ' + escapeHtml(srcText) + '</span>'
-          + '<small class="xrss-time">上次轮询 ' + escapeHtml(pollText) + '</small>'
-          + '<span>发现 ' + (Number(data.last_new_count) || 0) + ' 条</span>'
-          + '<span>发送 ' + (Number(data.last_sent_count) || 0) + ' 条</span>'
-          + '<span>积压 ' + (Number(data.protection_queue_pending) || 0) + ' 条</span>';
-      }
-      summary.title = hasError ? errorHint
-        : data.scanning && data.current_source
-          ? "正在检查 Steam 来源 " + (data.scanned || 0) + "/" + (data.scan_total || 0)
-          : "";
-      const badge = $("steamBadge");
-      badge.textContent = badgeText;
-      badge.className = "badge " + state;
-      badge.title = hasError ? errorHint : badgeText;
-      if (typeof renderChainStatusShortcut === "function") renderChainStatusShortcut();
-    } catch (error) {
-      const statusElement = $("steamStatus");
-      statusElement.textContent = "无法读取 Steam 运行状态";
-      statusElement.classList.add("err");
-      statusElement.dataset.state = "off";
-      $("steamBadge").textContent = "读取失败";
-      $("steamBadge").className = "badge off";
-      if (typeof renderChainStatusShortcut === "function") renderChainStatusShortcut();
-    }
-  }
-  setInterval(status, 10000);
   renderSteamPage();
 })();

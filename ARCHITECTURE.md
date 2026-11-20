@@ -123,7 +123,7 @@ WRelay/
 
 ## Steam → QQ
 
-`plugins/steam.py` 按账号读取 `steam_sources` 和 `steam_forwarding_groups`，并分别轮询游戏公告、新闻、商店价格和开发商/发行商主页关联的游戏列表。可选 DLC 扩展游戏列表，捆绑包由 Steam StoreBrowse 购买选项发现；开发商或发行商来源还要求捆绑包的对应归属可以确认。游戏详情、购买选项与主页列表来自未正式文档化的接口；读取失败不作为空列表或价格归零处理。Steam 官方公告 RSS 与 `ISteamNews` 公告 feed 共同用于发现公告，新闻按 feed 可选筛选。扫描使用共享请求间隔及有限重试；账号的轮询任务并行调度，发送任务独立运行。
+`plugins/steam.py` 按账号读取 `steam_sources` 和 `steam_forwarding_groups`，并分别轮询游戏公告、新闻、商店价格和开发商/发行商主页关联的游戏列表。可选 DLC 扩展游戏列表，捆绑包由 Steam StoreBrowse 购买选项发现；开发商或发行商来源还要求捆绑包的对应归属可以确认。游戏详情、购买选项与主页列表来自未正式文档化的接口；读取失败不作为空列表或价格归零处理。Steam 官方公告 RSS 与 `ISteamNews` 公告 feed 共同用于发现公告，新闻按 feed 可选筛选。扫描使用共享请求间隔及有限重试。请求优先使用 Steam 专用代理，留空时先直连。直连遇到可重试的连接或协议错误时，后续请求可改走 Discord 代理。HTTP 429 保持当前选路，按 `Retry-After` 对该请求主机设置跨账号共享的退避截止时间。短等待释放请求锁，较长等待交给后续轮询在截止后重试。账号的轮询任务并行调度，发送任务独立运行。
 
 `steam_state.py` 按来源、目标群和事件分别建立基线，比较公告时间、价格及发行阶段。每个账号的 `steam.json` 保存快照、递增序号、待发送队列和发送时间窗：入队和快照更新在一次原子写中完成，队列满时不推进该项。投递沿用 QQ sender、游标和跨来源幂等记录；个人 QQ 继续遵守未知发送结果待确认机制。停用或移除路由的队列项保留为暂停状态，只有通过面板明确清理才删除；清理与发送使用账号级锁。文件损坏会暂停该账号的 Steam 处理并保留原文件。账号运行状态目录和高级运行状态备份均包含该文件。
 
@@ -142,6 +142,10 @@ Steam 队列出队时按当前账号的共享翻译服务路由和来源级选�
 ---
 
 ## 3. Discord → QQ 实时转发流程
+
+Discord 的实时、补发和延迟重试共用 `forward_service.prepare_discord_message`。五条自动链路与授权 QQ 手动转发先执行既有的筛选与翻译，再由 `message_card.py` 在限并发的工作线程中把文本段、表情字节和图片排成 PNG。`data/settings.json` 顶层的 `image_card_enabled` 缺省为 `true`，`image_card_theme` 缺省为 `dark`，所有账号和链路共享。此前保存在 Discord 或 X 来源条目中的同名字段不参与判断。媒体字节不写入待重试队列。独立视频、语音及文件沿用 `sender.py`，并在卡片后处理。
+
+图片按内容高度分页并限制图片数量、像素和文件大小。渲染失败回退普通转发。卡片及随附媒体复用 SQLite 投递账本记录分片及各目标群的回执，重试时按内容签名跳过已确认的分片。图片模式下投递追踪仍保留文本摘要。
 
 ```
 Discord 消息事件
@@ -359,7 +363,7 @@ plugins/youtube.py
      │    └── 公开数据 Key 放在请求头；API 429/rateLimitExceeded 遵循 Retry-After 并暂停本轮 RSS/网页备用请求，服务错误使用全局退避
     │    └── API 非限流失败或配额耗尽时回退官方 RSS；未配置 Key 时直接请求 RSS
      │    └── RSS 支持 ETag/304；429 按 Retry-After 退避，404 重解析 handle；后备页也失败后进入 15 分钟来源冷却
-    │    └── YouTube 请求优先使用 YOUTUBE_PROXY，否则使用 DISCORD_PROXY；连接失败且未指定远程代理时可试 Windows 系统代理
+    │    └── YouTube 请求依次使用面板专用代理、YOUTUBE_PROXY、DISCORD_PROXY 或直连。直连或回环代理遇到连接错误、连接超时或代理错误时，可重试不同且正在监听的 Windows 回环代理
     │ ④ plugins/youtube_parser.py 把 Data API 上传列表或 Atom Feed 统一转换为标题、视频链接、发布时间、封面、简介和频道名
     │ ⑤ 游标 = 发布时间秒 × 1000 + crc32(video_id) % 1000，存入 discord_last.json 的 youtube:<source_id>
     │    └── 首次启用来源或目标群时先建立基线，不补发频道历史
@@ -370,7 +374,7 @@ plugins/youtube.py
 
 每个来源的消息类型筛选（文字/图片/链接）与关键词筛选在入队前和投递时共同生效；关键词在标题、简介和频道名中不区分大小写匹配。渲染始终保留来源头；关闭“文字”不发送标题，关闭“链接”不发送视频地址，关闭“图片”不下载封面。翻译复用共享 `translation` 服务配置和来源级 `translation_enabled`/`translation_append_original`/`translation_show_datetime`，翻译时跳过来源头；`btnTranslationYoutube` 批量写入所有 YouTube 来源的开关。封面通过 `media.fetch_bytes_many` 下载，YouTube 主机优先使用 `YOUTUBE_PROXY`，否则使用 `DISCORD_PROXY`，下载失败时降级为图片链接。
 
-投递保护沿用 `plugins/bilibili_rate_limit.py` 的纯逻辑，但队列独立保存在 `data/youtube_protection.json`：默认最短发送间隔 60 秒、每小时 10 条、每来源积压 10 条，超限可选择保留最新或最旧。队列状态损坏时本轮记为 `protection_failed` 并暂停投递，不覆盖原文件。轮询结果取值只有 `ok`、`fetch_failed`、`parse_failed` 和 `protection_failed`；某来源失败只影响该来源，不会阻断其他来源。`source_health` 还记录每来源实际使用的 provider；`/api/youtube/status` 返回来源/启用数量、转发组数量、保护配置、积压条数、最近轮询与发送计数、Data API 是否配置及冷却时间；配置读取在线程池执行，避免面板轮询状态阻塞事件循环。
+投递保护沿用 `plugins/bilibili_rate_limit.py` 的纯逻辑，但队列独立保存在 `data/youtube_protection.json`：默认最短发送间隔 60 秒、每小时 10 条、每来源积压 10 条，超限可选择保留最新或最旧。队列状态损坏时本轮记为 `protection_failed` 并暂停投递，不覆盖原文件。轮询结果取值只有 `ok`、`fetch_failed`、`parse_failed` 和 `protection_failed`；某来源失败只影响该来源，不会阻断其他来源。`source_health` 记录上一轮各来源的检查结果和实际使用的 provider。当前轮询通过 `poll_progress` 按账号发布来源总数和每个已完成频道的结果。每个频道完成后立即更新进度，整轮结束时才更新最近轮询时间及发现、投递和失败计数。`/api/youtube/status` 还返回来源/启用数量、转发组数量、保护配置、积压条数、Data API 是否配置及冷却时间。读取配置和探测 Windows 回环代理端口在线程池执行。
 
 YouTube 没有 QQ 手动转发。投递复用 `send_and_record` 的 `youtube:<video_id>` 幂等键，成功群写入与 X/Bilibili 共用的 `data/delivery_dedup.sqlite3`，重复调度或重启重投时不会再次发送；来源游标负责正常增量，幂等记录负责跨队列/重启兜底。Discord、X、Bilibili 和 QQ→QQ 的配置、游标与投递路径不受影响。
 
@@ -414,6 +418,7 @@ Discord、X RSS、Bilibili RSS、YouTube RSS、Steam 和 QQ 手动转发在完�
 卡片只放首选/次选服务与左下角的「翻译链路」入口，六个链路开关在该按钮打开的 `#translationChainsModal`
 二级窗口内（六个整行胶囊开关，链路名在左、轨道在右）：Discord、X、Bilibili、YouTube、Steam 开关分别批量写入对应来源的 `translation_enabled`，
 「手动转发」开关写入 `settings.translation.enabled`。自动转发仍按来源条目决定是否翻译；
+新增 Discord、X、YouTube 和 Steam 来源显式默认开启翻译，Bilibili 来源和 QQ 手动转发默认关闭；已有来源及旧配置迁移保持原有行为。没有来源时，批量开关显示新来源默认状态并禁用，添加来源后才能切换。
 Discord/X 手动转发通过 `manual=True` 读取配置，`enabled` 只看共享手动开关，而
 `append_original` / `show_datetime` 仍沿用来源设置；纯 QQ 与 Bilibili 手动转发回退到
 `translation` 全局配置。YouTube 自动投递翻译时跳过来源头（`skip_leading_parts=1`），只翻译标题和链接所在正文；Steam 翻译整条已渲染通知。
@@ -641,7 +646,7 @@ Discord 与 QQ 网关启动失败后由 `plugins/discord_reconnect.py` 常驻监
 
 ## 8. 重要数据文件
 
-全局出站代理由设置页维护在 `data/network_proxies.json`，字段为 Discord、X、远程 RSSHub、Bilibili、YouTube、Steam、翻译/AI。它不属于单个 QQ Bot 工作区配置；修改后由面板重启机器人。HTTP/HTTPS 地址按链路分别应用，未配置时保留各链路现有的环境变量回退行为。设置页可读取当前 Windows 回环系统代理并填入 Discord/X，但不会自动保存；本机/局域网 RSSHub 与本机 AI 服务绕过代理。完整配置备份包含该文件，备份可能含带认证信息的代理 URL。
+全局出站代理由设置页维护在 `data/network_proxies.json`，字段为 Discord、X、远程 RSSHub、Bilibili、YouTube、Steam、翻译/AI。它不属于单个 QQ Bot 工作区配置；修改后由面板重启机器人。HTTP/HTTPS 地址按链路分别应用，未配置时保留各链路现有的环境变量回退行为。网络代理窗口底栏可读取当前 Windows 回环系统代理，填入并检测全部七项，需通过保存按钮提交；本机/局域网 RSSHub 与本机 AI 服务绕过代理。完整配置备份包含该文件，备份可能含带认证信息的代理 URL。
 
 私聊 Bilibili 投稿链接的消息类型筛选保存在 settings.json 的 bilibili_c2c_relay_filter 中，由管理面板「QQ → QQ」页的统一「手动转发」卡右侧「内容筛选」二级窗口的 Bilibili Tab 读写；视频本体归入“视频”类型，旧配置缺少此字段时按全部支持类型启用处理。该筛选不区分内容类型：链接指向视频、专栏还是动态由链接本身决定，面板不提供投稿类型选项。
 
@@ -705,7 +710,7 @@ QQ 定时消息可在每条计划内保存一张 PNG、JPEG、GIF 或 WebP 附�
 |------|------|----------|
 | `bot.py` | 入口：适配器注册、日志轮转、运行时日志级别监听；在 NoneBot 初始化前加载设置页中的 Discord 代理，使首次 Gateway 连接使用已保存设置；控制台和文件日志均关闭异常局部变量诊断，避免 traceback 输出适配器对象中的 Token | 低 |
 | `plugins/network_proxy.py` | 全局代理配置的校验、原子读写、链路解析；本机/私有地址默认绕过代理 | 低 |
-| `panel/network_proxy_api.py` | 设置页代理配置读写、Windows 系统代理检测及 Discord/X 出站连接检测；检测不回显代理地址中的认证信息 | 低 |
+| `panel/network_proxy_api.py` | 设置页代理配置读写、Windows 系统代理检测及七项代理的出站连接检测。检测使用当前输入的代理和服务对应的预设目标，结果不回显代理认证信息 | 低 |
 | `plugins/config.py` | settings.json 消费者：带文件版本缓存的配置读取；Discord 实时转发和 QQ 默认发送路由从单次快照取得频道/目标群/筛选及 Bot 绑定；文件缺失时初始化默认值，损坏/结构无效时内存降级（不写盘） | 低 |
 | `plugins/relay.py` | 实时转发主逻辑：在线程池读取频道/群/筛选快照 → 去重 → 渲染 → 在线程池复查群状态 → 发送 → 记录 | 中 |
 | `plugins/command.py` | QQ 私聊 relay 命令 + OpenID 自动发现 + 身份记录 | 中 |

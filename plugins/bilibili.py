@@ -73,6 +73,7 @@ from plugins.rss_polling import (
 )
 from plugins.stats import record
 from plugins.translation import translate_text_parts
+from plugins.message_card import CardSource, render_configured_card, source_header_count
 
 
 FEED_TIMEOUT = 30
@@ -858,11 +859,21 @@ async def _dispatch_one_locked():
                 await _save_protection_state_async(state)
                 continue
             text_parts, media_items = rendered
+            original = text_parts
             text_parts = await translate_text_parts(
                 text_parts,
                 ("bilibili", source_id, item["post"]["id"]),
                 skip_leading_parts=0,
                 config=delivery_config["translation"],
+            )
+            post = item["post"]
+            card_source = CardSource(
+                "Bilibili", post.get("author") or source["name"], post.get("post_type") or "投稿",
+                post.get("link", "") if enabled_types is None or "链接" in enabled_types else "",
+            )
+            text_parts, media_items = await render_configured_card(
+                card_source, delivery_config, original, text_parts, media_items, delivery_config["translation"],
+                header_parts=source_header_count(original, "Bilibili"),
             )
             ok_map = await send_and_record(
                 channel_key,

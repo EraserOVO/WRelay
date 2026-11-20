@@ -135,13 +135,10 @@ async def reply(bot, event, text):
 async def prepare(event):
     from plugins import command
     from plugins.media import fetch_bytes
-    from plugins.translation import translate_text_parts
     text = event.get_plaintext().strip()
     if command.is_discord_url(text) or command.is_x_status_url(text) or command.parse_manual_post_url(text):
         content = await command._prepare_manual_relay_content({"content": text})
-        parts = await translate_text_parts(content.text_parts, content.translation_key,
-                                          skip_leading_parts=1, config=content.translation_config)
-        return parts, content.media_items
+        return await command.format_manual_relay_content(content, header_parts=1)
     parts, media = [], []
     for segment in event.message:
         if segment.type == "text":
@@ -163,7 +160,8 @@ async def prepare(event):
             media.append({"kind": kind, "url": url, "segment": constructor(data)})
         elif segment.type != "reply":
             raise ValueError("该消息包含暂不支持的附件类型")
-    return await translate_text_parts(parts, ("qq_group", str(event.message_id))), media
+    content = command._ManualRelayContent(parts, media, ("qq_group", str(event.message_id)))
+    return await command.format_manual_relay_content(content)
 
 
 async def forward(bot, event, text):

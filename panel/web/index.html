@@ -18,8 +18,8 @@
   html.panel-styles-ready body { visibility: visible; }
 </style>
 <link rel="icon" type="image/svg+xml" href="./wrelay-logo.svg">
-<link rel="stylesheet" href="./style.css?v=20261118-registry-picker-edit-r1">
-<link rel="stylesheet" href="./ui-components.css?v=20261116-profile-import-summary-r1">
+<link rel="stylesheet" href="./style.css?v=20261120-registration-empty-text">
+<link rel="stylesheet" href="./ui-components.css?v=20261120-filter-checkbox-alignment">
 <link rel="stylesheet" href="./onboarding.css?v=20261107-restart">
 <link rel="stylesheet" href="./personal-qq.css">
 </head>
@@ -727,7 +727,7 @@
           <button id="btnSettingsAutostart" type="button" class="sec" disabled aria-label="开机自启" aria-pressed="false"><span class="settings-switch-track" aria-hidden="true"></span></button>
         </div>
         <div class="settings-row">
-          <div class="settings-item-copy"><strong>网络代理</strong><small>按链路设置外网代理并检测 Discord、X 连通性</small></div>
+          <div class="settings-item-copy"><strong>网络代理</strong><small>按链路设置外网代理并检测连通性</small></div>
           <button type="button" class="sec icon-label-button" id="btnNetworkProxy"><span>配置</span><svg data-mingcute-icon="right" data-mingcute-size="14"></svg></button>
         </div>
         <div class="settings-row">
@@ -764,15 +764,11 @@
           <option value="ERROR">ERROR</option>
         </select>
         <button id="btnLogAutoScroll" class="sec log-auto-scroll pill-switch" type="button" role="switch" aria-pressed="true" aria-checked="true"><span class="pill-switch-label">自动滚动：开</span><span class="settings-switch-track" aria-hidden="true"></span></button>
+        <button id="btnOpenMessageTrace" class="sec" type="button">消息追踪</button>
       </div>
       <div class="modal-actions">
-        <span class="modal-actions-start">
-          <button id="btnOpenMessageTrace" class="sec" type="button">消息追踪</button>
-        </span>
-        <span class="modal-actions-end">
-          <button id="btnCopyLog" class="sec" type="button">复制日志</button>
-          <button id="btnClearLog" class="danger">清空日志</button>
-        </span>
+        <button id="btnCopyLog" class="sec" type="button">复制日志</button>
+        <button id="btnClearLog" class="danger">清空日志</button>
       </div>
   </div>
 </div>
@@ -840,7 +836,7 @@
     <div class="bilibili-source-heading">
       <button type="button" class="modal-x" data-close="youtubeSourceModal" aria-label="关闭"><svg data-mingcute-icon="close" data-mingcute-size="18"></svg></button>
       <h3 id="youtubeSourceModalTitle">注册 YouTube 来源</h3>
-      <p id="youtubeSourceModalContext">填写频道 ID（UC 开头）或 @handle</p>
+      <p id="youtubeSourceModalContext">填写频道主页链接，或输入 @开头的频道用户名</p>
     </div>
     <div id="youtubeSourceModalBody"></div>
     <div class="bilibili-source-actions">
@@ -926,6 +922,14 @@
         <label class="content-filter-check"><input id="filterTranslationShowDatetime" type="checkbox">显示时间</label>
       </div>
     </div>
+    <div id="filterImageCardFields" style="margin-top:14px;"></div>
+    <template id="imageCardOptionsTemplate">
+      <span class="flt-col-title">消息呈现 <span class="flt-col-hint">（全局）</span></span>
+      <div class="content-filter-checks" style="margin-top:8px;">
+        <label class="content-filter-check"><input data-image-card="enabled" type="checkbox" checked>图片化转发</label>
+        <label class="content-filter-check"><input data-image-card="light" type="checkbox">浅色模式</label>
+      </div>
+    </template>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
       <button id="filterSave">保存</button>
     </div>
@@ -940,7 +944,7 @@
       <button type="button" class="sec fscope-tab" data-rscope="bilibili">Bilibili</button>
     </div>
     <h3 id="relayChannelsTitle">已注册频道</h3>
-    <p class="relay-channels-desc">这里显示全部已登记、可用于手动转发链接的频道。修改备注后点击保存即可。</p>
+    <p class="relay-channels-desc" style="display:none;"></p>
     <div id="relayChannelsList" class="relay-channels-list"></div>
     <div class="relay-channels-actions">
       <button type="button" class="sec" data-close="relayChannelsModal">取消</button>
@@ -1009,7 +1013,6 @@
     <label for="tencentSecretKey" class="translation-config-label">SecretKey</label>
     <input type="password" id="tencentSecretKey" autocomplete="new-password" spellcheck="false" style="width:100%;box-sizing:border-box;">
     <p id="tencentConfigStatus" style="font-size:12px;color:var(--muted);margin:10px 0 0;line-height:1.6;">TMT 配置状态读取中……</p>
-    <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.6;">密钥会写入对应环境变量，不会保存到 settings.json；留空表示保持当前密钥。在此窗口选择已保存配置并保存后即可切换模型。</p>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
       <button id="translationConfigCancel" class="sec">取消</button>
       <button id="translationConfigSave">保存</button>
@@ -1087,53 +1090,59 @@
 <div id="networkProxyModal" class="modal-overlay" style="display:none">
   <section class="modal-shell modal-large network-proxy-modal" role="dialog" aria-modal="true" aria-labelledby="networkProxyTitle">
     <header class="modal-header">
-      <div class="modal-heading"><h3 id="networkProxyTitle">网络代理</h3><p>留空表示直连或使用该链路原有回退设置。修改后需要重启机器人。</p></div>
+      <div class="modal-heading"><h3 id="networkProxyTitle">网络代理</h3></div>
       <div class="modal-header-actions"><button type="button" class="modal-x" data-close="networkProxyModal" aria-label="关闭"><svg data-mingcute-icon="close" data-mingcute-size="18"></svg></button></div>
     </header>
     <div class="modal-body network-proxy-body">
-      <div class="network-proxy-autodetect">
-        <div class="network-proxy-copy"><strong>不确定端口？</strong><small>在 Clash Verge 开启「系统代理」后，可自动读取当前 Windows 代理并填入 Discord 和 X。</small></div>
-        <button type="button" class="sec" id="networkProxyDetectSystem">自动读取系统代理</button>
-        <span id="networkProxySystemStatus" role="status" aria-live="polite"></span>
-      </div>
       <div class="network-proxy-row">
-        <div class="network-proxy-copy"><label for="networkProxyDiscord">Discord 代理</label><small>用于 Discord Gateway 与 API 连接；提供连接检测。</small></div>
+        <label for="networkProxyDiscord">Discord 代理</label>
         <input id="networkProxyDiscord" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
-        <div class="network-proxy-actions"><button type="button" class="sec" data-proxy-test="discord">检测连接</button><span id="networkProxyDiscordStatus" role="status" aria-live="polite"></span></div>
+        <button type="button" class="sec rowicon" data-proxy-test="discord" title="检测 Discord 代理连接" aria-label="检测 Discord 代理连接"><svg data-mingcute-icon="dashboard-2" data-mingcute-size="18" aria-hidden="true"></svg></button>
+        <span class="network-proxy-test-status" id="networkProxyDiscordStatus" role="status" aria-live="polite"></span>
       </div>
       <div class="network-proxy-row">
-        <div class="network-proxy-copy"><label for="networkProxyX">X 代理</label><small>用于 WRelay 进程访问 X/Twitter；提供连接检测。</small></div>
+        <label for="networkProxyX">X 代理</label>
         <input id="networkProxyX" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
-        <div class="network-proxy-actions"><button type="button" class="sec" data-proxy-test="x">检测连接</button><span id="networkProxyXStatus" role="status" aria-live="polite"></span></div>
+        <button type="button" class="sec rowicon" data-proxy-test="x" title="检测 X 代理连接" aria-label="检测 X 代理连接"><svg data-mingcute-icon="dashboard-2" data-mingcute-size="18" aria-hidden="true"></svg></button>
+        <span class="network-proxy-test-status" id="networkProxyXStatus" role="status" aria-live="polite"></span>
       </div>
       <div class="network-proxy-row">
-        <div class="network-proxy-copy"><label for="networkProxyRsshub">远程 RSSHub 代理</label><small>仅作用于 WRelay 请求远程 RSSHub；本机/局域网 RSSHub 自动直连。RSSHub 容器访问上游需在 RSSHub 服务内配置。</small></div>
+        <label for="networkProxyRsshub">远程 RSSHub 代理</label>
         <input id="networkProxyRsshub" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
-        <span class="network-proxy-spacer" aria-hidden="true"></span>
+        <button type="button" class="sec rowicon" data-proxy-test="rsshub" title="检测远程 RSSHub 代理连接" aria-label="检测远程 RSSHub 代理连接"><svg data-mingcute-icon="dashboard-2" data-mingcute-size="18" aria-hidden="true"></svg></button>
+        <span class="network-proxy-test-status" id="networkProxyRsshubStatus" role="status" aria-live="polite"></span>
       </div>
       <div class="network-proxy-row">
-        <div class="network-proxy-copy"><label for="networkProxyBilibili">Bilibili 代理</label><small>用于 WRelay 直接访问 Bilibili API 和下载视频；通过 RSSHub 获取来源时仍使用上面的 RSSHub 代理。</small></div>
+        <label for="networkProxyBilibili">Bilibili 代理</label>
         <input id="networkProxyBilibili" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
-        <span class="network-proxy-spacer" aria-hidden="true"></span>
+        <button type="button" class="sec rowicon" data-proxy-test="bilibili" title="检测 Bilibili 代理连接" aria-label="检测 Bilibili 代理连接"><svg data-mingcute-icon="dashboard-2" data-mingcute-size="18" aria-hidden="true"></svg></button>
+        <span class="network-proxy-test-status" id="networkProxyBilibiliStatus" role="status" aria-live="polite"></span>
       </div>
       <div class="network-proxy-row">
-        <div class="network-proxy-copy"><label for="networkProxyYoutube">YouTube 代理</label><small>用于 YouTube RSS 与 API 请求。</small></div>
+        <label for="networkProxyYoutube">YouTube 代理</label>
         <input id="networkProxyYoutube" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
-        <span class="network-proxy-spacer" aria-hidden="true"></span>
+        <button type="button" class="sec rowicon" data-proxy-test="youtube" title="检测 YouTube 代理连接" aria-label="检测 YouTube 代理连接"><svg data-mingcute-icon="dashboard-2" data-mingcute-size="18" aria-hidden="true"></svg></button>
+        <span class="network-proxy-test-status" id="networkProxyYoutubeStatus" role="status" aria-live="polite"></span>
       </div>
       <div class="network-proxy-row">
-        <div class="network-proxy-copy"><label for="networkProxySteam">Steam 代理</label><small>用于 Steam 商店、公告与游戏数据请求。</small></div>
+        <label for="networkProxySteam">Steam 代理</label>
         <input id="networkProxySteam" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
-        <span class="network-proxy-spacer" aria-hidden="true"></span>
+        <button type="button" class="sec rowicon" data-proxy-test="steam" title="检测 Steam 代理连接" aria-label="检测 Steam 代理连接"><svg data-mingcute-icon="dashboard-2" data-mingcute-size="18" aria-hidden="true"></svg></button>
+        <span class="network-proxy-test-status" id="networkProxySteamStatus" role="status" aria-live="polite"></span>
       </div>
       <div class="network-proxy-row">
-        <div class="network-proxy-copy"><label for="networkProxyTranslation">翻译与 AI API 代理</label><small>用于远程 AI/Tencent TMT 接口；本机 Ollama 地址自动直连。</small></div>
+        <label for="networkProxyTranslation">翻译与 AI API 代理</label>
         <input id="networkProxyTranslation" type="password" autocomplete="new-password" spellcheck="false" placeholder="http://127.0.0.1:端口">
-        <span class="network-proxy-spacer" aria-hidden="true"></span>
+        <button type="button" class="sec rowicon" data-proxy-test="translation" title="检测翻译与 AI API 代理连接" aria-label="检测翻译与 AI API 代理连接"><svg data-mingcute-icon="dashboard-2" data-mingcute-size="18" aria-hidden="true"></svg></button>
+        <span class="network-proxy-test-status" id="networkProxyTranslationStatus" role="status" aria-live="polite"></span>
       </div>
-      <p class="network-proxy-note">支持 HTTP/HTTPS 代理地址，可带用户名和密码；配置保存在本机，并会包含在 WRelay 配置备份中。</p>
     </div>
-    <footer class="modal-footer"><button type="button" class="sec" data-close="networkProxyModal">取消</button><button type="button" id="networkProxySave">保存并重启机器人</button></footer>
+    <footer class="modal-footer">
+      <span id="networkProxySystemStatus" role="status" aria-live="polite"></span>
+      <button type="button" class="sec" id="networkProxyDetectSystem">自动读取系统代理</button>
+      <button type="button" class="sec" data-close="networkProxyModal">取消</button>
+      <button type="button" id="networkProxySave">保存并重启机器人</button>
+    </footer>
   </section>
 </div>
 <div id="chainDetailModal" class="modal-overlay" style="display:none">
@@ -1148,13 +1157,13 @@
 </div>
   <script src="./local-api.js"></script>
 <script src="./mingcute-icons.js?v=20261118-upstream-icon-r1"></script>
-<script src="./app.js?v=20261118-registry-picker-edit-r1"></script>
+<script src="./app.js?v=20261120-registration-empty"></script>
 <script src="./desktop.js?v=20261107-select-sheen"></script>
 <script src="./ui-components.js?v=20261118-link-destination-labels-r1"></script>
 <script src="./personal-qq.js"></script>
   <script src="./bot-profiles.js?v=20261116-profile-menu-actions-r4"></script>
 <script src="./discord-page.js?v=20261114-steam-workspace"></script>
 <script src="./onboarding.js?v=20261114-mingcute-buttons"></script>
-<script src="./steam-page.js?v=20261116-source-links-r1"></script>
+<script src="./steam-page.js?v=20261120-registration-empty"></script>
 </body>
 </html>

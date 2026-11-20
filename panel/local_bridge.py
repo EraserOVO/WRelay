@@ -48,7 +48,7 @@ def dispatch(app, token, method, path, headers=None, body_base64=""):
         return {"status": 400, "headers": {"content-type": "application/json"},
                 "body": base64.b64encode(json.dumps({"ok": False, "msg": "无效请求体"}).encode("utf-8")).decode("ascii")}
     safe_headers = {str(k): str(v) for k, v in (headers or {}).items()
-                    if str(k).lower() in ("content-type", "accept")}
+                    if str(k).lower() in ("content-type", "accept", "x-file-name")}
     safe_headers["X-WRelay-Token"] = token
 
     async def run():

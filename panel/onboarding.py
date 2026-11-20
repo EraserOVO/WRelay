@@ -58,7 +58,7 @@ def source_spec(draft, settings):
     value = draft.get("source_value", "").strip()
     name = draft.get("name", "").strip() or value
     translation_defaults = {
-        "translation_enabled": False,
+        "translation_enabled": purpose != "bilibili",
         "translation_append_original": True,
         "translation_show_datetime": False,
     }

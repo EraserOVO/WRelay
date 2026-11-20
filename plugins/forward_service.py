@@ -8,8 +8,9 @@
 import asyncio
 
 from plugins.config import get_channel_filter, get_channel_translation_config
-from plugins.fetch import build_parts
-from plugins.filter import get_enabled_message_types
+from plugins.fetch import build_parts, discord_message_link
+from plugins.filter import MESSAGE_TYPE_LINK, get_enabled_message_types
+from plugins.message_card import CardSource, card_time, part_text, render_forward_card
 from plugins.translation import translate_text_parts
 
 
@@ -38,19 +39,31 @@ async def prepare_discord_message(
         channel_id,
     )
 
+    enabled_types = get_enabled_message_types(filter_config)
     text_parts, media_items, has_content = await build_parts(
         message,
         source_label=source_label,
-        enabled_types=get_enabled_message_types(filter_config),
+        enabled_types=enabled_types,
         show_datetime=translation_config.get("show_datetime") is True,
     )
     if not has_content:
         return None
 
+    original = text_parts
     text_parts = await translate_text_parts(
         text_parts,
         ("discord", str(channel_id), str(message_id)),
         skip_leading_parts=1,
         config=translation_config,
     )
+    if text_parts and filter_config.get("image_card_enabled", True):
+        header = part_text(original[0]).split("\n", 1)[0]
+        channel = message.get("channel_name") or header.removeprefix("【Discord】#").rsplit(" · ", 1)[0]
+        detail = " · ".join(value for value in (f"#{channel}", card_time(original)) if value)
+        url = ""
+        if enabled_types is None or MESSAGE_TYPE_LINK in enabled_types:
+            url = await discord_message_link(message, channel_id, message_id)
+        source = CardSource("Discord", message.get("username") or "unknown", detail, url)
+        return await render_forward_card(source, filter_config.get("image_card_theme", "dark"),
+                                         original, text_parts, media_items, translation_config)
     return text_parts, media_items
