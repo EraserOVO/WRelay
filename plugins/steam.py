@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 import copy
 from datetime import timezone
 from email.utils import parsedate_to_datetime
@@ -24,8 +25,9 @@ from plugins.retry import send_and_record
 from plugins.network_proxy import get_proxy as get_network_proxy
 from plugins.sender import get_qq_bots
 from plugins.stats import record
-from plugins.steam_data import (app_id, bundle_details, bundle_ids, creator_app_ids, creator_clan_id,
-                                creator_url, game_details, parse_announcements, parse_news, store_items)
+from plugins.steam_data import (app_id, bundle_details, bundle_ids, card_store_image, card_store_item,
+                                creator_app_ids, creator_clan_id, creator_url, game_details,
+                                parse_announcements, parse_news, store_items)
 from plugins.translation import translate_text_parts
 from plugins.message_card import CardSource, render_configured_card, source_link
 from plugins import steam_state as logic
@@ -36,6 +38,7 @@ _delivery_locks = {}
 _status = {}
 _next_poll = {}
 _retry_after = {}
+_card_images = OrderedDict()
 _request_lock = asyncio.Lock()
 _last_request = 0.0
 _host_cooldowns = {}
@@ -312,13 +315,40 @@ async def _details(appid, region, cache):
     return cache[key]
 
 
-async def _browse(ids, field, region):
+async def _browse(ids, field, region, *, include_assets=False):
     request = {"ids": [{field: int(value)} for value in ids],
                "context": {"country_code": region, "language": "english", "steam_realm": 1},
                "data_request": {"include_basic_info": True, "include_all_purchase_options": True}}
+    if include_assets:
+        request["data_request"] = {"include_assets": True}
     response = await _get("https://api.steampowered.com/IStoreBrowseService/GetItems/v1/",
                           {"input_json": json.dumps(request, separators=(",", ":"))})
     return store_items(response.json(), ids, field)
+
+
+async def _card_avatar_url(item, url):
+    field, item_id = card_store_item(item, url)
+    if not item_id:
+        return ""
+    key = field, item_id
+    cached = _card_images.get(key)
+    if cached and cached[0] > time.monotonic():
+        _card_images.move_to_end(key)
+        return cached[1]
+    image = ""
+    try:
+        rows = await asyncio.wait_for(_browse([item_id], field, "US", include_assets=True), timeout=3)
+        image = card_store_image(rows[item_id], field, item_id)
+    except Exception:
+        pass  # Store artwork is optional and never prevents delivery.
+    ttl = 3600 if image else 60
+    if not image and field == "appid":
+        image = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{item_id}/header.jpg"
+    _card_images[key] = (time.monotonic() + ttl, image)
+    _card_images.move_to_end(key)
+    if len(_card_images) > 128:
+        _card_images.popitem(last=False)
+    return image
 
 
 async def _poll_bundles(owner, source, groups, region, limit, candidate_apps, clan=None, role=None):
@@ -542,7 +572,12 @@ async def _dispatch_locked(owner, settings):
                 )
                 _, _, body = formatted.partition("\n")
                 title = body.splitlines()[0].strip() if body else "Steam"
-                source = CardSource("Steam", title, _EVENT_LABELS.get(chosen.get("event"), "动态"), source_link(original))
+                url = source_link(original)
+                avatar_url = ""
+                if delivery_config.get("image_card_enabled", True):
+                    avatar_url = await _card_avatar_url(chosen, url)
+                source = CardSource("Steam", title, _EVENT_LABELS.get(chosen.get("event"), "动态"),
+                                    url, avatar_url=avatar_url)
                 text_parts, media_items = await render_configured_card(
                     source, delivery_config, original, text_parts, [], delivery_config["translation"], header_parts=0,
                 )

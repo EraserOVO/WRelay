@@ -25,6 +25,40 @@ def app_id(value):
     return str(int(match.group(1))) if match and int(match.group(1)) else ""
 
 
+def card_store_item(item, url):
+    """Identify the card's app or bundle, including entries from older queues."""
+    if item.get("event") in {"announcements", "news"}:
+        return "appid", app_id(item.get("source_value"))
+    parsed = urlsplit(url)
+    if parsed.scheme == "https" and parsed.hostname == "store.steampowered.com":
+        bundle = re.match(r"^/bundle/([1-9][0-9]*)(?:/|$)", parsed.path)
+        if bundle:
+            return "bundleid", bundle.group(1)
+    return "appid", app_id(url) or app_id(item.get("source_value"))
+
+
+def card_store_image(row, field, item_id):
+    """Prefer a square app icon, or the store cover for apps and bundles."""
+    assets = row.get("assets")
+    if not isinstance(assets, dict):
+        return ""
+    icon = assets.get("community_icon")
+    if field == "appid" and isinstance(icon, str) and re.fullmatch(r"[0-9a-fA-F]{40}", icon):
+        return f"https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{item_id}/{icon}.jpg"
+    kind = "apps" if field == "appid" else "bundles"
+    prefix = f"steam/{kind}/{item_id}/"
+    template = assets.get("asset_url_format")
+    cover = assets.get("header") or assets.get("main_capsule")
+    if not isinstance(template, str) or not template.startswith(prefix) or not isinstance(cover, str):
+        return ""
+    path = template[len(prefix):]
+    if not re.fullmatch(r"(?:[A-Za-z0-9_-]+/)*\$\{FILENAME\}(?:\?t=[0-9]+)?", path):
+        return ""
+    if not re.fullmatch(r"(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.(?:jpg|png|webp)", cover):
+        return ""
+    return "https://shared.fastly.steamstatic.com/store_item_assets/" + template.replace("${FILENAME}", cover)
+
+
 def creator_url(value):
     try:
         url = urlsplit(str(value or "").strip())

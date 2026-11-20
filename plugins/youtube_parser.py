@@ -30,6 +30,10 @@ _PAGE_TITLE_PATTERNS = (
     re.compile(r'<meta[^>]+property="og:title"[^>]+content="([^"]+)"'),
     re.compile(r"<title>([^<]+)</title>"),
 )
+_CHANNEL_IMAGE_RE = re.compile(
+    r'''<meta\b(?=[^>]*\sproperty=["']og:image["'])(?=[^>]*\scontent=(["'])(.*?)\1)[^>]*>''',
+    re.IGNORECASE,
+)
 
 
 def normalize_channel_value(raw):
@@ -108,6 +112,12 @@ def parse_channel_page(html):
     if title.endswith(" - YouTube"):
         title = title[: -len(" - YouTube")].strip()
     return {"channel_id": channel_id, "title": title}
+
+
+def parse_channel_avatar(html):
+    """频道主页的 og:image 对应发布频道的头像。"""
+    match = _CHANNEL_IMAGE_RE.search(str(html or ""))
+    return unescape(match.group(2)).strip() if match else ""
 
 
 def parse_channel_videos_page(html, channel_id):

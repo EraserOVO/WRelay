@@ -1113,7 +1113,8 @@ async def _dispatch_one_locked():
                 attribution = next((part_text(part).strip().removeprefix("↻ ").rstrip("：")
                                     for part in original[1:] if part_text(part).startswith("\n↻ 转发 ")), "")
                 detail = " · ".join(value for value in (card_time(original), attribution) if value)
-                card_source = CardSource("X", post.get("author") or source["name"], detail, post.get("link") or "")
+                card_source = CardSource("X", post.get("author") or source["name"], detail, post.get("link") or "",
+                                         avatar_url=post.get("avatar_url", ""))
                 text_parts, media_items = await render_forward_card(
                     card_source, delivery_config.get("image_card_theme", "dark"),
                     original, text_parts, media_items, delivery_config["translation"],

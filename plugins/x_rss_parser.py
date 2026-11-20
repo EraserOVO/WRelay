@@ -245,6 +245,8 @@ def parse_feed(xml_bytes):
     )
     if root_name != "rss":
         raise ValueError("RSS 文档根节点无效: {}".format(root_name or "<empty>"))
+    # RSSHub 的单用户源把订阅账号的资料图放在频道元数据中。
+    avatar_url = (root.findtext("channel/image/url") or "").strip()
     posts = []
     for item_el in root.findall(".//item"):
         try:
@@ -252,6 +254,8 @@ def parse_feed(xml_bytes):
         except Exception:
             continue
         if post is not None:
+            if avatar_url:
+                post["avatar_url"] = avatar_url
             posts.append(post)
     return posts
 
@@ -389,6 +393,7 @@ def parse_syndication_feed(body, fallback_author=""):
             "guid": link,
             "link": link,
             "author": author,
+            "avatar_url": user.get("profile_image_url_https") or user.get("profile_image_url") or "",
             "pub_date": str(tweet.get("created_at") or "").strip(),
             "title": f"RT {rt_author}" if is_retweet and rt_author else text.splitlines()[0][:120],
             "is_retweet": is_retweet,

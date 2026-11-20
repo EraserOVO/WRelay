@@ -20,6 +20,7 @@ WRelay 是由使用者自行配置的本地转发程序，不要求创建 WRelay
 
 - Discord → QQ 功能会从 Discord API 读取已授权频道消息，并按用户配置发送到 QQ Bot。
 - 启用个人 QQ 时，WRelay 与用户配置的 OneBot 协议端交换账号、群、消息及媒体数据；协议端负责 QQ 登录和与 QQ 服务的通信。请按其部署方式保护连接和令牌。
+- QQ 手动转发生成图片卡片时，若需要通过数字 QQ 号查询头像，号码仅用于向 QQ 头像服务请求该原消息作者的头像，不会作为头像链接写入卡片。
 - X/Bilibili 自动投递通过用户配置的 RSSHub 地址读取来源，再将符合规则的内容发送到 QQ。
 - YouTube 自动投递通过 YouTube 官方频道 RSS（`feeds/videos.xml`）和封面 CDN 读取频道更新，不经过 RSSHub；可经用户配置的 `DISCORD_PROXY` 或系统 TUN 路由访问。程序只保存频道标识、游标和标题/链接摘要，不下载视频本体。
 - 开启自动翻译后，待翻译文本（包括 Steam 通知）会发送给所选翻译服务。腾讯 TMT 与用户配置的远程 OpenAI 兼容 API 会按各自条款处理文本；配置本机 Ollama 时，文本发往本机 loopback 服务。

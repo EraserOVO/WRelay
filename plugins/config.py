@@ -940,6 +940,18 @@ def is_user_registered(user_openid):
     return False
 
 
+def get_registered_qq_user_number(user_openid):
+    """Return the explicit QQ number bound to this OpenID in the current workspace."""
+    from plugins import bot_profiles
+
+    if not user_openid or (bot_profiles.ids(SETTINGS_FILE) and not bot_profiles.CURRENT.get()):
+        return ""
+    for item in _load_settings().get("qq_user_openids", []):
+        if isinstance(item, dict) and str(item.get("openid") or "") == user_openid:
+            return str(item.get("qq_id") or "").strip()
+    return ""
+
+
 def _failure_notification_config_from(data):
     value = data.get("failure_notification")
     if not isinstance(value, dict):

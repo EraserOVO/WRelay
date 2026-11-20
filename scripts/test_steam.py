@@ -4,6 +4,7 @@ import copy
 import os
 import json
 import importlib.util
+from io import BytesIO
 from importlib.machinery import SourceFileLoader
 import shutil
 import subprocess
@@ -27,7 +28,7 @@ with tempfile.TemporaryDirectory(prefix="wrelay-steam-env-") as _empty_env_dir:
         os.chdir(_cwd)
 
 import httpx
-from plugins import bot_profiles, config, delivery_dedup, history, paths, personal_qq, retry, sender, steam, steam_data, steam_state
+from plugins import bot_profiles, config, delivery_dedup, history, media, message_card, paths, personal_qq, retry, sender, steam, steam_data, steam_state
 from panel.profile_api import portable, prepare
 from panel.backup_restore import BackupRestoreService
 from plugins.json_io import json_file_lock, _atomic_write_json_unlocked
@@ -355,10 +356,15 @@ class SteamRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.path = str(Path(self.directory.name) / "steam.json")
         self.path_patch = mock.patch.object(steam, "_path", return_value=self.path)
         self.path_patch.start()
-        steam._states.clear(); steam._locks.clear(); steam._delivery_locks.clear(); steam._retry_after.clear(); steam._poll_jobs.clear(); steam._next_poll.clear(); steam._poll_suspended.clear()
+        self.real_card_avatar_url = steam._card_avatar_url
+        self.avatar_patch = mock.patch.object(steam, "_card_avatar_url", new=mock.AsyncMock(return_value=""))
+        self.avatar_patch.start()
+        steam._states.clear(); steam._locks.clear(); steam._delivery_locks.clear(); steam._retry_after.clear(); steam._poll_jobs.clear(); steam._next_poll.clear(); steam._card_images.clear()
+        message_card._avatar_cache.clear()
 
     async def asyncTearDown(self):
         self.path_patch.stop()
+        self.avatar_patch.stop()
         # Windows can briefly keep a recently replaced JSON or lock file open.
         for attempt in range(5):
             try:
@@ -368,7 +374,43 @@ class SteamRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 if attempt == 4:
                     raise
                 await asyncio.sleep(0.1 * (attempt + 1))
-        steam._states.clear(); steam._locks.clear(); steam._delivery_locks.clear(); steam._retry_after.clear(); steam._poll_jobs.clear(); steam._next_poll.clear(); steam._poll_suspended.clear()
+        steam._states.clear(); steam._locks.clear(); steam._delivery_locks.clear(); steam._retry_after.clear(); steam._poll_jobs.clear(); steam._next_poll.clear(); steam._card_images.clear()
+        message_card._avatar_cache.clear()
+
+    async def test_card_avatar_success_and_failure_still_deliver(self):
+        from PIL import Image
+
+        image = BytesIO()
+        Image.new("RGB", (100, 100), (240, 30, 50)).save(image, "PNG")
+        icon_url = "https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/620/" + "a" * 40 + ".jpg"
+        assets = {"620": {"assets": {"community_icon": "a" * 40}}}
+        settings = {"sources": [GAME], "routes": {"s1": ["g1"]},
+                    "protection": {"min_send_interval": 1, "hourly_limit": 30}}
+        delivery = {"image_card_enabled": True, "image_card_theme": "dark", "translation": {}}
+        with mock.patch.object(steam, "_card_avatar_url", new=self.real_card_avatar_url), \
+             mock.patch.object(steam, "_browse", new=mock.AsyncMock(return_value=assets)), \
+             mock.patch.object(media, "fetch_bytes", new=mock.AsyncMock(side_effect=[image.getvalue(), None])) as download, \
+             mock.patch.object(config, "get_steam_source_delivery_config", return_value=delivery), \
+             mock.patch.object(steam, "translate_text_parts", new=mock.AsyncMock(side_effect=lambda parts, *args, **kwargs: parts)), \
+             mock.patch.object(steam, "load_last_messages_async", new=mock.AsyncMock(return_value={})), \
+             mock.patch.object(steam, "send_and_record", new=mock.AsyncMock(return_value={"g1": True})) as send, \
+             mock.patch.object(steam, "record", new=mock.AsyncMock()):
+            for index, expected in enumerate(((240, 30, 50, 255), (138, 146, 158, 255)), 1):
+                await steam._change("", lambda state: steam_state.enqueue(
+                    state, "s1", "g1", "card" + str(index),
+                    "Portal 2\nNews\nhttps://store.steampowered.com/app/620/", 20, "news", "620"))
+                message_card._avatar_cache.clear()
+                await steam._dispatch_owner("", settings)
+                self.assertEqual((await steam._snapshot(""))["queue"], [])
+                args = send.await_args.args
+                self.assertEqual(args[2], [])
+                self.assertEqual(args[3][0]["kind"], "转发卡片")
+                with Image.open(BytesIO(args[3][0]["segment"].data["content"])) as card:
+                    self.assertEqual(card.getpixel((message_card.PAD + 30, 55)), expected)
+                await steam._change("", lambda state: state.update(sent_at=[]))
+        self.assertEqual(send.await_count, 2)
+        self.assertEqual(download.await_count, 2)
+        self.assertEqual(download.await_args.args[0], icon_url)
 
     async def test_atomic_queue_failure_preserves_snapshot(self):
         await steam._change("", lambda state: steam_state.enqueue(state, "s1", "g1", "item1", "first", 1, "news", "620"))
@@ -409,22 +451,17 @@ class SteamRuntimeTests(unittest.IsolatedAsyncioTestCase):
             await steam._dispatch_owner("", settings)
         self.assertEqual([item["group"] for item in (await steam._snapshot(""))["queue"]], ["g1"])
 
-    async def test_clear_paused_keeps_active_queue_and_never_changes_baselines(self):
+    async def test_dispatch_discards_unroutable_queue_without_changing_baselines(self):
         await steam._change("", lambda state: steam_state.enqueue(state, "s1", "g1", "one", "first", 20, "news", "620"))
         await steam._change("", lambda state: steam_state.enqueue(state, "s1", "g2", "two", "second", 20, "news", "620"))
-        settings = {"sources": [GAME], "routes": {"s1": ["g1"]}}
+        settings = {"sources": [GAME], "routes": {"s1": ["g1"]},
+                    "protection": {"min_send_interval": 1, "hourly_limit": 30}}
         before = await steam._snapshot("")
-        started = asyncio.Event()
-        async def old_poll():
-            started.set()
-            await asyncio.sleep(60)
-        job = asyncio.create_task(old_poll())
-        steam._poll_jobs[""] = job
-        await started.wait()
-        with mock.patch.object(bot_profiles, "ids", return_value=[]), mock.patch.object(steam, "_config", new=mock.AsyncMock(return_value=settings)):
-            result = await steam.api_steam_clear_paused("")
-        self.assertTrue(job.cancelled())
-        self.assertEqual(result, {"ok": True, "removed": 1})
+        with mock.patch.object(steam, "load_last_messages_async", new=mock.AsyncMock(return_value={})), \
+             mock.patch.object(steam, "send_and_record", new=mock.AsyncMock(return_value={"g1": False})), \
+             mock.patch.object(steam, "_card_avatar_url", new=mock.AsyncMock(return_value="")), \
+             mock.patch.object(steam, "record", new=mock.AsyncMock()):
+            await steam._dispatch_owner("", settings)
         after = await steam._snapshot("")
         self.assertEqual([item["group"] for item in after["queue"]], ["g1"])
         self.assertEqual(after["routes"], before["routes"])
@@ -507,8 +544,7 @@ class SteamRuntimeTests(unittest.IsolatedAsyncioTestCase):
             try:
                 with mock.patch.object(panel, "_ensure_bot_profiles"), \
                      mock.patch.object(panel, "bot_status", return_value={"running": True}), \
-                     mock.patch.object(panel, "bot_api_get", return_value={"ok": True, "queue_pending": 3}), \
-                     mock.patch.object(panel, "bot_api_post", return_value={"ok": True, "removed": 1}) as clear:
+                     mock.patch.object(panel, "bot_api_get", return_value={"ok": True, "queue_pending": 3}):
                     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=panel.app), base_url="http://127.0.0.1") as client:
                         unauthorized = await client.get("/api/settings?bot_id=111")
                         self.assertEqual(unauthorized.status_code, 401)
@@ -522,9 +558,6 @@ class SteamRuntimeTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(bot_profiles.read(str(settings_path), "111")["steam_sources"][0]["id"], "s1")
                         status = await client.get("/api/steam/status?bot_id=111", headers=headers)
                         self.assertEqual(status.json()["queue_pending"], 3)
-                        cleared = await client.post("/api/steam/clear-paused?bot_id=111", headers=headers)
-                        self.assertEqual(cleared.json()["removed"], 1)
-                        clear.assert_called_once_with("/api/steam/clear-paused", bot_id="111")
             finally:
                 panel._panel_log._file.close()
 

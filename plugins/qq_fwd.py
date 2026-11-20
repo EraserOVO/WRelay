@@ -37,6 +37,7 @@ from nonebot.adapters.qq.event import GroupMessageCreateEvent
 from plugins.config import (
     get_image_card_options,
     get_qq_fwd_routing_snapshot,
+    get_registered_qq_user_number,
     get_translation_config,
     is_group_registered,
     GROUP_NOT_REGISTERED_TEXT,
@@ -234,11 +235,45 @@ _BOT_REPLY_PREFIXES = (
 )
 
 
+def _author_metadata(author):
+    member_id = getattr(author, "member_openid", None) or getattr(author, "user_openid", None)
+    author_id = getattr(author, "id", None)
+    return {
+        "author_id": str(author_id or member_id or ""),
+        "author_openid": str(member_id or author_id or ""),
+        "author_name": str(getattr(author, "username", None) or ""),
+        "author_avatar_url": getattr(author, "avatar_url", None) or getattr(author, "avatar", None) or "",
+        "author_qq_id": str(getattr(author, "qq_id", None) or ""),
+    }
+
+
+async def qq_card_source(message, *, group_name=""):
+    """Use the original author and the avatar data provided for that identity."""
+    avatar_url = message.get("author_avatar_url") or ""
+    number = str(message.get("author_qq_id") or "").strip()
+    if not avatar_url and not number and message.get("author_openid"):
+        try:
+            number = await asyncio.to_thread(get_registered_qq_user_number, message["author_openid"])
+        except Exception:
+            pass  # Optional identity metadata must not interrupt forwarding.
+    if not avatar_url and number.isascii() and number.isdecimal() and 5 <= len(number) <= 12:
+        avatar_url = f"https://q1.qlogo.cn/g?b=qq&nk={number}&s=100"
+
+    author = str(message.get("author_name") or "").strip()
+    if not author and avatar_url:
+        author = "QQ 用户"
+    if author:
+        detail = " · ".join(value for value in (group_name, "手动转发") if value)
+    else:
+        author = group_name or "手动转发"
+        detail = "手动转发" if group_name else ""
+    return CardSource("QQ", author, detail, avatar_url=avatar_url)
+
+
 def extract_quoted_message(event):
     """提取被引用消息；没有引用时返回 None。
 
-    返回 {"content", "attachments", "from_bot", "author_id", "author_name",
-    "author_known"}，attachments 的结构与 build_forward_content 入参一致。
+    附带原作者元数据，attachments 的结构与 build_forward_content 入参一致。
     """
     reply = getattr(event, "reply", None)
     if reply is None:
@@ -256,13 +291,7 @@ def extract_quoted_message(event):
             if getattr(attachment, "url", None)
         ],
         "from_bot": bool(getattr(author, "bot", False)),
-        "author_id": str(
-            getattr(author, "id", None)
-            or getattr(author, "member_openid", None)
-            or getattr(author, "user_openid", None)
-            or ""
-        ),
-        "author_name": str(getattr(author, "username", None) or ""),
+        **_author_metadata(author),
         "author_known": author is not None,
     }
 
@@ -392,17 +421,18 @@ async def _fetch_no_proxy(url):
 
 
 def normalize_event_message(event):
-    """把一条群消息归一化为可转发内容 dict（文本 + 附件）。
-
-    结构对齐 build_forward_content 的入参，供待转发的“下一条消息”使用。
-    """
+    """把一条 QQ 消息归一化为可转发内容和作者资料。"""
     content = event.get_plaintext() or ""
     attachments = [
         {"url": a.url, "content_type": a.content_type or ""}
         for a in (getattr(event, "attachments", None) or [])
         if getattr(a, "url", None)
     ]
-    return {"content": content, "attachments": attachments}
+    return {"content": content, "attachments": attachments, **_author_metadata(getattr(event, "author", None))}
+
+
+def relay_message_payload(message):
+    return {key: message[key] for key in ("content", "attachments") if key in message}
 
 
 async def build_forward_content(message):
@@ -633,10 +663,7 @@ async def _cmd_relay_forward(bot, event, numbers):
         return
 
     if quote is not None:
-        message = {
-            "content": quote["content"],
-            "attachments": quote["attachments"],
-        }
+        message = quote
     else:
         record = get_remembered_content(group, user)
         if record is None:
@@ -676,7 +703,7 @@ async def _forward_to_targets(bot, event, targets, message):
     )
 
     try:
-        text_parts, media_items = await build_forward_content(message)
+        text_parts, media_items = await build_forward_content(relay_message_payload(message))
         event_id = str(getattr(event, "id", "") or "")
         original = text_parts
         translation = await asyncio.to_thread(get_translation_config)
@@ -686,8 +713,11 @@ async def _forward_to_targets(bot, event, targets, message):
             config=translation,
         )
         options = await asyncio.to_thread(get_image_card_options)
+        source = CardSource("QQ", source_group_name, "手动转发")
+        if options.get("image_card_enabled", True):
+            source = await qq_card_source(message, group_name=source_group_name)
         text_parts, media_items = await render_configured_card(
-            CardSource("QQ", source_group_name, "手动转发"), options, original, text_parts,
+            source, options, original, text_parts,
             media_items, translation, header_parts=0,
         )
     except Exception as exc:

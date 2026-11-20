@@ -578,10 +578,7 @@ async def _forward_quoted_or_recent(bot, event, targets, user):
     content_event = event
     qq_message = None
     if quote is not None:
-        message = {
-            "content": quote["content"],
-            "attachments": quote["attachments"],
-        }
+        message = quote
     else:
         record = get_c2c_content(user)
         if record is None:
@@ -659,7 +656,8 @@ async def _prepare_discord_relay_content(message):
     )
     detail = " · ".join(value for value in ("#" + str(msg["channel_name"] or msg["channel_id"]), card_time(text_parts)) if value)
     source = CardSource("Discord", msg.get("username") or "Discord", detail,
-                        message if enabled_types is None or "链接" in enabled_types else "")
+                        message if enabled_types is None or "链接" in enabled_types else "",
+                        avatar_url=msg.get("avatar_url", ""))
     return _ManualRelayContent(text_parts, media_items, translation_key, translation_config, source)
 
 
@@ -692,7 +690,8 @@ async def _prepare_x_relay_content(message):
     translation_key = ("x_manual", str(post.get("id") or ""))
     attribution = f"转发 {post['rt_author']}" if post.get("is_retweet") and post.get("rt_author") else ""
     detail = " · ".join(value for value in (card_time(text_parts), attribution) if value)
-    source = CardSource("X", post.get("author") or source_name, detail, post.get("link") or message)
+    source = CardSource("X", post.get("author") or source_name, detail, post.get("link") or message,
+                        avatar_url=post.get("avatar_url", ""))
     return _ManualRelayContent(text_parts, media_items, translation_key, translation_config, source)
 
 
@@ -722,7 +721,8 @@ async def _prepare_bilibili_relay_content(message):
     text_parts, media_items = rendered
     translation_key = ("bilibili_manual", str(post.get("id") or ""))
     source = CardSource("Bilibili", post.get("author") or source_name, post.get("post_type") or "投稿",
-                        post.get("link", "") if enabled_types is None or "链接" in enabled_types else "")
+                        post.get("link", "") if enabled_types is None or "链接" in enabled_types else "",
+                        avatar_url=post.get("avatar_url", ""))
     return _ManualRelayContent(text_parts, media_items, translation_key, card_source=source)
 
 
@@ -739,7 +739,7 @@ async def _prepare_manual_relay_content(
     if parse_manual_post_url(text):
         return await _prepare_bilibili_relay_content(text)
 
-    text_parts, media_items = await qq_fwd.build_forward_content(message or {})
+    text_parts, media_items = await qq_fwd.build_forward_content(qq_fwd.relay_message_payload(message or {}))
 
     if qq_message is not None and qq_message["emoji"]:
         # QQ 表情不在 get_plaintext() 中；优先保留原有文本和表情段。
@@ -756,14 +756,18 @@ async def _prepare_manual_relay_content(
     return _ManualRelayContent(text_parts, media_items, translation_key)
 
 
-async def format_manual_relay_content(content, *, header_parts=0, qq_author="手动转发"):
+async def format_manual_relay_content(content, *, header_parts=0, qq_sender=None):
     translation = content.translation_config
     if translation is None:
         translation = await asyncio.to_thread(get_translation_config)
     translated = await translate_text_parts(content.text_parts, content.translation_key,
                                             skip_leading_parts=header_parts, config=translation)
     options = await asyncio.to_thread(get_image_card_options)
-    source = content.card_source or CardSource("QQ", qq_author)
+    source = content.card_source
+    if source is None:
+        source = CardSource("QQ", "手动转发")
+        if qq_sender is not None and options.get("image_card_enabled", True):
+            source = await qq_fwd.qq_card_source(qq_sender)
     return await render_configured_card(source, options, content.text_parts, translated,
                                         content.media_items, translation, header_parts=header_parts)
 
@@ -819,6 +823,7 @@ async def _consume_next(
     text = str((message or {}).get("content") or "").strip()
     text_parts, media_items = await format_manual_relay_content(
         content,
+        qq_sender=message,
         header_parts=1 if (
             is_discord_url(text)
             or is_x_status_url(text)

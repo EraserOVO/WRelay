@@ -265,6 +265,8 @@ def _get_proxy(url):
         or host == "googleusercontent.com"
         or host.endswith(".googleusercontent.com")
     )
+    if host == "steamstatic.com" or host.endswith(".steamstatic.com"):
+        return get_network_proxy("steam")
     if not (is_discord_host or is_x_host or is_bilibili_host or is_youtube_host):
         return None
     try:
@@ -314,6 +316,7 @@ _media_stopping = False
 
 
 def _get_media_client(proxy=None):
+    global _media_client
     if proxy:
         client = _media_proxy_clients.get(proxy)
         if client is None:
@@ -420,10 +423,10 @@ def get_max_download_bytes():
     return _get_max_download_bytes()
 
 
-async def fetch_bytes(url, headers=None):
+async def fetch_bytes(url, headers=None, *, max_bytes=None, follow_redirects=True):
     """下载媒体字节（走代理、受全局信号量限流、有大小上限）；
     失败或超限返回 None（调用方降级为链接）。可选 headers 用于需要来源页
-    Referer 的 CDN 媒体；不传时保持既有请求行为。"""
+    Referer 的 CDN 媒体。调用方可降低大小上限或禁用重定向。"""
     if _media_stopping:
         return None
     download_task = asyncio.current_task()
@@ -432,10 +435,12 @@ async def fetch_bytes(url, headers=None):
     try:
         proxy = _get_proxy(url)
         timeout = _get_timeout()
-        max_bytes = _get_max_download_bytes()
+        configured_limit = _get_max_download_bytes()
+        max_bytes = configured_limit if max_bytes is None else min(configured_limit, max_bytes)
         async with _get_semaphore():
             client = _get_media_client(proxy)
-            async with client.stream("GET", url, headers=headers) as resp:
+            request_options = {} if follow_redirects else {"follow_redirects": False}
+            async with client.stream("GET", url, headers=headers, **request_options) as resp:
                 if resp.status_code != 200:
                     logger.warning(
                         "媒体下载失败: {} {}",

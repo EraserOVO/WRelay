@@ -264,6 +264,15 @@ def _discord_id(value):
     return str(value)
 
 
+def _discord_avatar_url(author_id, avatar):
+    user_id = _discord_id(author_id)
+    if not re.fullmatch(r"[0-9]{1,32}", user_id):
+        return ""
+    if not isinstance(avatar, str) or not re.fullmatch(r"(?:a_)?[0-9a-fA-F]{32}", avatar):
+        return ""
+    return f"https://cdn.discordapp.com/avatars/{user_id}/{avatar}.png?size=64"
+
+
 def _mention_name_map(mentions):
     """从 Discord mentions 列表提取用户 ID → 显示名映射。"""
     if not isinstance(mentions, (list, tuple)):
@@ -397,6 +406,7 @@ def normalize_api_message(msg):
         "message_id": str(msg.get("id") or ""),
         "author_username": author_username,
         "username": username,
+        "avatar_url": _discord_avatar_url(author.get("id"), author.get("avatar")),
         "channel_id": str(msg.get("channel_id") or ""),
         "guild_id": _discord_id(msg.get("guild_id")),
         "channel_name": None,
@@ -928,6 +938,7 @@ def normalize_event(event, channel_name):
 
     return {
         "username": username,
+        "avatar_url": _discord_avatar_url(getattr(author, "id", None), getattr(author, "avatar", None)),
         "channel_id": str(event.channel_id),
         "guild_id": _discord_id(getattr(event, "guild_id", None)),
         "channel_name": channel_name,

@@ -414,7 +414,8 @@ async def _fetch_video_manual_post(video_ref):
         cover = "https:" + cover
     elif cover.startswith("http://"):
         cover = "https://" + cover[len("http://"):]
-    author = str((data.get("owner") or {}).get("name") or "").strip()
+    owner = data.get("owner") or {}
+    author = str(owner.get("name") or "").strip()
     post = {
         "id": link_id,
         "bvid": bvid,
@@ -424,10 +425,31 @@ async def _fetch_video_manual_post(video_ref):
         "link": link,
         "title": title,
         "author": author,
+        "avatar_url": owner.get("face") or "",
         "post_type": "视频",
         "media": ([{"kind": "图片", "url": cover}] if cover else []),
     }
     return post, author
+
+
+async def _fetch_post_avatar(post):
+    """RSS 条目没有头像时，以原投稿详情补全。头像缺失不影响投递。"""
+    if post.get("avatar_url"):
+        return post["avatar_url"]
+    ref = parse_manual_post_url(post.get("link"))
+    if not ref:
+        return ""
+    try:
+        if ref.get("opus_id"):
+            details, _ = await asyncio.wait_for(_fetch_opus_manual_post(ref["opus_id"]), timeout=3)
+            return details.get("avatar_url") or ""
+        video = ref.get("video_ref") or {}
+        if video.get("bvid") or video.get("avid"):
+            details = await asyncio.wait_for(_fetch_view_data(video), timeout=3)
+            return (details.get("owner") or {}).get("face") or ""
+    except Exception:
+        pass
+    return ""
 
 
 async def fetch_bilibili_manual_post(url):
@@ -867,9 +889,13 @@ async def _dispatch_one_locked():
                 config=delivery_config["translation"],
             )
             post = item["post"]
+            avatar_url = ""
+            if delivery_config.get("image_card_enabled", True):
+                avatar_url = await _fetch_post_avatar(post)
             card_source = CardSource(
                 "Bilibili", post.get("author") or source["name"], post.get("post_type") or "投稿",
                 post.get("link", "") if enabled_types is None or "链接" in enabled_types else "",
+                avatar_url=avatar_url,
             )
             text_parts, media_items = await render_configured_card(
                 card_source, delivery_config, original, text_parts, media_items, delivery_config["translation"],

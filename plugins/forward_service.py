@@ -63,7 +63,8 @@ async def prepare_discord_message(
         url = ""
         if enabled_types is None or MESSAGE_TYPE_LINK in enabled_types:
             url = await discord_message_link(message, channel_id, message_id)
-        source = CardSource("Discord", message.get("username") or "unknown", detail, url)
+        source = CardSource("Discord", message.get("username") or "unknown", detail, url,
+                            avatar_url=message.get("avatar_url", ""))
         return await render_forward_card(source, filter_config.get("image_card_theme", "dark"),
                                          original, text_parts, media_items, translation_config)
     return text_parts, media_items

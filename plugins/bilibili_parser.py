@@ -411,6 +411,7 @@ def _opus_post(item, opus_id, title, body, link, author, cover, is_article):
         "title": title,
         "description": body,
         "author": author,
+        "avatar_url": (item.get("modules") or {}).get("module_author", {}).get("face") or "",
         "pub_date": str(
             (item.get("modules") or {}).get("module_author", {}).get("pub_time") or ""
         ).strip(),

@@ -63,6 +63,7 @@ from plugins.youtube_parser import (
     CHANNEL_ID_RE,
     channel_feed_url,
     channel_page_url,
+    parse_channel_avatar,
     parse_channel_page,
     parse_feed,
     parse_api_playlist_items,
@@ -833,9 +834,13 @@ async def _dispatch_one_locked():
                 config=delivery_config["translation"],
             )
             post = item["post"]
+            avatar_url = ""
+            if delivery_config.get("image_card_enabled", True):
+                avatar_url = await _fetch_channel_avatar(source_id, post.get("channel_id"))
             card_source = CardSource(
                 "YouTube", post.get("author") or source["name"], "视频",
                 post.get("link", "") if enabled_types is None or "链接" in enabled_types else "",
+                avatar_url=avatar_url,
             )
             text_parts, media_items = await render_configured_card(
                 card_source, delivery_config, original, text_parts, media_items, delivery_config["translation"],
@@ -911,6 +916,7 @@ def _update_source_state(
     channel_id=None,
     channel_title=None,
     uploads_playlist_id=None,
+    channel_avatar_url=None,
 ):
     with _state_file_lock:
         state = _load_state()
@@ -926,7 +932,11 @@ def _update_source_state(
         elif etag:
             source_state["etag"] = etag
         if channel_id:
+            if source_state.get("channel_id") != channel_id:
+                source_state.pop("channel_avatar_url", None)
             source_state["channel_id"] = str(channel_id)
+        if channel_avatar_url:
+            source_state["channel_avatar_url"] = channel_avatar_url
         if channel_title:
             source_state["channel_title"] = str(channel_title)
         if uploads_playlist_id:
@@ -937,6 +947,25 @@ def _update_source_state(
 async def _update_source_state_async(*args, **kwargs):
     """Update and persist RSS metadata outside the asyncio event loop."""
     return await asyncio.to_thread(_update_source_state, *args, **kwargs)
+
+
+async def _fetch_channel_avatar(source_id, channel_id):
+    """Prefer existing channel metadata and fall back to the channel homepage."""
+    if not CHANNEL_ID_RE.fullmatch(str(channel_id or "")):
+        return ""
+    try:
+        state = (await _load_state_async())["sources"].get(source_id, {})
+        if isinstance(state, dict) and state.get("channel_id") == channel_id and state.get("channel_avatar_url"):
+            return state["channel_avatar_url"]
+        response = await asyncio.wait_for(
+            _youtube_get(channel_page_url(channel_id), headers={"Accept": "text/html"}), timeout=3,
+        )
+        response.raise_for_status()
+        if parse_channel_page(response.text)["channel_id"] == channel_id:
+            return parse_channel_avatar(response.text)
+    except Exception:
+        pass  # An optional avatar must never hold a video in the queue.
+    return ""
 
 
 async def _resolve_channel_id(source, force_refresh=False):
@@ -963,6 +992,7 @@ async def _resolve_channel_id(source, force_refresh=False):
         source["id"],
         channel_id=channel_id,
         channel_title=str(info.get("title") or "").strip(),
+        channel_avatar_url=parse_channel_avatar(response.text),
     )
     return channel_id
 
@@ -1006,6 +1036,9 @@ async def _resolve_channel_uploads(source, force_refresh=False):
     playlist_id = str(related.get("uploads") or "").strip()
     snippet = item.get("snippet")
     title = str((snippet or {}).get("title") or "").strip()
+    thumbnails = (snippet or {}).get("thumbnails") or {}
+    thumbnail = thumbnails.get("default") if isinstance(thumbnails, dict) else None
+    avatar_url = thumbnail.get("url") if isinstance(thumbnail, dict) else ""
     if not CHANNEL_ID_RE.fullmatch(channel_id) or not playlist_id:
         raise YoutubeDataAPIError(
             "YouTube Data API 未返回有效频道 ID 或上传列表 ID",
@@ -1017,6 +1050,7 @@ async def _resolve_channel_uploads(source, force_refresh=False):
         channel_id=channel_id,
         channel_title=title,
         uploads_playlist_id=playlist_id,
+        channel_avatar_url=avatar_url,
     )
     return channel_id, playlist_id
 

@@ -1,6 +1,7 @@
 """Render filtered forward content into WRelay PNG cards off the event loop."""
 
 import asyncio
+from collections import OrderedDict
 from dataclasses import dataclass
 from decimal import Decimal
 from functools import lru_cache
@@ -10,6 +11,7 @@ import os
 from pathlib import Path
 import re
 from threading import get_ident
+from time import monotonic
 from urllib.parse import urlsplit
 
 from loguru import logger
@@ -24,6 +26,16 @@ MAX_PAGE_HEIGHT = 2560
 MAX_PAGES = 6
 MAX_PNG_BYTES = 6 * 1024 * 1024
 MAX_IMAGE_PIXELS = 20_000_000
+AVATAR_GAP = 13
+AVATAR_HOSTS = {
+    "Discord": ("cdn.discordapp.com", "media.discordapp.net"),
+    "X": ("pbs.twimg.com",),
+    "Bilibili": ("hdslb.com",),
+    "YouTube": ("ytimg.com", "ggpht.com", "googleusercontent.com"),
+    "QQ": ("qlogo.cn",),
+    "Steam": ("steamstatic.com",),
+}
+_avatar_cache = OrderedDict()
 _render_slots = asyncio.Semaphore(2)
 
 
@@ -33,6 +45,7 @@ class CardSource:
     author: str
     detail: str = ""
     url: str = ""
+    avatar_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -101,6 +114,65 @@ def _read_image(data, size):
         image = ImageOps.exif_transpose(original).convert("RGBA")
         image.thumbnail(size, Image.Resampling.LANCZOS)
         return image
+
+
+async def _load_avatar(source):
+    hosts = AVATAR_HOSTS.get(source.platform, ())
+    if not hosts:
+        return None
+    url = source.avatar_url
+    if isinstance(url, str) and url.startswith("//"):
+        url = "https:" + url
+    try:
+        url = valid_source_url(url)
+    except UnicodeError:
+        return None
+    if not url:
+        return None
+    parsed = urlsplit(url)
+    host = parsed.hostname
+    if not any(host == domain or host.endswith("." + domain) for domain in hosts):
+        return None
+    if parsed.netloc.lower() not in (host, host + ":443"):
+        return None
+    url = parsed._replace(scheme="https", fragment="").geturl()
+    if url in _avatar_cache:
+        expires, data = _avatar_cache[url]
+        if expires > monotonic():
+            _avatar_cache.move_to_end(url)
+            return data
+    from plugins.media import fetch_bytes
+
+    try:
+        data = await asyncio.wait_for(
+            fetch_bytes(url, max_bytes=512 * 1024, follow_redirects=False), timeout=3,
+        )
+    except Exception:
+        data = None
+    _avatar_cache[url] = (monotonic() + (600 if data else 60), data)
+    _avatar_cache.move_to_end(url)
+    if len(_avatar_cache) > 64:
+        _avatar_cache.popitem(last=False)
+    return data
+
+
+def _avatar_icon(data, diameter):
+    from PIL import Image, ImageDraw, ImageOps
+
+    size = (diameter, diameter)
+    icon = Image.new("RGBA", size, "#8a929e")
+    if data:
+        try:
+            with Image.open(BytesIO(data)) as original:
+                if original.width * original.height <= MAX_IMAGE_PIXELS:
+                    image = ImageOps.exif_transpose(original).convert("RGBA")
+                    icon.alpha_composite(ImageOps.fit(image, size, Image.Resampling.LANCZOS))
+        except Exception:
+            pass  # A missing or unreadable avatar must not prevent card delivery.
+    mask = Image.new("L", (diameter * 4, diameter * 4))
+    ImageDraw.Draw(mask).ellipse((0, 0, mask.width - 1, mask.height - 1), fill=255)
+    icon.putalpha(mask.resize(size, Image.Resampling.LANCZOS))
+    return icon
 
 
 @lru_cache(maxsize=64)
@@ -209,7 +281,7 @@ def _footer(url, colors):
     return code, _wrap([display], CONTENT - size - 24, 16)
 
 
-def _png_page(colors, header, rows, footer, index):
+def _png_page(colors, header, rows, footer, index, avatar):
     from PIL import Image, ImageColor, ImageDraw
 
     qr, links = footer
@@ -236,8 +308,27 @@ def _png_page(colors, header, rows, footer, index):
         pass
 
     y = 25
+    x = PAD
+    text_offset = 0
+    if avatar is not None:
+        text_height = header_height - 48
+        avatar_y = y + (text_height - avatar.height) // 2
+        canvas.alpha_composite(avatar, (PAD, avatar_y))
+        x += avatar.width + AVATAR_GAP
+        last_line_height, last_line = header[-1][1:3]
+        last_center = y + text_height - last_line_height + last_line_height // 2
+        bottoms = []
+        for value, font, _, _ in last_line:
+            if font:
+                ascent, descent = font.getmetrics()
+                if value.strip():
+                    bottoms.append(last_center - (ascent + descent) // 2 + font.getbbox(value)[3])
+            else:
+                bottoms.append(last_center - value.height // 2 + value.height)
+        if bottoms:
+            text_offset = avatar_y + avatar.height - max(bottoms)
     for _, line_height, line, color in header:
-        _draw_runs(canvas, draw, line, PAD, y + line_height // 2, color)
+        _draw_runs(canvas, draw, line, x, y + line_height // 2 + text_offset, color)
         y += line_height
     y = header_height
     for kind, row_height, data, ink in rows:
@@ -284,13 +375,29 @@ def _png_page(colors, header, rows, footer, index):
     return output.getvalue()
 
 
-def _render(source, theme, body, original, attachments):
+def _card_header(source, colors):
+    name = (source.author or "").strip() or source.platform
+    metadata = " · ".join(value for value in (source.platform, source.detail) if value)
+    diameter = 55 if source.platform in AVATAR_HOSTS else 0
+    while True:
+        width = CONTENT - 65 - (diameter + AVATAR_GAP if diameter else 0)
+        header = [("line", 35, row, colors.ink) for row in _wrap([name], width, 26, True)]
+        header.extend(("line", 25, row, colors.muted) for row in _wrap([metadata], width, 16))
+        if not diameter:
+            return header, 0
+        # Size the circle to wrapped text too, while reserving space for unusually long headers.
+        target = min(sum(height for _, height, _, _ in header) * 11 // 12, CONTENT // 2)
+        if target == diameter:
+            return header, diameter
+        diameter = target
+
+
+def _render(source, theme, body, original, attachments, avatar_data=None):
     from PIL import Image
 
     colors = PALETTES.get(theme, PALETTES["dark"])
-    header = [("line", 35, row, colors.ink) for row in _wrap([source.author or source.platform], CONTENT - 65, 26, True)]
-    metadata = " · ".join(value for value in (source.platform, source.detail) if value)
-    header.extend(("line", 25, row, colors.muted) for row in _wrap([metadata], CONTENT - 65, 16))
+    header, diameter = _card_header(source, colors)
+    avatar = _avatar_icon(avatar_data, diameter) if diameter else None
 
     rows = []
     for parts, label in ((body, ""), (original, "原文")):
@@ -344,7 +451,7 @@ def _render(source, theme, body, original, attachments):
 
     footer = _footer(valid_source_url(source.url), colors)
     if not rows:
-        return [_png_page(colors, header, [], footer, 1)] if footer[0] else []
+        return [_png_page(colors, header, [], footer, 1, avatar)] if footer[0] else []
     reserved = 70 + sum(row[1] for row in header)
     if footer[0]:
         reserved += max(footer[0].height, len(footer[1]) * 23) + 18
@@ -359,7 +466,7 @@ def _render(source, theme, body, original, attachments):
         pages.append(page)
     if len(pages) > MAX_PAGES or reserved >= MAX_PAGE_HEIGHT - 800:
         raise ValueError("卡片超过排版上限")
-    return [_png_page(colors, header, page, footer if i == len(pages) else (None, []), i)
+    return [_png_page(colors, header, page, footer if i == len(pages) else (None, []), i, avatar)
             for i, page in enumerate(pages, 1)]
 
 
@@ -416,8 +523,9 @@ async def render_forward_card(source, theme, before_translation, text_parts, med
             for parts in (body, original):
                 parts[:] = ["\n".join(line for line in part.split("\n") if line.strip() != url)
                             if isinstance(part, str) else part for part in parts]
+        avatar_data = await _load_avatar(source)
         async with _render_slots:
-            pages = await run_in_thread_to_completion(_render, source, theme, body, original, pictures)
+            pages = await run_in_thread_to_completion(_render, source, theme, body, original, pictures, avatar_data)
         if not pages:
             return text_parts, media_items
         preview = " ".join(part_text(part) for part in text_parts)[:300]

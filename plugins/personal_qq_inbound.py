@@ -161,7 +161,12 @@ async def prepare(event):
         elif segment.type != "reply":
             raise ValueError("该消息包含暂不支持的附件类型")
     content = command._ManualRelayContent(parts, media, ("qq_group", str(event.message_id)))
-    return await command.format_manual_relay_content(content)
+    sender = getattr(event, "sender", None)
+    return await command.format_manual_relay_content(content, qq_sender={
+        "author_qq_id": getattr(event, "user_id", ""),
+        "author_name": getattr(sender, "card", None) or getattr(sender, "nickname", ""),
+        "author_avatar_url": getattr(sender, "avatar_url", ""),
+    })
 
 
 async def forward(bot, event, text):
