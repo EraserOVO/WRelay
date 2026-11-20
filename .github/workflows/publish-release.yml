@@ -65,7 +65,11 @@ jobs:
 
       - name: Build unsigned release installer
         shell: pwsh
-        run: .\scripts\build_installer.ps1 -Edition release -Unsigned
+        run: .\scripts\build_installer.ps1 -Edition release -Owner "EraserOVO" -Unsigned
+
+      - name: Verify installer before publication
+        shell: pwsh
+        run: .\.runtime\compile-env\Scripts\python.exe scripts\test_compiled_installer.py dist\WRelay-Setup.exe --edition release --skip-desktop
 
       - name: Prepare checksum and release notes
         shell: pwsh

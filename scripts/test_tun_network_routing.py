@@ -43,6 +43,7 @@ def load_media_proxy_function():
     namespace = {
         "urlsplit": urlsplit,
         "get_driver": lambda: Driver(),
+        "get_network_proxy": lambda _service: None,
     }
     exec(compile(module, str(MEDIA_PATH), "exec"), namespace)
     return namespace["_get_proxy"]

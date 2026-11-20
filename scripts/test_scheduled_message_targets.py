@@ -35,6 +35,15 @@ def resolve(message):
 
 
 def main():
+    # 整体暂停不更改单条或消息组勾选；恢复后按原状态继续。
+    scheduled = {"target_groups": ["g1"], "messages": [{"id": "m1", "content": "hello", "enabled": True, "schedule_type": "interval"}]}
+    with mock.patch.object(config, "_load_settings", return_value={"scheduled_message": scheduled}):
+        assert len(config.get_scheduled_message_config()["messages"]) == 1
+        scheduled["command_paused"] = True
+        assert config.get_scheduled_message_config()["messages"] == []
+        assert scheduled["messages"][0]["enabled"] is True
+        scheduled["command_paused"] = False
+        assert len(config.get_scheduled_message_config()["messages"]) == 1
     # 1) 旧消息：按指定群并沿用默认目标
     legacy = config._scheduled_message_targets({}, ["g1", "g2"])
     assert legacy["target_mode"] == "groups", legacy

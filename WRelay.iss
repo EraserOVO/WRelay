@@ -10,7 +10,7 @@
 AppId=WRelay
 AppName=WRelay
 AppVersion={#BuildVersion}
-AppPublisher=WRelay
+AppPublisher=EraserOVO
 #ifndef Unsigned
 SignTool=wrelay-authenticode
 SignedUninstaller=yes

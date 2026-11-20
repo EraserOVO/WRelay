@@ -1331,6 +1331,8 @@ def get_scheduled_message_config():
             "target_groups": [],
             "messages": [],
         }
+    if value.get("command_paused") is True:
+        return {"target_groups": [], "messages": []}
     default_targets = _scheduled_group_list(value.get("target_groups"))
     raw_messages = []
     message_groups = value.get("message_groups")

@@ -2,7 +2,7 @@
 param(
     [ValidateSet("release", "test")]
     [string]$Edition = "release",
-    [string]$Owner = "",
+    [string]$Owner = "EraserOVO",
     [switch]$CompileOnly,
     [switch]$Unsigned
 )

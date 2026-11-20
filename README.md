@@ -1,5 +1,7 @@
 # WRelay
 
+作者：EraserOVO
+
 WRelay 是一个基于 NoneBot2 的 Windows 消息转发服务。当前代码包含六条相互独立的消息链路：
 
 - Discord → QQ：实时转发和离线补发

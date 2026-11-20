@@ -91,6 +91,7 @@ def main():
         "enabled": True,
         "sources": [SOURCE_ID],
         "groups": ["G1", "G2"],
+        "disabled_groups": [],
     }]
     assert cfg.get_youtube_groups_for_source(SOURCE_ID) == ["G1", "G2"]
     assert cfg.get_youtube_groups_for_source("channel:@LinusTechTips") == []

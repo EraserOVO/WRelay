@@ -149,6 +149,7 @@ class DeliveryJournalTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory, \
                 mock.patch.object(discord_gaps, "GAP_FILE", str(Path(directory) / "gaps.sqlite3")), \
                 mock.patch.object(backfill_api, "get_backfill_routing_snapshot", return_value=snapshot), \
+                mock.patch.object(backfill_api, "get_backfill_status", return_value={"running": True}), \
                 mock.patch.object(backfill_api, "load_last_messages_async", new_callable=mock.AsyncMock,
                                   return_value={"123": {"a": "100", "b": "100"}}), \
                 mock.patch.object(backfill_api, "fetch_channel_latest", new_callable=mock.AsyncMock, return_value="105") as latest:

@@ -82,6 +82,7 @@ def main():
         "enabled": True,
         "sources": ["keyword:独立游戏", "tag:动作游戏", "up:123456"],
         "groups": ["G1", "G2"],
+        "disabled_groups": [],
     }]
     assert cfg.get_bilibili_groups_for_source("up:123456") == ["G1", "G2"]
     assert cfg.get_bilibili_groups_for_source("tag:动作游戏") == ["G1", "G2"]

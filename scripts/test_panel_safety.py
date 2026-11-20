@@ -466,6 +466,7 @@ def check_scheduled_message_update_does_not_block_event_loop():
                     "ok": True,
                     "scheduled_message": {
                         "enabled": True,
+                        "command_paused": False,
                         "content": "keep existing message",
                         "messages": [{"id": "existing", "content": "keep"}],
                     },
@@ -1040,8 +1041,8 @@ def check_qq_bot_config_save_does_not_block_event_loop():
                 assert result["appid"] == "A"
                 assert result["bot_ids"] == ["A", "B"]
                 assert result["bots"] == [
-                    {"appid": "A", "name": ""},
-                    {"appid": "B", "name": ""},
+                    {"appid": "A", "name": "", "enabled": True},
+                    {"appid": "B", "name": "", "enabled": True},
                 ]
                 assert result["restart_required"] is True
                 assert "old-secret" not in json.dumps(result)
@@ -1477,8 +1478,8 @@ def main():
     except ValueError:
         pass
     assert panel._public_qq_bots(updated_bots, names={}) == [
-        {"appid": "A", "name": ""},
-        {"appid": "B", "name": ""},
+        {"appid": "A", "name": "", "enabled": True},
+        {"appid": "B", "name": "", "enabled": True},
     ]
     print("PASS - QQ Bot 多凭据保存保留旧 Secret 且不向前端泄露")
 

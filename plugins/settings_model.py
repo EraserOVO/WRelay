@@ -398,9 +398,12 @@ class SettingsModel(dict):
             )
         # 旧转发组把接收群状态保存在 qq_group_openids.enabled。迁移时将
         # 当时未启用的成员写入组内停用列表，保留各组原有投递结果。
+        identity_groups = result.get("qq_group_openids")
+        if not isinstance(identity_groups, list):
+            identity_groups = []
         global_disabled = {
             str(item.get("openid"))
-            for item in result.get("qq_group_openids", [])
+            for item in identity_groups
             if isinstance(item, dict) and item.get("openid") and item.get("enabled") is not True
         }
         for key in (
@@ -422,8 +425,11 @@ class SettingsModel(dict):
         if isinstance(scheduled, dict):
             message_groups = scheduled.get("message_groups")
             if isinstance(message_groups, list):
-                group_map = {str(item.get("id")): item for item in result.get("qq_forwarding_groups", []) if isinstance(item, dict)}
-                known = {str(item.get("openid")) for item in result.get("qq_group_openids", []) if isinstance(item, dict) and item.get("openid")}
+                configured_groups = result.get("qq_forwarding_groups")
+                if not isinstance(configured_groups, list):
+                    configured_groups = []
+                group_map = {str(item.get("id")): item for item in configured_groups if isinstance(item, dict)}
+                known = {str(item.get("openid")) for item in identity_groups if isinstance(item, dict) and item.get("openid")}
                 for group in message_groups:
                     if not isinstance(group, dict) or "disabled_target_groups" in group:
                         continue
@@ -868,6 +874,8 @@ def _validate_scheduled_messages(data):
     scheduled = data.get("scheduled_message")
     if not isinstance(scheduled, dict):
         return "scheduled_message 必须是对象"
+    if "command_paused" in scheduled and not isinstance(scheduled["command_paused"], bool):
+        return "scheduled_message.command_paused 必须是布尔值"
     if not isinstance(scheduled.get("content"), str):
         return "scheduled_message.content 必须是字符串"
     if len(scheduled["content"]) > 20000:

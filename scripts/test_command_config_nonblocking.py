@@ -252,6 +252,7 @@ async def main():
         mock.patch.object(command, "is_discord_url", return_value=False),
         mock.patch.object(command, "is_x_status_url", return_value=False),
         mock.patch.object(command, "parse_manual_post_url", return_value=False),
+        mock.patch.object(command, "get_image_card_options", return_value={"image_card_enabled": False}),
         mock.patch.object(
             command,
             "translate_text_parts",

@@ -1961,7 +1961,7 @@ def _update_scheduled_message(body):
         return JSONResponse({"ok": False, "msg": "数据格式错误"}, status_code=400)
 
     allowed = {
-        "content", "interval", "target_groups",
+        "enabled", "content", "interval", "target_groups",
         "schedule_mode", "every_days", "every_weeks", "every_months",
         "weekdays", "send_time", "anchor_date", "messages", "message_groups",
     }
@@ -1971,6 +1971,8 @@ def _update_scheduled_message(body):
             status_code=400,
         )
 
+    if "enabled" in body and not isinstance(body["enabled"], bool):
+        return JSONResponse({"ok": False, "msg": "enabled 必须是布尔值"}, status_code=400)
     data, revision = _load_settings_snapshot()
     scheduled = data.get("scheduled_message")
     if not isinstance(scheduled, dict):
@@ -1993,6 +1995,8 @@ def _update_scheduled_message(body):
     for key in allowed:
         if key in body:
             scheduled[key] = body[key]
+    if "enabled" in body:
+        scheduled["command_paused"] = not body["enabled"]
     _sync_legacy_scheduled_message(scheduled, body)
     data["scheduled_message"] = scheduled
 

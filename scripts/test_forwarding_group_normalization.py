@@ -22,6 +22,7 @@ def main():
         "enabled": True,
         "channels": [],
         "groups": [],
+        "disabled_groups": [],
     }]
 
     qq_data = {

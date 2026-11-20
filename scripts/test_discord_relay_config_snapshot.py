@@ -49,6 +49,8 @@ def test_single_load_and_accessor_equivalence():
             "filter_usernames": ["ignored-user"],
             "filter_keywords": ["blocked"],
             "filter_message_types": ["text"],
+            "image_card_enabled": True,
+            "image_card_theme": "dark",
         },
     }, route
 

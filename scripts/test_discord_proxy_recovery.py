@@ -108,8 +108,9 @@ def test_cached_clients_follow_proxy_switch():
     assert "proxy != _discord_client_proxy" in fetch
 
     media = (ROOT / "plugins" / "media.py").read_text(encoding="utf-8")
-    assert "_discord_media_proxy" in media
-    assert "proxy != _discord_media_proxy" in media
+    assert "_media_proxy_clients.get(proxy)" in media
+    assert "_media_proxy_clients[proxy] = client" in media
+    assert "_get_media_client(proxy)" in media
 
 
 def main():

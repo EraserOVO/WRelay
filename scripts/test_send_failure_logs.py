@@ -102,10 +102,10 @@ async def test_rate_limit_log_format():
 
     joined = "\n".join(records)
     assert ok is False, "429 重试耗尽应返回 False"
-    assert "发送失败(第1次) 频道CH100 消息MSG200 群G1" in joined, joined
-    assert "发送失败(第2次) 频道CH100 消息MSG200 群G1" in joined, joined
-    assert "发送失败(第3次) 频道CH100 消息MSG200 群G1" in joined, joined
-    assert "发送失败已达上限(3次)（限流） 频道CH100 消息MSG200 群G1" in joined, joined
+    assert "发送失败(第1次) 类型限流 HTTP- 错误码- Trace ID- 频道CH100 消息MSG200 群G1" in joined, joined
+    assert "发送失败(第2次) 类型限流 HTTP- 错误码- Trace ID- 频道CH100 消息MSG200 群G1" in joined, joined
+    assert "发送失败(第3次) 类型限流 HTTP- 错误码- Trace ID- 频道CH100 消息MSG200 群G1" in joined, joined
+    assert "发送失败，已尝试3次（限流） 频道CH100 消息MSG200 群G1" in joined, joined
     print("[OK] 429 限流失败日志 →\n" + "\n".join(records[:2]) + "\n...")
 
 
@@ -126,8 +126,8 @@ async def test_non_rate_limit_log_format_with_defaults():
     joined = "\n".join(records)
     assert ok is False
     # 不传频道/消息时用 "-" 占位（command.py 手动转发路径）
-    assert "发送失败(第1次) 频道- 消息- 群G1: timed out" in joined, joined
-    assert "发送失败已达上限(3次)（非限流） 频道- 消息- 群G1" in joined, joined
+    assert "发送失败(第1次) 类型未知或临时错误 HTTP- 错误码- Trace ID- 频道- 消息- 群G1: timed out" in joined, joined
+    assert "发送失败，已尝试3次（非限流） 频道- 消息- 群G1" in joined, joined
     print("[OK] 非限流失败日志（默认占位） →\n" + records[-1])
 
 

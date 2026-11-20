@@ -35,7 +35,7 @@ async def main():
         "get_backfill_routing_snapshot",
         empty_routing,
         {"ok": True, "total": 0, "channels": {}, "unknown": False,
-         "scanning": False, "capped": False, "status": {}},
+         "scanning": False, "scan_pending": False, "scan_failed": False, "capped": False, "status": {}},
     )
     await verify_nonblocking(
         backfill_api.api_backfill_clear,

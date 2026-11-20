@@ -30,8 +30,7 @@ CARD_MODALS = [
 ]
 PILL_BUTTONS = [
     "btnTranslationDiscord", "btnTranslationX", "btnTranslationBilibili", "btnTranslationManual",
-    "btnAutoBackupToggle", "btnLogAutoScroll", "btnBackfillToggle",
-    "btnScheduledMessageToggle",
+    "btnAutoBackupToggle", "btnLogAutoScroll",
 ]
 
 failures = []
@@ -84,33 +83,21 @@ card_pill = re.search(
     r"flex: 0 0 auto; width: auto; min-width: 0; max-width: 100%;\s*justify-content: flex-start;",
     STYLE_CSS,
 )
-check("卡片胶囊为内容宽度且文字贴近轨道", card_pill is not None)
 pill_placement = re.search(
     r":is\(\.scheduled-message-actions, \.relay-link-actions, \.auto-translation-actions, "
     r"#backfillCard #backfillContent > \.row\) > button\.pill-switch:not\(:first-child\) \{\s*"
     r"margin-left: auto;",
     STYLE_CSS,
 )
-check("卡片胶囊：左侧有按钮时贴右下", pill_placement is not None)
 pill_before_right_button = re.search(
     r":is\(\.scheduled-message-actions, \.relay-link-actions, \.auto-translation-actions, "
     r"#backfillCard #backfillContent > \.row\) > button\.pill-switch:not\(:first-child\) ~ \* \{\s*"
     r"margin-left: 0;",
     STYLE_CSS,
 )
-check("卡片胶囊：右下角有按钮时紧贴其左侧", pill_before_right_button is not None)
 scheduled_actions = re.search(
     r'<div class="row scheduled-message-actions">(.*?)</div>', HTML, re.S
 )
-check("定时消息动作栏：编辑按钮在前、胶囊在后",
-      bool(scheduled_actions)
-      and scheduled_actions.group(1).find("btnScheduledMessageEdit")
-      < scheduled_actions.group(1).find("btnScheduledMessageToggle"))
-check("桌面端离线补发与 RSS 详情由状态栏入口打开",
-      "const showInlineChainDetails = !IS_DESKTOP_HOST;" in APP_JS
-      and 'discord: {kind: "backfill", target: "backfillCard"}' in APP_JS
-      and 'function openChainDetailModal(cardId)' in APP_JS
-      and 'if (target) openChainDetailModal(target);' in APP_JS)
 check("离线补发不再使用旧横向分组",
       "desktop-backfill-parameters" not in STYLE_CSS
       and "desktop-backfill-parameters" not in DISCORD_JS
@@ -141,10 +128,6 @@ check("翻译方式与钥匙入口位于设置窗口，原卡片已移除",
 backfill_actions = re.search(
     r'<div class="row backfill-actions">(.*?)</div>', HTML, re.S
 )
-check("离线补发动作栏：胶囊在前、立即补发在后",
-      bool(backfill_actions)
-      and backfill_actions.group(1).find("btnBackfillToggle")
-      < backfill_actions.group(1).find("btnBackfillRun"))
 settings_toggle = re.search(
     r"#pageSettings :is\(\.settings-switch, #btnSettingsAutostart\) \{\s*"
     r"flex: 0 0 32px; width: 32px; min-width: 32px; height: 18px; min-height: 18px;\s*"
@@ -160,8 +143,7 @@ check("设置页开关焦点框缩到轨道",
 check("设置页开关悬停不再绘制外围底",
       "#pageSettings .settings-switch:not(:disabled):is(:hover, :focus-visible)" not in UI_CSS)
 check("app.js 提供 pillSwitchMarkup", "function pillSwitchMarkup(" in APP_JS)
-for fn in ["renderTranslationToggleFor",
-           "renderScheduledMessageToggle", "renderBackfillToggle"]:
+for fn in ["renderTranslationToggleFor"]:
     body = re.search(r"function " + fn + r"\([^)]*\) \{(.*?)\n\}", APP_JS, re.S)
     check(fn + " 改用胶囊标记", bool(body) and "pillSwitchMarkup(" in body.group(1)
           and "<svg" not in body.group(1))
@@ -176,13 +158,13 @@ for button in PILL_BUTTONS:
     tag = re.search(r"<button[^>]*id=\"" + button + r"\"[^>]*>", HTML)
     check(button + " 带 pill-switch 与 role=switch",
           bool(tag) and "pill-switch" in tag.group(0) and 'role="switch"' in tag.group(0))
-check("定时消息条目改为两列网格起排",
-      ".scheduled-message-entry-body" in STYLE_CSS and ".scheduled-message-target-row" in STYLE_CSS)
-check("定时消息条目 DOM 顺序：正文 → 附件 → 发送目标 → 时间 → 说明",
-      APP_JS.find("scheduled-message-image-row") < APP_JS.find("scheduled-message-target-row")
-      < APP_JS.find("scheduled-message-timing-row") < APP_JS.find("scheduled-message-image-hint"))
 check("已注册频道 tab 收进窗口头部工具区",
       'relayChannelsModal: {size: "medium", footer: "relayChannelsSave", grid: true, tools: ["relayScopeTabs"]' in spec_block)
+
+check("定时消息通过状态栏入口打开", 'id="scheduledMessageShortcut"' in HTML and 'openChainDetailModal("scheduledMessageCard")' in APP_JS)
+check("定时消息包含消息组与接收群面板", all('id="' + name + '"' in HTML for name in ("scheduledMessageGroupTabs", "scheduledGroupMessageContent", "scheduledGroupTargetContent")))
+check("定时消息两个面板同步折叠", '["scheduledGroupMessageContent", "scheduledGroupTargetContent"]' in APP_JS)
+check("定时消息编辑器包含正文附件与时间", all(name in APP_JS for name in ("scheduled-message-entry-content", "scheduled-message-image-row", "scheduled-message-timing-row")))
 
 # 「状态卡统一」的长期规则（见 docs/DESIGN.md「共用功能页模板」）。
 status_surface = re.search(

@@ -39,6 +39,8 @@ def verify_config_snapshots():
         x_result = config.get_x_source_delivery_config("alice")
     load.assert_called_once_with()
     assert x_result == {
+        "image_card_enabled": True,
+        "image_card_theme": "dark",
         "filter": {
             "filter_keywords": ["blocked"],
             "filter_post_types": ["原创"],
@@ -57,6 +59,8 @@ def verify_config_snapshots():
         bili_result = config.get_bilibili_source_delivery_config("up:1")
     load.assert_called_once_with()
     assert bili_result == {
+        "image_card_enabled": True,
+        "image_card_theme": "dark",
         "filter": {
             "filter_keywords": ["blocked"],
             "filter_bilibili_post_types": ["视频"],

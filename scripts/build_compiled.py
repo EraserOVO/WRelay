@@ -188,7 +188,7 @@ def main():
     parser.add_argument("--compile-only", action="store_true")
     parser.add_argument("--unsigned", action="store_true", help="Explicitly build an unsigned installer; published as unsigned")
     parser.add_argument("--edition", choices=("test", "release"), default="test")
-    parser.add_argument("--owner", default="", help="Copyright holder supplied by the project owner")
+    parser.add_argument("--owner", default="EraserOVO", help="Copyright holder supplied by the project owner")
     parser.add_argument("--resume", type=Path, help="Resume a build directory under build/compiled")
     parser.add_argument("--package-only", action="store_true", help="Package a completed --resume build")
     args = parser.parse_args()
