@@ -378,7 +378,7 @@ class SteamRuntimeTests(unittest.IsolatedAsyncioTestCase):
         message_card._avatar_cache.clear()
 
     async def test_card_avatar_success_and_failure_still_deliver(self):
-        from PIL import Image
+        from PIL import Image, ImageFont
 
         image = BytesIO()
         Image.new("RGB", (100, 100), (240, 30, 50)).save(image, "PNG")
@@ -388,6 +388,7 @@ class SteamRuntimeTests(unittest.IsolatedAsyncioTestCase):
                     "protection": {"min_send_interval": 1, "hourly_limit": 30}}
         delivery = {"image_card_enabled": True, "image_card_theme": "dark", "translation": {}}
         with mock.patch.object(steam, "_card_avatar_url", new=self.real_card_avatar_url), \
+             mock.patch.object(message_card, "_font", side_effect=lambda size, bold=False, emoji=False: ImageFont.load_default(size=size)), \
              mock.patch.object(steam, "_browse", new=mock.AsyncMock(return_value=assets)), \
              mock.patch.object(media, "fetch_bytes", new=mock.AsyncMock(side_effect=[image.getvalue(), None])) as download, \
              mock.patch.object(config, "get_steam_source_delivery_config", return_value=delivery), \
