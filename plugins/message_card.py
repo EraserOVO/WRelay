@@ -333,7 +333,7 @@ def _png_page(colors, header, rows, footer, index, avatar):
     y = header_height
     for kind, row_height, data, ink in rows:
         if kind == "image":
-            canvas.alpha_composite(data, (PAD + (CONTENT - data.width) // 2, y))
+            canvas.alpha_composite(data, (PAD, y))
         elif kind == "price":
             old, current, percent = data
             center = y + row_height // 2
@@ -443,9 +443,9 @@ def _render(source, theme, body, original, attachments, avatar_data=None):
         else:
             column = (CONTENT - 12) // 2
             left, right = [_read_image(data, (column, 480)) for data in pair]
-            image = Image.new("RGBA", (CONTENT, max(left.height, right.height)))
-            image.alpha_composite(left, ((column - left.width) // 2, 0))
-            image.alpha_composite(right, (column + 12 + (column - right.width) // 2, 0))
+            image = Image.new("RGBA", (left.width + 12 + right.width, max(left.height, right.height)))
+            image.alpha_composite(left, (0, 0))
+            image.alpha_composite(right, (left.width + 12, 0))
         rows.append(("space", 12, None, ""))
         rows.append(("image", image.height, image, ""))
 
